@@ -1,3 +1,8 @@
+.web
+assets/external/
+__pycache__/
+*.db
+*.py[cod]
 venv
 __pycache__
 db.sqlite3
