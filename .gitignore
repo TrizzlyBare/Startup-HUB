@@ -6,3 +6,6 @@ __pycache__/
 venv
 __pycache__
 db.sqlite3
+
+__init__.py
+.venv
