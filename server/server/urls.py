@@ -25,4 +25,5 @@ from django.urls import path, include
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("", include("myapp.urls")),  # Include myapp URLs
+    path("webcall/", include("webcall.urls")),  # Include webcall URLs
 ]
