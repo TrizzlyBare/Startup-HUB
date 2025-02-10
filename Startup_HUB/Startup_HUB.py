@@ -1,4 +1,5 @@
 import reflex as rx
+import reflex_chakra as rc
 from .Auth.AuthPage import login_page
 class State(rx.State):
     pass
@@ -10,10 +11,10 @@ def index() -> rx.Component:
         rx.box(
             rx.text("Startup HUB", class_name="text-lg sm:text-xl font-semibold text-gray-900"),
             rx.hstack(
-                rx.button("Home", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
-                rx.button("About", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
-                rx.button("Co-Founders", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
-                rx.button("Contact", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
+                rx.button("Home", class_name="text-gray-600 hover:text-gray-900 hover:underline px-4 py-2 bg-transparent"),
+                rx.button("About", class_name="text-gray-600 hover:text-gray-900 hover:underline px-4 py-2 bg-transparent"),
+                rx.button("Co-Founders", class_name="text-gray-600 hover:text-gray-900 hover:underline px-4 py-2 bg-transparent"),
+                rx.button("Contact", class_name="text-gray-600 hover:text-gray-900 hover:underline px-4 py-2 bg-transparent"),
                 rx.button("Sign In", class_name="text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg font-semibold", on_click=rx.redirect("/login")),
                 class_name="ml-auto"
             ),
