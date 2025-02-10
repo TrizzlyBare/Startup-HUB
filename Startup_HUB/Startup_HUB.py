@@ -1,5 +1,5 @@
 import reflex as rx
-
+from .Auth.AuthPage import login_page
 class State(rx.State):
     pass
     
@@ -10,11 +10,11 @@ def index() -> rx.Component:
         rx.box(
             rx.text("Startup HUB", class_name="text-lg sm:text-xl font-semibold text-gray-900"),
             rx.hstack(
-                rx.link("Home", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
-                rx.link("About", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
-                rx.link("Co-Founders", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
-                rx.link("Contact", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
-                rx.link("Sign Up", class_name="text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg font-semibold"),
+                rx.button("Home", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
+                rx.button("About", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
+                rx.button("Co-Founders", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
+                rx.button("Contact", class_name="text-gray-600 hover:text-gray-900 px-4 py-2"),
+                rx.button("Sign In", class_name="text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg font-semibold", on_click=rx.redirect("/login")),
                 class_name="ml-auto"
             ),
             class_name="bg-white py-4 sm:py-6 px-6 w-full flex items-center"
@@ -91,3 +91,5 @@ def index() -> rx.Component:
 
 app = rx.App()
 app.add_page(index)
+app.add_page(login_page,
+             route="/login")
