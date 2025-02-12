@@ -1,41 +1,80 @@
 from rest_framework import serializers
-from django.contrib.auth.models import User
-from rest_framework.authtoken.models import Token
+from django.contrib.auth.password_validation import validate_password
+from .models import CustomUser
 
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
-        model = User
-        fields = ["id", "username", "first_name", "last_name", "email", "password"]
+        model = CustomUser
+        fields = [
+            "id",
+            "username",
+            "first_name",
+            "last_name",
+            "email",
+            "password",
+            "phone_number",
+            "profile_picture",
+        ]
+        extra_kwargs = {
+            "password": {"write_only": True},
+            "first_name": {"required": True},
+            "last_name": {"required": True},
+            "email": {"required": True},
+        }
+
+    def validate_password(self, value):
+        # Use Django's password validation
+        validate_password(value)
+        return value
 
     def create(self, validated_data):
-        user = User.objects.create_user(
-            email=validated_data["email"],
+        # Remove profile picture from validated_data if it's None
+        profile_picture = validated_data.pop("profile_picture", None)
+        phone_number = validated_data.pop("phone_number", None)
+
+        # Create user with required fields
+        user = CustomUser.objects.create_user(
             username=validated_data["username"],
+            email=validated_data["email"],
+            password=validated_data["password"],
             first_name=validated_data["first_name"],
             last_name=validated_data["last_name"],
         )
+
+        # Add optional fields if they exist
+        if phone_number:
+            user.phone_number = phone_number
+        if profile_picture:
+            user.profile_picture = profile_picture
+
+        user.save()
         return user
 
     def update(self, instance, validated_data):
-        instance.email = validated_data.get("email", instance.email)
-        instance.username = validated_data.get("username", instance.username)
-        instance.first_name = validated_data.get("first_name", instance.first_name)
-        instance.last_name = validated_data.get("last_name", instance.last_name)
+        # Handle password separately
+        if "password" in validated_data:
+            password = validated_data.pop("password")
+            instance.set_password(password)
+
+        # Update all other fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
         instance.save()
         return instance
 
-    def validate(self, data):
-        if "password" not in data:
-            raise serializers.ValidationError("Password is required")
-        return data
-
-    def validate_password(self, value):
-        if len(value) < 8:
-            raise serializers.ValidationError("Password must be at least 8 characters")
-        return value
 
 class UserInfoSerializer(serializers.ModelSerializer):
     class Meta:
-        model = User
-        fields = ["id", "username", "first_name", "last_name", "email"]
+        model = CustomUser
+        fields = [
+            "id",
+            "username",
+            "first_name",
+            "last_name",
+            "email",
+            "phone_number",
+            "profile_picture",
+        ]
+        read_only_fields = ["id"]

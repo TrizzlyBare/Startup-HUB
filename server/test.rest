@@ -2,21 +2,21 @@
 # Content-Type: application/json
 
 # {
-#     "username": "testuser2",
+#     "username": "testuser8",
 #     "first_name": "testfirst2",
 #     "last_name": "testlast2",
-#     "email": "test2@gmail.com",
-#     "password": "test"
+#     "email": "test9@gmail.com",
+#     "password": "testinga"
 # }
 
 # POST http://127.0.0.1:8000/authen/login/
 # Content-Type: application/json
 
 # {
-#     "email": "test2@gmail.com",
-#     "password": "test"
+#     "email": "test9@gmail.com",
+#     "password": "testinga"
 # }
 
 GET http://127.0.0.1:8000/authen/test-token/
 Content-Type: application/json
-Authorization: Token e86a80498f1aa66fb8dc2bf39fafcd64735665d8
+Authorization: Token b954ced9985deadaf4a1e9ac340d56ed5f76b137
