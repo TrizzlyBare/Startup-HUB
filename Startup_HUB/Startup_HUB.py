@@ -1,6 +1,7 @@
 import reflex as rx
 import reflex_chakra as rc
 from .Auth.AuthPage import login_page
+from .Profile.ProfilePage import profile_page
 class State(rx.State):
     pass
     
@@ -11,7 +12,7 @@ def index() -> rx.Component:
         rx.box(
             rx.text("Startup HUB", class_name="text-lg sm:text-xl font-semibold text-gray-900"),
             rx.hstack(
-                rx.button("Home", class_name="text-gray-600 hover:text-gray-900 hover:underline px-4 py-2 bg-transparent"),
+                rx.button("Home", class_name="text-gray-600 hover:text-gray-900 hover:underline px-4 py-2 bg-transparent", on_click=rx.redirect("/profile")),
                 rx.button("About", class_name="text-gray-600 hover:text-gray-900 hover:underline px-4 py-2 bg-transparent"),
                 rx.button("Co-Founders", class_name="text-gray-600 hover:text-gray-900 hover:underline px-4 py-2 bg-transparent"),
                 rx.button("Contact", class_name="text-gray-600 hover:text-gray-900 hover:underline px-4 py-2 bg-transparent"),
@@ -20,7 +21,6 @@ def index() -> rx.Component:
             ),
             class_name="bg-white py-4 sm:py-6 px-6 w-full flex items-center"
         ),
-
         # Hero Section (Centered)
         rx.box(
             rx.text("Find Your Perfect Co-Founder", class_name="text-3xl sm:text-5xl font-bold text-neutral-50 mb-6 text-center"),
@@ -98,3 +98,5 @@ app = rx.App()
 app.add_page(index)
 app.add_page(login_page,
              route="/login")
+app.add_page(profile_page,
+             route="/profile")
