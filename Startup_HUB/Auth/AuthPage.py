@@ -3,8 +3,10 @@ import reflex as rx
 class State(rx.State):
     email: str = ""
     password: str = ""
-    show_login: bool = True  # Track which form to show
-    
+    show_login: bool = True
+    local_storage = True  # Ensure state is stored locally
+
+
     def login(self):
         print(f"Logging in with Email: {self.email} and Password: {self.password}")
     
@@ -16,22 +18,29 @@ class State(rx.State):
         self.email = ""
         self.password = ""
 
+    def handle_login_and_redirect(self):
+        # Perform login
+        self.login()
+        # Redirect to profile
+        rx.redirect("/profile")    
+
+        
 def login_form(State) -> rx.Component:
     return rx.vstack(
         rx.text("Welcome back", class_name="text-gray-600 text-sm"),
         rx.text("Login to your account", class_name="text-2xl font-bold text-gray-900 mb-6"),
 
         rx.input(
-            placeholder="Email Address", 
-            on_change=State.set_email, 
-            class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-500"
+            placeholder="Email Address",
+            on_change=State.set_email,
+            class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-900"
         ),
 
         rx.input(
             placeholder="Password", 
             type="password", 
             on_change=State.set_password, 
-            class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-500"
+            class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-900"
         ),
 
         rx.hstack(
@@ -40,9 +49,9 @@ def login_form(State) -> rx.Component:
         ),
 
         rx.button(
-            "Login now", 
+            "Login now",
             class_name="bg-blue-600 text-white w-full py-2 rounded-lg font-semibold text-base hover:bg-blue-700 transition-colors",
-            on_click=State.login
+            on_click=State.handle_login_and_redirect
         ),
 
         rx.text(
