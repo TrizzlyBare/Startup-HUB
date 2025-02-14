@@ -8,7 +8,6 @@ from django.dispatch import receiver
 
 class CustomUser(AbstractUser):
     email = models.EmailField(unique=True)
-    phone_number = models.CharField(max_length=15, blank=True, null=True)
     profile_picture = models.ImageField(
         upload_to="profile_pics/", blank=True, null=True
     )

@@ -1,8 +1,8 @@
 from rest_framework import serializers
-from .models import WebRTCSession
+from .models import Room
 
 
-class WebRTCSessionSerializer(serializers.ModelSerializer):
+class RoomSerializer(serializers.ModelSerializer):
     class Meta:
-        model = WebRTCSession
-        fields = "__all__"
+        model = Room
+        fields = ["room_name", "created_at"]

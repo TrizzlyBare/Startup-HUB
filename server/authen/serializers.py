@@ -13,11 +13,11 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email",
             "password",
-            "phone_number",
             "profile_picture",
         ]
         extra_kwargs = {
             "password": {"write_only": True},
+            "username": {"required": True},
             "first_name": {"required": True},
             "last_name": {"required": True},
             "email": {"required": True},
@@ -31,7 +31,6 @@ class UserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         # Remove profile picture from validated_data if it's None
         profile_picture = validated_data.pop("profile_picture", None)
-        phone_number = validated_data.pop("phone_number", None)
 
         # Create user with required fields
         user = CustomUser.objects.create_user(
@@ -43,8 +42,6 @@ class UserSerializer(serializers.ModelSerializer):
         )
 
         # Add optional fields if they exist
-        if phone_number:
-            user.phone_number = phone_number
         if profile_picture:
             user.profile_picture = profile_picture
 
@@ -74,7 +71,6 @@ class UserInfoSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "email",
-            "phone_number",
             "profile_picture",
         ]
         read_only_fields = ["id"]
