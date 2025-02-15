@@ -23,9 +23,9 @@ from django.urls import path, include
 # ]
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    path("api/admin/", admin.site.urls),
     path("", include("myapp.urls")),  # Include myapp URLs
-    path("webcall/", include("webcall.urls")),  # Include webcall URLs
-    path("authen/", include("authen.urls")),  # Include authen URLs
-    path("message/", include("message.urls")),  # Include message URLs
+    path("api/webcall/", include("webcall.urls")),  # Include webcall URLs
+    path("api/authen/", include("authen.urls")),  # Include authen URLs
+    path("api/message/", include("message.urls")),  # Include message URLs
 ]

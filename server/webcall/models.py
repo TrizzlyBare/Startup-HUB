@@ -13,7 +13,6 @@ class Room(models.Model):
 
 
 class Participant(models.Model):
-    # Update the ForeignKey to use settings.AUTH_USER_MODEL
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     room = models.ForeignKey(
         Room, on_delete=models.CASCADE, related_name="participants"
