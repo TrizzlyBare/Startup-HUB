@@ -27,4 +27,5 @@ urlpatterns = [
     path("", include("myapp.urls")),  # Include myapp URLs
     path("webcall/", include("webcall.urls")),  # Include webcall URLs
     path("authen/", include("authen.urls")),  # Include authen URLs
+    path("message/", include("message.urls")),  # Include message URLs
 ]

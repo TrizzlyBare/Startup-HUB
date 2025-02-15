@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "myapp",
     "webcall",
     "authen",
+    "message",
 ]
 
 # Add REST Framework settings
