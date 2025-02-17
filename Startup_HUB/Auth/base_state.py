@@ -10,7 +10,7 @@ class BaseState(rx.State):
     
     def check_auth(self) -> bool:
         """Check if user is authenticated."""
-        token = rx.get_local_storage("token")
+        token = self.get_token_from_cookie()
         if token is not None:
             self.token = token
             self.is_authed = True
@@ -18,16 +18,16 @@ class BaseState(rx.State):
         return False
 
     def set_token(self, token: str):
-        """Set token in local storage and state."""
+        """Set token in cookie and state."""
         self.token = token
         self.is_authed = True
-        rx.set_local_storage("token", token)
+        self.set_token_cookie(token)
 
     def clear_token(self):
-        """Clear token from local storage and state."""
+        """Clear token from cookie and state."""
         self.token = None
         self.is_authed = False
-        rx.delete_local_storage("token")
+        self.clear_token_cookie()
 
     def logout(self):
         """Logout user."""
@@ -36,6 +36,18 @@ class BaseState(rx.State):
 
     def protect_route(self):
         """Protect route from unauthenticated access."""
-        token = rx.get_local_storage("token")
+        token = self.get_token_from_cookie()
         if token is None:
-            return rx.redirect("/login") 
+            return rx.redirect("/login")
+
+    def set_token_cookie(self, token: str):
+        """Set token in an HTTP-only cookie."""
+        rx.set_cookie("auth_token", token, httponly=True, max_age=7*24*60*60)  # 7 days
+
+    def get_token_from_cookie(self) -> Optional[str]:
+        """Get token from cookie."""
+        return rx.get_cookie("auth_token")
+
+    def clear_token_cookie(self):
+        """Clear the token cookie."""
+        rx.delete_cookie("auth_token") 

@@ -70,6 +70,16 @@ async def register(
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 409:
             raise Exception("Email or username already exists. Please login instead.")
+        elif e.response.status_code == 400:
+            error_data = e.response.json()
+            error_message = "Registration failed: "
+            if isinstance(error_data, dict):
+                for field, errors in error_data.items():
+                    if isinstance(errors, list):
+                        error_message += f"{field} - {errors[0]}. "
+                    else:
+                        error_message += f"{field} - {errors}. "
+            raise Exception(error_message.strip())
         else:
             print(f"Registration error: {str(e)}")
             raise Exception("Registration failed. Please try again.")
