@@ -38,75 +38,108 @@ class State(rx.State):
 
 def profile_page() -> rx.Component:
     return rx.box(
-        rx.grid(
-            # Profile Image
-            rx.box(
-                rx.image(
-                    src="/mock-image.jpg",  # Add a fallback image if needed
-                    class_name="rounded-full object-cover w-48 h-48 border-4 border-white"
-                )
-            ),
-            # Box containing Name and Description
-            rx.box(
-                # Update the greeting with the name
-                rx.text(f"Hello, {State.name}", class_name="text-lg sm:text-xl font-bold text-gray-600"),
-                rx.cond(
-                    State.edit_mode,
-                    rx.input(value=State.name, on_change=lambda value: State.set_name(value)),
-                    rx.text(State.name, class_name="text-lg font-bold mb-2 text-color-black")
-                ),
-                rx.cond(
-                    State.edit_mode,
-                    rx.text_area(value=State.description, on_change=lambda value: State.set_description(value)),
-                    rx.text(State.description, class_name="text-lg font-bold mb-2")
-                ),
-                class_name="bg-sky-200 p-4 rounded-lg shadow-md"
-            ),
-
-            # "Details" Card
-            rx.box(
-                rx.text("Details :", class_name="text-lg sm:text-xl font-bold text-gray-600"),
-                rx.cond(
-                    State.edit_mode,
-                    rx.text_area(value=State.details, on_change=lambda value: State.set_details(value)),
-                    rx.text(State.details, class_name="text-lg font-bold mb-2")
-                ),
-                class_name="bg-sky-200 p-4 rounded-lg shadow-md"
-            ),
-            # "Project" Card
-            rx.box(
-                rx.text("Projects :", class_name="text-lg sm:text-xl font-bold text-gray-600"),
-                rx.cond(
-                    State.edit_mode,
-                    rx.text_area(value=State.project, on_change=lambda value: State.set_project(value)),
-                    rx.text(State.project, class_name="text-lg font-bold mb-2")
-                ),
-                class_name="bg-sky-200 p-4 rounded-lg shadow-md"
-            ),
-            # "Experience" Card
-            rx.box(
-                rx.text("Experience :", class_name="text-lg sm:text-xl font-bold text-gray-600"),
-                rx.cond(
-                    State.edit_mode,
-                    rx.text_area(value=State.experience, on_change=lambda value: State.set_experience(value)),
-                    rx.text(State.experience, class_name="text-lg font-bold mb-2")
-                ),
-                class_name="bg-sky-200 p-4 rounded-lg shadow-md"
-            ),
-            class_name="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto"
-        ),
-        rx.box(
-            rx.cond(
-                State.edit_mode,
+        # Main layout with profile image and content side-by-side
+        rx.hstack(
+            # Left Column: Profile Image and Project
+            rx.vstack(
+                # Profile Image Section
                 rx.box(
-                    rx.button("Save", on_click=State.save_changes, class_name="bg-green-500 text-white px-4 py-2 rounded"),
-                    rx.button("Cancel", on_click=State.toggle_edit_mode, class_name="bg-red-500 text-white px-4 py-2 rounded ml-2"),
-                    class_name="flex space-x-4 mt-4"
+                    rx.image(
+                        src="/mock-image.jpg",
+                        class_name="rounded-2xl object-cover w-80 h-80 border-4 border-white"
+                    ),
+                    class_name="mb-6"
                 ),
-                rx.button("Edit", on_click=State.toggle_edit_mode, class_name="bg-blue-500 text-white px-4 py-2 rounded mt-4")
-            )
+                # Project Card
+                rx.box(
+                    rx.text("Projects :", class_name="text-xl sm:text-2xl font-bold text-black w-full bg-sky-300 p-4 rounded-2xl"),
+                    rx.cond(
+                        State.edit_mode,
+                        rx.text_area(
+                            value=State.project,
+                            on_change=State.set_project,
+                            placeholder="Enter project details",
+                            class_name="w-full whitespace-normal resize-y "
+                        ),
+                        rx.text(State.project, class_name="text-l mb-2")
+                    ),
+                    class_name="bg-white p-4 rounded-2xl text-black shadow-md w-[350px] h-[200px]"
+                ),
+            ),
+            # Right Column: Name, Details and Experience
+            rx.vstack(
+                # Name and Description Box
+                rx.box(
+                    rx.text(f"Meet, {State.name}", class_name="text-xl sm:text-2xl font-bold text-black w-full bg-sky-300 p-4 rounded-2xl"),
+                    rx.cond(
+                        State.edit_mode,
+                        rx.input(
+                            value=State.name,
+                            on_change=State.set_name,
+                            placeholder="Enter your name",
+                            class_name="w-full mb-2"
+                        ),
+                    ),
+                    rx.cond(
+                        State.edit_mode,
+                        rx.text_area(
+                            value=State.description,
+                            on_change=State.set_description,
+                            placeholder="Enter a description",
+                            class_name="w-full whitespace-normal resize-y min-h-[100px] max-h-[300px]"
+                        ),
+                        rx.text(State.description, class_name="text-l mb-2")
+                    ),
+                    class_name="bg-white p-4 rounded-2xl shadow-md text-black  w-[700px] h-auto"
+                ),
+
+                # Details Card
+                rx.box(
+                    rx.text("Details :", class_name="text-xl sm:text-2xl font-bold text-black w-full bg-sky-300 p-4 rounded-2xl"),
+                    rx.cond(
+                        State.edit_mode,
+                        rx.text_area(
+                            value=State.details,
+                            on_change=State.set_details,
+                            placeholder="Enter details",
+                            class_name="w-full whitespace-normal resize-y"
+                        ),
+                        rx.text(State.details, class_name="text-l mb-2 text-black ")
+                    ),
+                    class_name="bg-white p-4 rounded-2xl shadow-md w-[700px] h-auto"
+                ),
+
+                # Experience Card
+                rx.box(
+                    rx.text("Experience :", class_name="text-xl sm:text-2xl font-bold text-black w-full bg-sky-300 p-4 rounded-2xl"),
+                    rx.cond(
+                        State.edit_mode,
+                        rx.text_area(
+                            value=State.experience,
+                            on_change=State.set_experience,
+                            placeholder="Enter your experience",
+                            class_name="w-full whitespace-normal resize-y min-h-[100px] max-h-[300px]"
+                        ),
+                        rx.text(State.experience, class_name="text-l mb-2")
+                    ),
+                    class_name="bg-white p-4 rounded-2xl text-black  shadow-md w-[700px] h-[270px]"
+                ),
+                
+                # Save and Edit Buttons
+                rx.cond(
+                    State.edit_mode,
+                    rx.hstack(
+                        rx.button("Save", on_click=State.save_changes, class_name="bg-green-500 text-white px-5 py-3 rounded"),
+                        rx.button("Cancel", on_click=State.toggle_edit_mode, class_name="bg-red-500 text-white px-5 py-3 rounded ml-2"),
+                        class_name="space-x-4 mt-4"
+                    ),
+                    rx.button("Edit", on_click=State.toggle_edit_mode, class_name="bg-blue-500 text-white px-5 py-3 rounded mt-4")
+                ),
+                class_name="space-y-6"  # Adds vertical spacing between sections
+            ),
+            class_name="space-x-10"  # Horizontal spacing between columns
         ),
-        class_name="min-h-screen flex flex-col items-center justify-center bg-gray-800 p-8"
+        class_name="min-h-screen flex flex-col items-center justify-center bg-gray-800 p-10"
     )
 
 # Create the Reflex app
