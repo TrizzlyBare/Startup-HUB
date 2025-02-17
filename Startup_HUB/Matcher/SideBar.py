@@ -12,10 +12,11 @@ def navbar() -> rx.Component:
             rx.icon("search", class_name="text-gray-600"),
             rx.icon("shield", class_name="text-gray-600"),
             rx.icon("settings", class_name="text-gray-600"),
-            spacing="4"
+            spacing="6"  # Increased spacing for a wider appearance
         ),
         width="full",
-        padding="4",
+        padding_x="9",
+        padding_y="6",
         bg="lightblue"
     )
 

@@ -1,6 +1,7 @@
 import reflex as rx
 from typing import List, Dict
 
+
 class MatchState(rx.State):
     """State for the matcher page."""
     current_profile_index: int = 0
@@ -62,50 +63,87 @@ def sidebar() -> rx.Component:
             rx.hstack(
                 rx.avatar(
                     src="profile.jpg",
-                    size="3",
-                    class_name="cursor-pointer",
+                    size="5",
+                    class_name="rounded-full object-cover border-4 border-white m-2",
                 ),
+
                 rx.spacer(),
                 rx.hstack(
-                    rx.icon("search", color="gray.400"),
-                    rx.icon("shield", color="gray.400"),
-                    rx.icon("settings", color="gray.400"),
+                    rx.icon(
+                        "search",
+                        color="black",  # Set the icon color to black
+                        class_name="w-10 h-10 bg-white rounded-full p-1 hover:bg-blue-500 hover:text-white",  # White background, rounded full, padding, and hover effects
+                    ),
+                    rx.icon(
+                        "shield",
+                        color="black",  # Set the icon color to black
+                        class_name="w-10 h-10 bg-white rounded-full p-1 hover:bg-green-500 hover:text-white",  # White background, rounded full, padding, and hover effects
+                    ),
+                    rx.icon(
+                        "settings",
+                        color="black",  # Set the icon color to black
+                        class_name="w-10 h-10 bg-white rounded-full p-1 hover:bg-red-500 hover:text-white",
+                    ),
+
                     spacing="4",
+                    class_name="m-4"
                 ),
                 width="full",
                 padding="4",
+                class_name="bg-sky-400",
             ),
             # Navigation tabs
             rx.hstack(
                 rx.text(
                     "Matches",
-                    color=rx.cond(MatchState.active_tab == "Matches", "white", "gray.400"),
+                    color="black",
                     font_weight="bold",
                     cursor="pointer",
+                    style={"fontSize": "18px"},
+                    class_name=rx.cond(
+                        MatchState.active_tab == "Matches",
+                        "border-b-2 border-sky-400",
+                        ""
+                    ),
                     on_click=lambda: MatchState.set_active_tab("Matches"),
                 ),
+
                 rx.text(
                     "liked",
-                    color=rx.cond(MatchState.active_tab == "Liked", "white", "gray.400"),
+                    color="black",
                     font_weight="bold",
                     cursor="pointer",
+                    style={"fontSize": "18px"},
+                    class_name=rx.cond(
+                        MatchState.active_tab == "Liked",
+                        "border-b-2 border-sky-400",
+                        ""
+                    ),
                     on_click=lambda: MatchState.set_active_tab("Liked"),
                 ),
                 rx.text(
                     "Messages",
-                    color=rx.cond(MatchState.active_tab == "Messages", "white", "gray.400"),
+                    color="black",
                     font_weight="bold",
                     cursor="pointer",
+                    style={"fontSize": "18px"},
+                    class_name=rx.cond(
+                        MatchState.active_tab == "Messages",
+                        "border-b-2 border-sky-400",
+                        ""
+                    ),
                     on_click=lambda: MatchState.set_active_tab("Messages"),
                 ),
                 spacing="6",
                 padding="4",
+                class_name="ml-2"
             ),
+
             # Profile thumbnails
             rx.vstack(
                 rx.image(
                     src="character.jpg",
-                    class_name="w-16 h-16 rounded-lg object-cover cursor-pointer hover:opacity-80",
+                    class_name="w-20 h-40 rounded-lg object-cover cursor-pointer hover:opacity-80 m-2 border-4 border-sky-400",
                 ),
                 align_items="start",
                 padding_x="4",
@@ -114,7 +152,7 @@ def sidebar() -> rx.Component:
             align_items="stretch",
             height="full",
         ),
-        class_name="w-64 h-screen bg-[#1e1e1e] border-r border-gray-800",
+        class_name="w-[350px] h-screen bg-sky-100 border-r border-gray-800",
     )
 
 def profile_card() -> rx.Component:
@@ -122,15 +160,15 @@ def profile_card() -> rx.Component:
         rx.vstack(
             rx.image(
                 src=MatchState.profiles[MatchState.current_profile_index]["image"],
-                class_name="w-full h-[500px] object-cover rounded-3xl",
+                class_name="w-full h-[700px] object-cover rounded-3xl border-4 border-white mt-3",
             ),
             rx.box(
                 rx.hstack(
                     rx.box(
                         class_name=rx.cond(
                             MatchState.profiles[MatchState.current_profile_index]["is_active"],
-                            "w-2 h-2 rounded-full bg-green-400",
-                            "w-2 h-2 rounded-full bg-gray-400"
+                            "w-3 h-3 rounded-full bg-green-400",
+                            "w-3 h-3 rounded-full bg-gray-400"
                         ),
                     ),
                     rx.text(
@@ -145,16 +183,16 @@ def profile_card() -> rx.Component:
                 ),
                 rx.heading(
                     MatchState.profiles[MatchState.current_profile_index]["name"],
-                    size="2",
-                    class_name="text-white",
+                    size="7",
+                    class_name="text-sky-400",
                 ),
                 rx.text(
                     f"Profession: {MatchState.profiles[MatchState.current_profile_index]['profession']}",
-                    class_name="text-gray-400",
+                    class_name="text-black",
                 ),
                 padding="4",
                 spacing="2",
-                class_name="w-full bg-[#1e1e1e] rounded-b-3xl",
+                class_name="w-full bg-sky-100 rounded-2xl p-2 mt-1",
             ),
             spacing="0",
             width="full",
@@ -165,28 +203,29 @@ def profile_card() -> rx.Component:
 def action_buttons() -> rx.Component:
     return rx.hstack(
         rx.button(
-            rx.icon("arrow-left"),
-            on_click=MatchState.previous_profile,
-            class_name="rounded-full p-4 bg-[#2e2e2e] text-yellow-400 hover:bg-gray-800 transform transition-all hover:scale-110",
-        ),
+                rx.icon("arrow-left", class_name="drop-shadow-lg"),
+                on_click=MatchState.previous_profile,
+                class_name="rounded-full font-bold w-12 h-12 bg-yellow-400 text-white hover:bg-yellow-500 transform transition-all hover:scale-110",
+            ),
+
         rx.button(
-            rx.icon("x"),
+            rx.icon("x", class_name="drop-shadow-lg"),
             on_click=MatchState.dislike_profile,
-            class_name="rounded-full p-4 bg-[#2e2e2e] text-red-400 hover:bg-gray-800 transform transition-all hover:scale-110",
+            class_name="rounded-full w-14 h-14 bg-[#E74C3C] text-white hover:bg-CB4335 transform transition-all hover:scale-150",
         ),
         rx.button(
-            rx.icon("star"),
+            rx.icon("star", class_name="drop-shadow-lg"),
             on_click=MatchState.super_like_profile,
-            class_name="rounded-full p-4 bg-[#2e2e2e] text-blue-400 hover:bg-gray-800 transform transition-all hover:scale-110",
+            class_name="rounded-full w-12 h-12 bg-blue-400 text-white hover:bg-blue-500 transform transition-all hover:scale-110",
         ),
         rx.button(
-            rx.icon("check"),
+            rx.icon("check", class_name="drop-shadow-lg"),
             on_click=MatchState.like_profile,
-            class_name="rounded-full p-4 bg-[#2e2e2e] text-green-400 hover:bg-gray-800 transform transition-all hover:scale-110",
+            class_name="rounded-full w-14 h-14 bg-green-400  text-white hover:bg-green-500 transform transition-all hover:scale-150",
         ),
         rx.button(
-            rx.icon("eye"),
-            class_name="rounded-full p-4 bg-[#2e2e2e] text-orange-400 hover:bg-gray-800 transform transition-all hover:scale-110",
+            rx.icon("eye", class_name="drop-shadow-lg"),
+            class_name="rounded-full w-12 h-12 bg-orange-400  text-white hover:bg-orange-500 transform transition-all hover:scale-110",
         ),
         spacing="3",
         justify="center",
@@ -202,11 +241,10 @@ def match_page() -> rx.Component:
                 rx.vstack(
                     profile_card(),
                     action_buttons(),
-                    spacing="0",
+                    align_items="center",
                 ),
-                padding_top="8",
             ),
-            class_name="flex-1 min-h-screen bg-[#1a1a1a]",
+            class_name="flex-1 min-h-screen bg-gray-800 flex flex-col justify-center items-center",
         ),
         spacing="0",
         width="full",
