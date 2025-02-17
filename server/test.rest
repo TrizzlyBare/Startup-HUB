@@ -1,22 +1,22 @@
-# POST http://127.0.0.1:8000/authen/register/
+# POST http://127.0.0.1:8000/api/authen/register/
 # Content-Type: application/json
 
 # {
-#     "username": "testuser8",
+#     "username": "testuser3",
 #     "first_name": "testfirst2",
 #     "last_name": "testlast2",
-#     "email": "test9@gmail.com",
+#     "email": "test3@gmail.com",
 #     "password": "testinga"
 # }
 
-# POST http://127.0.0.1:8000/authen/login/
-# Content-Type: application/json
-
-# {
-#     "email": "test9@gmail.com",
-#     "password": "testinga"
-# }
-
-GET http://127.0.0.1:8000/authen/test-token/
+POST http://127.0.0.1:8000/api/authen/login/
 Content-Type: application/json
-Authorization: Token b954ced9985deadaf4a1e9ac340d56ed5f76b137
+
+{
+    "email": "test3@gmail.com",
+    "password": "testinga"
+}
+
+# GET http://127.0.0.1:8000/api/authen/test-token/
+# Content-Type: application/json
+# Authorization: Token 61abc658d43ae3c4d97813300fbd3a9a0ce847ef
