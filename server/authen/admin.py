@@ -25,7 +25,7 @@ class CustomUserAdmin(UserAdmin):
         ),
         (
             "Personal",
-            {"fields": ("first_name", "last_name", "phone_number", "profile_picture")},
+            {"fields": ("first_name", "last_name", "profile_picture")},
         ),
     )
     add_fieldsets = (
