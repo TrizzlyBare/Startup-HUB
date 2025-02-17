@@ -9,7 +9,7 @@ async def check_connection() -> bool:
     try:
         async with httpx.AsyncClient() as client:
             # Check Django's admin endpoint to verify server is running
-            response = await client.get(f"{BASE_URL}/admin/")
+            response = await client.get(f"{BASE_URL}")
             response.raise_for_status()
             return True
     except httpx.HTTPError as e:
@@ -21,7 +21,7 @@ async def login(email: str, password: str) -> Dict:
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{BASE_URL}/api/auth/login/",
+                f"{BASE_URL}/api/authen/login/",
                 json={
                     "email": email,
                     "password": password
@@ -54,7 +54,7 @@ async def register(
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{BASE_URL}/api/auth/register/",
+                f"{BASE_URL}/api/authen/register/",
                 json={
                     "first_name": first_name,
                     "last_name": last_name,
