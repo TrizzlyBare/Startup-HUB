@@ -1,10 +1,11 @@
 import reflex as rx
 import reflex_chakra as rc
-from .Auth.AuthPage import login_page
+from .Auth.AuthPage import login_page, AuthState
 from .Profile.ProfilePage import profile_page
-from .Matcher.Matcher_Page import match_page
+from .Matcher.Matcher_Page import match_page, MatchState
 
 class State(rx.State):
+    """Base state for the app."""
     pass
     
 
@@ -96,6 +97,7 @@ def index() -> rx.Component:
         class_name="flex flex-col items-center justify-center min-h-screen bg-white w-full"
     )
 
+# Initialize the app with states
 app = rx.App()
 app.add_page(index)
 app.add_page(login_page, route="/login")
