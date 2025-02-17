@@ -45,7 +45,9 @@ def login_form(State) -> rx.Component:
 
         rx.hstack(
             rx.checkbox("Remember me", class_name="text-gray-700"),
-            rx.link("Forgot Password?", href="#", class_name="text-blue-600 text-sm ml-auto")
+            rx.spacer(),  # Add spacer to push the link to the right
+            rx.link("Forgot Password?", href="#", class_name="text-blue-600 text-sm hover:text-blue-700"),
+            width="100%",  # Ensure the hstack takes full width
         ),
 
         rx.button(
@@ -72,14 +74,21 @@ def signup_form(State) -> rx.Component:
     return rx.vstack(
         rx.text("Get Started", class_name="text-gray-600 text-sm"),
         rx.text("Create your account", class_name="text-2xl font-bold text-gray-900 mb-6"),
-
-        rx.input(
-            placeholder="First Name", 
-            class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-500"
+        rx.hstack(
+            rx.input(
+                placeholder="First Name", 
+                class_name="flex-1 px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-500"
+            ),
+            rx.input(
+                placeholder="Last Name", 
+                class_name="flex-1 px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-500"
+            ),
+            width="100%",
+            spacing="4",
         ),
 
         rx.input(
-            placeholder="Last Name", 
+            placeholder="Username",
             class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-500"
         ),
 
