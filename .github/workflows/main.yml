@@ -16,6 +16,7 @@ jobs:
     - uses: actions/checkout@v3
     - name: Build the Docker image
       run: | #docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+        cd server
         docker build . --file Dockerfile --tag ghcr.io/trizzlybare/startup-hub:latest
         docker login --username TrizzlyBare --password ${{ secrets.GH_TOKEN }} ghcr.io
         docker push ghcr.io/trizzlybare/startup-hub:latest
