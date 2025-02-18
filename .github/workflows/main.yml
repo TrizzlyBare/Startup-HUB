@@ -66,7 +66,7 @@ jobs:
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.knmtrV7ise11CNTRL }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.laptop-hc100ojs\omen }}@${{ secrets.192.168.1.156 }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no ${{ secrets.laptop-hc100ojs }}@${{ secrets.192.168.1.156 }} << 'EOF'
           docker pull ${{ secrets.DOCKER_USERNAME }}/startup-hub:latest
           docker stop startup-hub || true
           docker rm startup-hub || true
