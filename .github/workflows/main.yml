@@ -8,38 +8,35 @@ on:
       - main
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-and-deploy:
+    runs-on: self-hosted
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
+      
+      # Python setup, testing and migrations
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
           python-version: 3.11
+      
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r server/requirements.txt
+      
       - name: Run migrations
         run: |
           cd server
           python manage.py makemigrations
           python manage.py migrate
+      
       - name: Run tests
         run: |
           cd server
           python manage.py test
-
-  deploy:
-    # Use the self-hosted runner that's on the same network as your Windows server
-    runs-on: self-hosted
-    needs: build
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
       
-      # Since we're running on the same network, we can verify connectivity directly
+      # Verify connectivity to server
       - name: Verify server connectivity
         shell: powershell
         run: |
@@ -51,35 +48,30 @@ jobs:
             Write-Host "Server is reachable"
           }
       
-      # Build Docker image
+      # Docker tasks
       - name: Build Docker image
         shell: powershell
         run: |
           cd server
           docker build -t ${{ secrets.DOCKER_USERNAME }}/startup-hub:latest .
       
-      # Login to Docker Hub
       - name: Login to Docker Hub
         shell: powershell
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
       
-      # Push image to Docker Hub
       - name: Push image to Docker Hub
         shell: powershell
         run: |
           docker push ${{ secrets.DOCKER_USERNAME }}/startup-hub:latest
       
-      # Deploy using appropriate method for Windows
+      # Deployment with fallback options
       - name: Deploy to Windows server
         shell: powershell
         run: |
-          # For Windows server, we have several options:
-          
-          # Option 1: If OpenSSH Server is installed on Windows target
+          # Try SSH first
           try {
             Write-Host "Attempting deployment via SSH..."
-            # Need to handle password or use SSH keys
             ssh -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} "powershell -Command {
               Write-Host 'Connected to Windows server'
               docker pull ${{ secrets.DOCKER_USERNAME }}/startup-hub:latest
@@ -87,14 +79,19 @@ jobs:
               docker rm startup-hub 2>$null
               docker-compose -f C:/app/docker-compose.yaml up -d
             }"
+            $deploymentSuccess = $true
           }
           catch {
-            Write-Warning "SSH deployment failed. Trying alternative method..."
-            
-            # Option 2: Using PowerShell remoting (requires WinRM setup)
+            Write-Warning "SSH deployment failed: $_"
+            $deploymentSuccess = $false
+          }
+          
+          # If SSH fails, try PowerShell remoting
+          if (-not $deploymentSuccess) {
             try {
-              $securePassword = ConvertTo-SecureString ${{ secrets.SERVER_PASSWORD }} -AsPlainText -Force
-              $cred = New-Object System.Management.Automation.PSCredential (${{ secrets.SERVER_USER }}, $securePassword)
+              Write-Host "Attempting deployment via PowerShell remoting..."
+              $securePassword = ConvertTo-SecureString "${{ secrets.SERVER_PASSWORD }}" -AsPlainText -Force
+              $cred = New-Object System.Management.Automation.PSCredential ("${{ secrets.SERVER_USER }}", $securePassword)
               
               $session = New-PSSession -ComputerName ${{ secrets.SERVER_IP }} -Credential $cred
               
@@ -107,43 +104,92 @@ jobs:
               }
               
               Remove-PSSession $session
+              $deploymentSuccess = $true
             }
             catch {
-              Write-Error "Failed to deploy using PowerShell remoting. Please check credentials and WinRM configuration."
-              exit 1
+              Write-Error "PowerShell remoting deployment failed: $_"
+              $deploymentSuccess = $false
             }
           }
+          
+          # As a last resort, try direct execution if the runner is on the same machine
+          if (-not $deploymentSuccess -and ${{ secrets.SERVER_IP }} -eq "localhost") {
+            try {
+              Write-Host "Attempting direct deployment..."
+              docker pull ${{ secrets.DOCKER_USERNAME }}/startup-hub:latest
+              docker stop startup-hub 2>$null
+              docker rm startup-hub 2>$null
+              docker-compose -f C:/app/docker-compose.yaml up -d
+              $deploymentSuccess = $true
+            }
+            catch {
+              Write-Error "Direct deployment failed: $_"
+              throw "All deployment methods failed. Please check configuration and try again."
+            }
+          }
+          
+          if (-not $deploymentSuccess) {
+            throw "All deployment methods failed. Please check configuration and try again."
+          }
       
-      # Verify deployment
+      # Verification
       - name: Verify deployment
         shell: powershell
         run: |
+          $verificationSuccess = $false
+          
           try {
+            # Try SSH verification
+            Write-Host "Verifying deployment via SSH..."
             $containerCheck = ssh -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} "docker ps | Select-String 'startup-hub'"
             if ($containerCheck) {
-              Write-Host "Container is running successfully"
-            } else {
-              Write-Warning "Container may not be running. Please check manually."
+              Write-Host "✓ Container is running successfully"
+              $verificationSuccess = $true
             }
           }
           catch {
+            Write-Warning "SSH verification failed: $_"
+          }
+          
+          # Try PowerShell remoting verification if SSH failed
+          if (-not $verificationSuccess) {
+            try {
+              Write-Host "Verifying deployment via PowerShell remoting..."
+              $securePassword = ConvertTo-SecureString "${{ secrets.SERVER_PASSWORD }}" -AsPlainText -Force
+              $cred = New-Object System.Management.Automation.PSCredential ("${{ secrets.SERVER_USER }}", $securePassword)
+              
+              $session = New-PSSession -ComputerName ${{ secrets.SERVER_IP }} -Credential $cred
+              
+              $containerCheck = Invoke-Command -Session $session -ScriptBlock {
+                docker ps | Select-String 'startup-hub'
+              }
+              
+              Remove-PSSession $session
+              
+              if ($containerCheck) {
+                Write-Host "✓ Container is running successfully"
+                $verificationSuccess = $true
+              }
+            }
+            catch {
+              Write-Warning "PowerShell remoting verification failed: $_"
+            }
+          }
+          
+          if (-not $verificationSuccess) {
             Write-Warning "Could not verify if container is running. Please check manually."
           }
         continue-on-error: true
-
-  notify:
-    runs-on: ubuntu-latest
-    needs: deploy
-    if: always()
-    steps:
+      
+      # Notification step
       - name: Notify deployment status
+        if: always()
         uses: rtCamp/action-slack-notify@v2
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
           SLACK_TITLE: Deployment Status
           SLACK_MESSAGE: |
-            Build: ${{ needs.build.result }}
-            Deploy: ${{ needs.deploy.result }}
-            ${{ needs.deploy.result == 'success' && 'Deployment completed successfully! :rocket:' || 'Deployment failed! :warning:' }}
-          SLACK_COLOR: ${{ needs.deploy.result == 'success' && 'good' || 'danger' }}
+            Build & Deploy: ${{ job.status }}
+            ${{ job.status == 'success' && 'Deployment completed successfully! :rocket:' || 'Deployment failed! :warning:' }}
+          SLACK_COLOR: ${{ job.status == 'success' && 'good' || 'danger' }}
         continue-on-error: true
