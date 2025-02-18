@@ -66,9 +66,9 @@ jobs:
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          ssh -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
+          ssh -T -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} << 'EOF'
           docker pull ${{ secrets.DOCKER_USERNAME }}/startup-hub:latest
           docker stop startup-hub || true
           docker rm startup-hub || true
-          docker-compose -f /app/docker-compose.yaml up -d
+          docker-compose -f /app/docker-compose.yaml up -d --remove-orphans
           EOF
