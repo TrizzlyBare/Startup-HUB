@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: CI/CD Pipeline for Windows Server
 on:
   push:
     branches:
@@ -6,6 +6,7 @@ on:
   pull_request:
     branches:
       - main
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,91 +32,103 @@ jobs:
           python manage.py test
 
   deploy:
-    runs-on: ubuntu-latest
+    # Use the self-hosted runner that's on the same network as your Windows server
+    runs-on: self-hosted
     needs: build
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v1
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v2
-        with:
-          context: .
-          file: server/Dockerfile
-          push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/startup-hub:latest
       
-      # Install required tools for connectivity testing
-      - name: Install connectivity test tools
+      # Since we're running on the same network, we can verify connectivity directly
+      - name: Verify server connectivity
+        shell: powershell
         run: |
-          sudo apt-get update
-          sudo apt-get install -y iputils-ping netcat-openbsd
-
-      # Check server connectivity before attempting deployment
-      - name: Check server connectivity
-        run: |
-          echo "Testing connectivity to ${{ secrets.SERVER_IP }}"
-          ping -c 4 ${{ secrets.SERVER_IP }} || echo "Ping failed but continuing"
-          nc -zv ${{ secrets.SERVER_IP }} 22 || { echo "Cannot connect to SSH port"; exit 1; }
+          Write-Host "Testing connectivity to ${{ secrets.SERVER_IP }}"
+          $pingResult = Test-Connection -ComputerName ${{ secrets.SERVER_IP }} -Count 4 -Quiet
+          if (-not $pingResult) {
+            Write-Warning "Cannot ping server, but continuing with deployment"
+          } else {
+            Write-Host "Server is reachable"
+          }
       
-      # Set up Tailscale if needed
-      - name: Set up Tailscale
-        if: env.TAILSCALE_AUTH_KEY != ''
-        env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+      # Build Docker image
+      - name: Build Docker image
+        shell: powershell
         run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
-          tailscale up --authkey=$TAILSCALE_AUTH_KEY
-          sleep 10 # Wait for connection to establish
-          tailscale status
+          cd server
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/startup-hub:latest .
       
-      # Verify SSH connection with extended timeout and debugging
-      - name: Verify SSH connection
-        timeout-minutes: 2
+      # Login to Docker Hub
+      - name: Login to Docker Hub
+        shell: powershell
         run: |
-          ssh -v -o "ConnectTimeout=30" -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} "echo SSH connection successful"
-        continue-on-error: true
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
       
-      # Actual deployment with extended timeout and error handling
-      - name: Deploy to server
-        timeout-minutes: 5
-        env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+      # Push image to Docker Hub
+      - name: Push image to Docker Hub
+        shell: powershell
         run: |
-          echo "Starting deployment..."
+          docker push ${{ secrets.DOCKER_USERNAME }}/startup-hub:latest
+      
+      # Deploy using appropriate method for Windows
+      - name: Deploy to Windows server
+        shell: powershell
+        run: |
+          # For Windows server, we have several options:
           
-          # Enhanced SSH command with retry logic
-          for i in {1..3}; do
-            echo "Attempt $i of 3"
-            ssh -o "ConnectTimeout=30" -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} << 'EOF' && break
-              echo "Connected to server, starting deployment tasks"
+          # Option 1: If OpenSSH Server is installed on Windows target
+          try {
+            Write-Host "Attempting deployment via SSH..."
+            # Need to handle password or use SSH keys
+            ssh -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} "powershell -Command {
+              Write-Host 'Connected to Windows server'
               docker pull ${{ secrets.DOCKER_USERNAME }}/startup-hub:latest
-              docker stop startup-hub || true
-              docker rm startup-hub || true
-              docker-compose -f /app/docker-compose.yaml up -d
-              echo "Deployment completed successfully"
-          EOF
-            if [ $i -eq 3 ]; then
-              echo "Failed to connect after 3 attempts. Deployment failed."
+              docker stop startup-hub 2>$null
+              docker rm startup-hub 2>$null
+              docker-compose -f C:/app/docker-compose.yaml up -d
+            }"
+          }
+          catch {
+            Write-Warning "SSH deployment failed. Trying alternative method..."
+            
+            # Option 2: Using PowerShell remoting (requires WinRM setup)
+            try {
+              $securePassword = ConvertTo-SecureString ${{ secrets.SERVER_PASSWORD }} -AsPlainText -Force
+              $cred = New-Object System.Management.Automation.PSCredential (${{ secrets.SERVER_USER }}, $securePassword)
+              
+              $session = New-PSSession -ComputerName ${{ secrets.SERVER_IP }} -Credential $cred
+              
+              Invoke-Command -Session $session -ScriptBlock {
+                Write-Host "Connected via PowerShell remoting"
+                docker pull ${{ secrets.DOCKER_USERNAME }}/startup-hub:latest
+                docker stop startup-hub 2>$null
+                docker rm startup-hub 2>$null
+                docker-compose -f C:/app/docker-compose.yaml up -d
+              }
+              
+              Remove-PSSession $session
+            }
+            catch {
+              Write-Error "Failed to deploy using PowerShell remoting. Please check credentials and WinRM configuration."
               exit 1
-            fi
-            echo "Connection attempt failed. Waiting 10 seconds before retrying..."
-            sleep 10
-          done
+            }
+          }
       
       # Verify deployment
       - name: Verify deployment
-        timeout-minutes: 2
+        shell: powershell
         run: |
-          # Try to check if the container is running
-          echo "Verifying deployment..."
-          ssh -o "ConnectTimeout=30" -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} "docker ps | grep startup-hub" || echo "Warning: Could not verify if container is running"
+          try {
+            $containerCheck = ssh -o "UserKnownHostsFile=/dev/null" -o "StrictHostKeyChecking=no" ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} "docker ps | Select-String 'startup-hub'"
+            if ($containerCheck) {
+              Write-Host "Container is running successfully"
+            } else {
+              Write-Warning "Container may not be running. Please check manually."
+            }
+          }
+          catch {
+            Write-Warning "Could not verify if container is running. Please check manually."
+          }
         continue-on-error: true
 
   notify:
