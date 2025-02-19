@@ -31,6 +31,8 @@ INSTALLED_APPS = [
     "message",
 ]
 
+ASGI_APPLICATION = "server.asgi.application"
+
 # Add REST Framework settings
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -106,3 +108,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Add Media settings for profile pictures
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}

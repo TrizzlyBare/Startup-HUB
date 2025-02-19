@@ -66,6 +66,7 @@ class Participant(models.Model):
     )
     joined_at = models.DateTimeField(auto_now_add=True)
     last_read = models.DateTimeField(default=timezone.now)
+    last_active = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ("user", "room")
