@@ -14,7 +14,7 @@ from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
 import message.routing  # Import the websocket routing configuration
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "yourproject.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.settings")
 
 application = ProtocolTypeRouter(
     {
