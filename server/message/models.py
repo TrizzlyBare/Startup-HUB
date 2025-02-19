@@ -9,6 +9,7 @@ class Room(models.Model):
     name = models.CharField(max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_group_chat = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.name} ({self.id})"
@@ -21,26 +22,44 @@ class Message(models.Model):
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sent_messages"
     )
-    receiver = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="received_messages",
-    )
     sent_at = models.DateTimeField(auto_now_add=True)
-    is_read = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-sent_at"]
 
     def __str__(self):
-        return f"Message from {self.sender.username} to {self.receiver.username} at {self.sent_at}"
+        return (
+            f"Message from {self.sender.username} in {self.room.name} at {self.sent_at}"
+        )
+
+
+class MessageReceipt(models.Model):
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name="receipts"
+    )
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="message_receipts",
+    )
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("message", "recipient")
+
+    def mark_as_read(self):
+        if not self.is_read:
+            self.is_read = True
+            self.read_at = timezone.now()
+            self.save()
 
 
 class Participant(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="chat_participants",  # Changed this to avoid the clash
+        related_name="chat_participants",
     )
     room = models.ForeignKey(
         Room, on_delete=models.CASCADE, related_name="participants"
@@ -56,22 +75,20 @@ class Participant(models.Model):
 
     def mark_messages_as_read(self):
         """Mark all messages in the room as read up to current time."""
-        self.last_read = timezone.now()
-        Message.objects.filter(
-            room=self.room,
-            sent_at__lte=self.last_read,
-            receiver=self.user,
-            is_read=False,
-        ).update(is_read=True)
+        current_time = timezone.now()
+        self.last_read = current_time
+
+        # Update all unread message receipts for this user in this room
+        MessageReceipt.objects.filter(
+            message__room=self.room, recipient=self.user, is_read=False
+        ).update(is_read=True, read_at=current_time)
+
         self.save()
 
     def unread_messages_count(self):
         """Get count of unread messages for this participant."""
-        return Message.objects.filter(
-            room=self.room,
-            receiver=self.user,
-            sent_at__gt=self.last_read,
-            is_read=False,
+        return MessageReceipt.objects.filter(
+            message__room=self.room, recipient=self.user, is_read=False
         ).count()
 
     def get_recent_messages(self, limit=50):
