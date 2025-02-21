@@ -7,11 +7,13 @@ from rest_framework.decorators import (
     api_view,
     authentication_classes,
     permission_classes,
+    parser_classes,
 )
 from rest_framework.response import Response
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.permissions import IsAuthenticated
 from django.core.exceptions import ObjectDoesNotExist
+from rest_framework.parsers import MultiPartParser, FormParser
 
 User = get_user_model()
 
@@ -19,14 +21,25 @@ User = get_user_model()
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([])
+@parser_classes([MultiPartParser, FormParser])
 def register(request):
+    """Handle user registration with profile picture upload"""
     serializer = UserSerializer(data=request.data)
     if serializer.is_valid():
         if User.objects.filter(email=serializer.validated_data["email"]).exists():
             return Response(
-                {"error": "Email already in use"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "Email already in use"}, 
+                status=status.HTTP_400_BAD_REQUEST
             )
+        
+        # Handle profile picture upload
+        profile_picture = request.FILES.get('profile_picture')
         user = serializer.save()
+        
+        if profile_picture:
+            user.profile_picture = profile_picture
+            user.save()
+        
         token, _ = Token.objects.get_or_create(user=user)
         return Response(
             {"token": token.key, "user": UserSerializer(user).data},

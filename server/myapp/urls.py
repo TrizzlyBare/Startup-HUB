@@ -1,6 +1,10 @@
-from django.urls import path
-from . import views
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import StartupProfileViewSet
+
+router = DefaultRouter()
+router.register(r'startup-profiles', StartupProfileViewSet, basename='startup-profile')
 
 urlpatterns = [
-    path("", views.home, name="home"),
+    path('', include(router.urls)),
 ]

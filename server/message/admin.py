@@ -53,45 +53,21 @@ class MessageInline(admin.TabularInline):
 
 @admin.register(Room)
 class RoomAdmin(admin.ModelAdmin):
-    list_display = [
-        "name",
-        "id",
-        "is_group_chat",
-        "created_at",
-        "updated_at",
-        "participant_count",
-        "message_count",
-    ]
-    list_filter = ["created_at", "updated_at", "is_group_chat"]
-    search_fields = ["name", "participants__user__username"]
-    readonly_fields = ["created_at", "updated_at"]
+    list_display = ('name', 'created_at', 'updated_at', 'is_group_chat')
+    list_filter = ('is_group_chat', 'created_at')
+    search_fields = ('name',)
+    readonly_fields = ('created_at', 'updated_at')
+    date_hierarchy = 'created_at'
     inlines = [ParticipantInline, MessageInline]
-
-    def participant_count(self, obj):
-        return obj.participants.count()
-
-    participant_count.short_description = "Participants"
-
-    def message_count(self, obj):
-        return obj.messages.count()
-
-    message_count.short_description = "Messages"
 
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = [
-        "id",
-        "truncated_content",
-        "room_link",
-        "sender_link",
-        "sent_at",
-        "receipt_count",
-        "read_count",
-    ]
-    list_filter = ["sent_at", "room__is_group_chat"]
-    search_fields = ["content", "sender__username", "room__name"]
-    readonly_fields = ["sent_at"]
+    list_display = ('sender', 'room', 'sent_at', 'content')
+    list_filter = ('sent_at', 'room')
+    search_fields = ('content', 'sender__username', 'room__name')
+    readonly_fields = ('sent_at',)
+    date_hierarchy = 'sent_at'
     raw_id_fields = ["sender", "room"]
     inlines = [MessageReceiptInline]
 
@@ -127,17 +103,11 @@ class MessageAdmin(admin.ModelAdmin):
 
 @admin.register(Participant)
 class ParticipantAdmin(admin.ModelAdmin):
-    list_display = [
-        "id",
-        "user_link",
-        "room_link",
-        "joined_at",
-        "last_read",
-        "unread_count",
-    ]
-    list_filter = ["joined_at", "last_read", "room__is_group_chat"]
-    search_fields = ["user__username", "room__name"]
-    readonly_fields = ["joined_at", "last_read"]
+    list_display = ('user', 'room', 'joined_at', 'last_read')
+    list_filter = ('joined_at', 'last_active')
+    search_fields = ('user__username', 'room__name')
+    readonly_fields = ('joined_at',)
+    date_hierarchy = 'joined_at'
     raw_id_fields = ["user", "room"]
 
     def user_link(self, obj):
@@ -162,16 +132,10 @@ class ParticipantAdmin(admin.ModelAdmin):
 
 @admin.register(MessageReceipt)
 class MessageReceiptAdmin(admin.ModelAdmin):
-    list_display = [
-        "id",
-        "message_content",
-        "recipient_link",
-        "is_read",
-        "read_at",
-    ]
-    list_filter = ["is_read", "read_at"]
-    search_fields = ["message__content", "recipient__username"]
-    readonly_fields = ["read_at"]
+    list_display = ('message', 'recipient', 'is_read', 'read_at')
+    list_filter = ('is_read', 'read_at')
+    search_fields = ('recipient__username', 'message__content')
+    readonly_fields = ('read_at',)
     raw_id_fields = ["message", "recipient"]
 
     def message_content(self, obj):

@@ -1,9 +1,12 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from .models import CustomUser
+from cloudinary.utils import cloudinary_url
 
 
 class UserSerializer(serializers.ModelSerializer):
+    profile_picture_url = serializers.SerializerMethodField()
+
     class Meta:
         model = CustomUser
         fields = [
@@ -14,14 +17,22 @@ class UserSerializer(serializers.ModelSerializer):
             "email",
             "password",
             "profile_picture",
+            "profile_picture_url",
         ]
         extra_kwargs = {
             "password": {"write_only": True},
+            "profile_picture": {"write_only": True},
             "username": {"required": True},
             "first_name": {"required": True},
             "last_name": {"required": True},
             "email": {"required": True},
         }
+
+    def get_profile_picture_url(self, obj):
+        """Get the Cloudinary URL for the profile picture"""
+        if obj.profile_picture:
+            return obj.profile_picture.url
+        return None
 
     def validate_password(self, value):
         # Use Django's password validation

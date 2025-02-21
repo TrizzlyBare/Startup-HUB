@@ -4,12 +4,22 @@ from django.conf import settings
 from rest_framework.authtoken.models import Token
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from cloudinary.models import CloudinaryField
 
 
 class CustomUser(AbstractUser):
     email = models.EmailField(unique=True)
-    profile_picture = models.ImageField(
-        upload_to="profile_pics/", blank=True, null=True
+    profile_picture = CloudinaryField(
+        'profile_picture',
+        folder='startup_hub/profile_pics',
+        blank=True,
+        null=True,
+        transformation={
+            'width': 500,
+            'height': 500,
+            'crop': 'fill',
+            'gravity': 'face'
+        }
     )
 
     groups = models.ManyToManyField(

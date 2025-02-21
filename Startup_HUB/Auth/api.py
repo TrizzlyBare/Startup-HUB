@@ -48,21 +48,31 @@ async def register(
     last_name: str,
     username: str,
     email: str,
-    password: str
+    password: str,
+    profile_picture: Optional[bytes] = None
 ) -> Dict:
-    """Register a new user."""
+    """Register a new user with optional profile picture."""
     try:
         async with httpx.AsyncClient() as client:
+            # Prepare form data
+            form_data = {
+                "first_name": first_name,
+                "last_name": last_name,
+                "username": username,
+                "email": email,
+                "password": password,
+            }
+            
+            files = {}
+            if profile_picture:
+                files["profile_picture"] = profile_picture
+
             response = await client.post(
                 f"{BASE_URL}/api/authen/register/",
-                json={
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "username": username,
-                    "email": email,
-                    "password": password
-                }
+                data=form_data,
+                files=files
             )
+            
             if response.status_code == 409:
                 raise Exception("Email or username already exists. Please login instead.")
             response.raise_for_status()
