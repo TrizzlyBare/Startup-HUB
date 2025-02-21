@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "webcall",
     "authen",
     "message",
+    "cloudinary",
 ]
 
 ASGI_APPLICATION = "server.asgi.application"
@@ -108,6 +109,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Add Media settings for profile pictures
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Cloudinary settings
+CLOUDINARY_STORAGE = {
+    "CLOUD_NAME": "dh22uuija",
+    "API_KEY": "349497593716885",
+    "API_SECRET": "dgib6KclQIU08uYnT4Vdr4EPeT8",
+}
+
+# Use Cloudinary for media storage
+DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 
 CHANNEL_LAYERS = {
     "default": {
