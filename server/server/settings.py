@@ -16,6 +16,7 @@ ALLOWED_HOSTS = ["*"]
 
 # Application definition
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -112,9 +113,9 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 # Cloudinary settings
 CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": "dh22uuija",
-    "API_KEY": "349497593716885",
-    "API_SECRET": "dgib6KclQIU08uYnT4Vdr4EPeT8",
+    "CLOUD_NAME": "your-cloud-name",
+    "API_KEY": "your-api-key",
+    "API_SECRET": "your-api-secret",
 }
 
 # Use Cloudinary for media storage
@@ -124,7 +125,7 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("127.0.0.1", 6379)],
+            "hosts": [("redis", 6379)],
         },
     },
 }
