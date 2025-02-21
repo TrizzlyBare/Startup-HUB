@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # IMPORTANT: Uncomment this line to use CustomUser model
 AUTH_USER_MODEL = "authen.CustomUser"
 
-# SECURITY WARNING: keep the secret key used in production secret!
+# SECURITY WARNING: the secret key used in production secret!
 SECRET_KEY = "django-insecure-86$g$4gj_g$7kqd7vmr5n-r&v-m62qtaofqf_t^**k$@24a!1="
 
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -113,9 +113,9 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 # Cloudinary settings
 CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": "your-cloud-name",
-    "API_KEY": "your-api-key",
-    "API_SECRET": "your-api-secret",
+    "CLOUD_NAME": "dh22uuija",
+    "API_KEY": "349497593716885",
+    "API_SECRET": "dgib6KclQIU08uYnT4Vdr4EPeT8",
 }
 
 # Use Cloudinary for media storage

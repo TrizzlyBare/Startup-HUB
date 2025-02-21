@@ -16,6 +16,7 @@ services:
     environment:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
+      - DJANGO_SETTINGS_MODULE=server.settings
 
   redis:
     image: "redis:alpine"
