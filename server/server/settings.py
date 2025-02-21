@@ -112,13 +112,13 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 # Cloudinary settings
 CLOUDINARY_STORAGE = {
-    'CLOUD_NAME': 'your-cloud-name',
-    'API_KEY': 'your-api-key',
-    'API_SECRET': 'your-api-secret'
+    "CLOUD_NAME": "dh22uuija",
+    "API_KEY": "349497593716885",
+    "API_SECRET": "dgib6KclQIU08uYnT4Vdr4EPeT8",
 }
 
 # Use Cloudinary for media storage
-DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 
 CHANNEL_LAYERS = {
     "default": {
