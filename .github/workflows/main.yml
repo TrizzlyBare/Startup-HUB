@@ -1,19 +1,76 @@
-name: Docker Image CI
+# name: Docker Image CI
+
+# on:
+#   push:
+#     branches: ["main"]
+#   pull_request:
+#     branches: ["main"]
+
+# jobs:
+#   build:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - uses: actions/checkout@v3
+#       - name: Build the Docker image
+#         run: | #docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+#           docker build . --file server/Dockerfile --tag ghcr.io/trizzlybare/startup-hub:latest
+#           docker login --username TrizzlyBare --password ${{ secrets.GH_TOKEN }} ghcr.io
+#           docker push ghcr.io/trizzlybare/startup-hub:latest
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: ["main"]
+    branches: [main]
   pull_request:
-    branches: ["main"]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  build:
+  test-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v3
-      - name: Build the Docker image
-        run: | #docker build . --file Dockerfile --tag my-image-name:$(date +%s)
-          docker build . --file server/Dockerfile --tag ghcr.io/trizzlybare/startup-hub:latest
-          docker login --username TrizzlyBare --password ${{ secrets.GH_TOKEN }} ghcr.io
-          docker push ghcr.io/trizzlybare/startup-hub:latest
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build Docker image locally
+        run: |
+          docker build -t ghcr.io/trizzlybare/startup-hub:latest -f server/Dockerfile .
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Push Docker image
+        run: docker push ghcr.io/trizzlybare/startup-hub:latest
+
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            cd ~/startup-hub
+            docker compose -f docker-compose.prod.yml down
+            docker image rm ghcr.io/trizzlybare/startup-hub:latest || true
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+
+            
