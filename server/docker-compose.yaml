@@ -5,20 +5,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: daphne -b 0.0.0.0 -p 8000 server.asgi:application
+    command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/app
       - ./server/db.sqlite3:/app/server/db.sqlite3
     ports:
       - "8000:8000"
-    depends_on:
-      - redis
     environment:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
-      - DJANGO_SETTINGS_MODULE=server.settings
-
-  redis:
-    image: "redis:alpine"
-    ports:
-      - "6379:6379"
