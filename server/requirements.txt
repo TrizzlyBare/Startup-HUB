@@ -4,3 +4,5 @@ cloudinary==1.42.2
 Django==5.1.5
 djangorestframework==3.15.2
 drf_nested_routers==0.94.1
+daphne
+
