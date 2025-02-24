@@ -1,8 +1,8 @@
 import httpx
 from typing import Dict, Optional
-from rxconfig import config
+
 # Update the base URL to match Django's default port
-BASE_URL = config.api_url
+BASE_URL = "http://localhost:8000"
 
 async def check_connection() -> bool:
     """Check if the API server is reachable."""

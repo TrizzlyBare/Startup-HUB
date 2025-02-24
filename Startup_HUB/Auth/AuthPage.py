@@ -21,9 +21,8 @@ class AuthState(BaseState):
     is_loading: bool = False
     api_connected: bool = False
     
-    # Profile picture field
-    profile_picture: Optional[str] = None
-    _upload_data: Optional[bytes] = None
+    # Add profile picture field
+    profile_picture: Optional[bytes] = None
 
     async def check_api(self):
         """Check if API is reachable."""
@@ -49,8 +48,6 @@ class AuthState(BaseState):
         self.username = ""
         self.email = ""
         self.password = ""
-        self.profile_picture = None
-        self._upload_data = None
         self.clear_messages()
 
     async def handle_login(self):
@@ -80,17 +77,12 @@ class AuthState(BaseState):
         finally:
             self.is_loading = False
 
-    async def handle_profile_picture_upload(self, files: list[rx.UploadFile]):
-        """Handle profile picture upload."""
-        if not files:
-            return
-        
-        upload_file = files[0]
-        self.profile_picture = upload_file.filename
-        self._upload_data = await upload_file.read()
+    def handle_profile_picture_upload(self, file: rx.UploadFile):
+        """Handle profile picture upload"""
+        self.profile_picture = file.contents
 
     async def handle_register(self):
-        """Handle registration form submission."""
+        """Handle registration form submission with profile picture."""
         self.clear_messages()
         self.is_loading = True
         
@@ -107,7 +99,7 @@ class AuthState(BaseState):
                 username=self.username,
                 email=self.email,
                 password=self.password,
-                profile_picture=self._upload_data
+                profile_picture=self.profile_picture
             )
             self.success = "Registration successful! Please login."
             self.show_login = True
@@ -268,23 +260,13 @@ def signup_form() -> rx.Component:
             class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-500"
         ),
 
-        # Profile picture upload
-        rx.vstack(
-            rx.upload(
-                rx.button(
-                    rx.cond(
-                        AuthState.profile_picture,
-                        rx.text(f"Selected: {AuthState.profile_picture}"),
-                        rx.text("Upload Profile Picture")
-                    ),
-                    class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 hover:bg-gray-50"
-                ),
-                on_drop=AuthState.handle_profile_picture_upload,
-                accept={".jpg", ".jpeg", ".png", ".gif"},
-                max_files=1,
-                class_name="w-full"
-            ),
-            width="100%"
+        # Add profile picture upload
+        rx.upload(
+            rx.text("Upload Profile Picture"),
+            accept={"image/*"},
+            max_files=1,
+            on_change=AuthState.handle_profile_picture_upload,
+            class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300",
         ),
 
         rx.button(

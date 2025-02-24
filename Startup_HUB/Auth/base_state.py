@@ -3,34 +3,31 @@ from typing import Optional
 
 class BaseState(rx.State):
     """Base state for the application with authentication handling."""
-
+    
     # Auth token
     token: Optional[str] = None
     is_authed: bool = False
     
-    # Client storage for auth token
-    auth_token: str = rx.LocalStorage("")
-    
     def check_auth(self) -> bool:
         """Check if user is authenticated."""
-        token = self.auth_token
-        if token:
+        token = self.get_token_from_cookie()
+        if token is not None:
             self.token = token
             self.is_authed = True
             return True
         return False
 
     def set_token(self, token: str):
-        """Set token in storage and state."""
+        """Set token in cookie and state."""
         self.token = token
         self.is_authed = True
-        self.auth_token = token
+        self.set_token_cookie(token)
 
     def clear_token(self):
-        """Clear token from storage and state."""
+        """Clear token from cookie and state."""
         self.token = None
         self.is_authed = False
-        self.auth_token = ""
+        self.clear_token_cookie()
 
     def logout(self):
         """Logout user."""
@@ -39,18 +36,18 @@ class BaseState(rx.State):
 
     def protect_route(self):
         """Protect route from unauthenticated access."""
-        token = self.auth_token
-        if not token:
+        token = self.get_token_from_cookie()
+        if token is None:
             return rx.redirect("/login")
 
-    def set_token_storage(self, token: str):
-        """Set token in client storage."""
-        self.set_client_storage("auth_token", token)
+    def set_token_cookie(self, token: str):
+        """Set token in an HTTP-only cookie."""
+        rx.set_cookie("auth_token", token, httponly=True, max_age=7*24*60*60)  # 7 days
 
-    def get_token_from_storage(self) -> Optional[str]:
-        """Get token from client storage."""
-        return self.get_client_storage("auth_token")
+    def get_token_from_cookie(self) -> Optional[str]:
+        """Get token from cookie."""
+        return rx.get_cookie("auth_token")
 
-    def clear_token_storage(self):
-        """Clear the token from client storage."""
-        self.set_client_storage("auth_token", None) 
+    def clear_token_cookie(self):
+        """Clear the token cookie."""
+        rx.delete_cookie("auth_token") 
