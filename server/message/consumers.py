@@ -221,9 +221,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
     def update_user_last_activity(self, is_online):
         """Update user's last activity in the participant record"""
         try:
-            participant = Participant.objects.get(user=self.user, room_id=self.room_id)
+            # Get the actual user ID from the lazy object
+            user_id = self.user.id if hasattr(self.user, 'id') else None
+            if not user_id:
+                return
+                
+            participant = Participant.objects.get(user_id=user_id, room_id=self.room_id)
             if is_online:
-                # Update some field to track when user was last active
                 participant.last_active = timezone.now()
                 participant.save(update_fields=["last_active"])
         except Participant.DoesNotExist:
@@ -231,6 +235,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
 
 class EchoConsumer(WebsocketConsumer):
+    channel_layer_alias = None  # Disable channel layer for echo consumer
+    
     def connect(self):
         self.accept()
 
