@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from .models import StartupProfile, StartupImage, CustomUser
+from .models import StartupProfile, StartupImage
+from django.contrib.auth import get_user_model
+
+CustomUser = get_user_model()
 
 class StartupImageSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
