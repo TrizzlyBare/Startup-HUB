@@ -1,5 +1,5 @@
 import json
-from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.generic.websocket import AsyncWebsocketConsumer, WebsocketConsumer
 from channels.db import database_sync_to_async
 from .models import Room, Message, Participant, MessageReceipt
 from django.contrib.auth import get_user_model
@@ -228,3 +228,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 participant.save(update_fields=["last_active"])
         except Participant.DoesNotExist:
             pass
+
+
+class EchoConsumer(WebsocketConsumer):
+    def connect(self):
+        self.accept()
+
+    def disconnect(self, close_code):
+        pass
+
+    def receive(self, text_data):
+        # Simply echo back the received data
+        self.send(text_data=text_data)
