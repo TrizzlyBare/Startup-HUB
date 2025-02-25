@@ -48,56 +48,34 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.update_user_presence(False)
 
     async def receive(self, text_data):
-        data = json.loads(text_data)
-        message_type = data.get("type")
+        text_data_json = json.loads(text_data)
+        message = text_data_json['message']
+        user_id = self.scope["user"].id
 
-        if message_type == "chat.message":
-            content = data.get("content", "").strip()
-            if content:
-                # Save message to database
-                message_data = await self.save_message(content)
+        # Save message to database
+        saved_message = await self.save_message(user_id, message)
 
-                # Send message to room group
-                await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {"type": "chat.message", "message": message_data},
-                )
-
-        elif message_type == "typing.status":
-            # Forward typing status
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type": "typing.status",
-                    "user_id": str(self.user.id),
-                    "username": self.user.username,
-                    "is_typing": data.get("is_typing", False),
-                },
-            )
-
-        elif message_type == "mark.read":
-            # Mark messages as read
-            await self.mark_messages_read()
-
-            # Broadcast read status update
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type": "read.status",
-                    "user_id": str(self.user.id),
-                    "username": self.user.username,
-                    "timestamp": timezone.now().isoformat(),
-                },
-            )
+        # Send message to room group
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'chat_message',
+                'message': message,
+                'user_id': user_id,
+                'message_id': saved_message.id,
+                'timestamp': saved_message.sent_at.isoformat()
+            }
+        )
 
     async def chat_message(self, event):
         """Handler for chat messages"""
         # Send message to WebSocket
-        await self.send(
-            text_data=json.dumps(
-                {"type": "chat.message", "message": event["message"]}, cls=UUIDEncoder
-            )
-        )
+        await self.send(text_data=json.dumps({
+            'message': event['message'],
+            'user_id': event['user_id'],
+            'message_id': event['message_id'],
+            'timestamp': event['timestamp']
+        }))
 
     async def typing_status(self, event):
         """Handler for typing status updates"""
@@ -148,48 +126,28 @@ class ChatConsumer(AsyncWebsocketConsumer):
         return Participant.objects.filter(user_id=user_id, room_id=room_id).exists()
 
     @database_sync_to_async
-    def save_message(self, content):
+    def save_message(self, user_id, message_content):
         """Save message to database and return serialized data"""
-        # Get room
+        user = User.objects.get(id=user_id)
         room = Room.objects.get(id=self.room_id)
-
-        # Create message
-        message = Message.objects.create(room=room, sender=self.user, content=content)
-
-        # Create receipts for all other participants
-        receipts = []
-        participants = Participant.objects.filter(room=room).exclude(user=self.user)
-        for participant in participants:
-            receipt = MessageReceipt(
-                message=message, recipient=participant.user, is_read=False
-            )
-            receipts.append(receipt)
-
-        if receipts:
-            MessageReceipt.objects.bulk_create(receipts)
-
+        message = Message.objects.create(
+            sender=user,
+            room=room,
+            content=message_content
+        )
+        
+        # Create message receipts for all participants except sender
+        participants = room.participants.exclude(user=user)
+        MessageReceipt.objects.bulk_create([
+            MessageReceipt(message=message, recipient=participant.user)
+            for participant in participants
+        ])
+        
         # Update room timestamp
         room.save()  # This updates the 'updated_at' field
 
         # Return serialized message data
-        receipt_data = [
-            {
-                "recipient_id": str(receipt.recipient.id),
-                "recipient_username": receipt.recipient.username,
-                "is_read": False,
-            }
-            for receipt in receipts
-        ]
-
-        return {
-            "id": str(message.id),
-            "content": message.content,
-            "sender_id": str(message.sender.id),
-            "sender_username": message.sender.username,
-            "sent_at": message.sent_at.isoformat(),
-            "receipts": receipt_data,
-            "read_status": {"total": len(receipts), "read": 0, "unread": len(receipts)},
-        }
+        return message
 
     @database_sync_to_async
     def mark_messages_read(self):
