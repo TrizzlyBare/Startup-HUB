@@ -1,8 +1,35 @@
 import httpx
+import websockets
+import asyncio
 from typing import Dict, Optional
 from rxconfig import config
 # Update the base URL to match Django's default port
 BASE_URL = config.api_url
+WS_URL = config.api_url.replace('http', 'ws')  # Convert HTTP URL to WebSocket URL
+
+async def verify_websocket_connection(timeout: int = 5) -> bool:
+    """
+    Verify server connection using WebSocket.
+    
+    Args:
+        timeout (int): Connection timeout in seconds
+        
+    Returns:
+        bool: True if connection successful, False otherwise
+    """
+    try:
+        async with websockets.connect(f"{WS_URL}/ws/health/", max_size=2**20) as websocket:
+            try:
+                # Set timeout for receiving the message
+                response = await asyncio.wait_for(websocket.recv(), timeout=timeout)
+                if response:
+                    return True
+            except asyncio.TimeoutError:
+                print("WebSocket connection timed out")
+                return False
+    except Exception as e:
+        print(f"WebSocket connection failed: {str(e)}")
+        return False
 
 async def check_connection() -> bool:
     """Check if the API server is reachable."""
