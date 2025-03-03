@@ -1,6 +1,5 @@
 import reflex as rx
 from typing import Optional
-from . import api
 from .base_state import BaseState
 
 class AuthState(BaseState):
@@ -17,25 +16,15 @@ class AuthState(BaseState):
     error: Optional[str] = None
     success: Optional[str] = None
     
-    # Loading and connection states
+    # Loading state
     is_loading: bool = False
-    api_connected: bool = False
     
     # Profile picture field
     profile_picture: Optional[str] = None
     _upload_data: Optional[bytes] = None
 
-    async def check_api(self):
-        """Check if API is reachable."""
-        try:
-            await api.check_connection()
-            self.api_connected = True
-            self.error = None
-            return True
-        except Exception as e:
-            self.api_connected = False
-            self.error = "Cannot connect to server. Please try again later."
-            return False
+    # Mock user database
+    _mock_users = []
     
     def clear_messages(self):
         """Clear error and success messages."""
@@ -54,26 +43,23 @@ class AuthState(BaseState):
         self.clear_messages()
 
     async def handle_login(self):
-        """Handle login form submission."""
+        """Handle mock login form submission."""
         self.clear_messages()
         self.is_loading = True
         
         try:
-            # Check API connection first
-            if not await self.check_api():
-                return
-
             if not self.email or not self.password:
                 raise Exception("Please fill in all fields.")
             
-            response = await api.login(self.email, self.password)
+            # Simulate API delay
+            await rx.sleep(1)
             
-            # Store token
-            self.set_token(response["token"])
-            self.success = "Login successful!"
-            
-            # Redirect to profile page after successful login
-            return rx.redirect("/profile")
+            # Mock validation
+            if self.email == "test@example.com" and self.password == "password":
+                self.success = "Login successful!"
+                return rx.redirect("/profile")
+            else:
+                raise Exception("Invalid email or password.")
             
         except Exception as e:
             self.error = str(e)
@@ -90,25 +76,30 @@ class AuthState(BaseState):
         self._upload_data = await upload_file.read()
 
     async def handle_register(self):
-        """Handle registration form submission."""
+        """Handle mock registration form submission."""
         self.clear_messages()
         self.is_loading = True
         
         try:
-            if not await self.check_api():
-                return
-
             if not all([self.first_name, self.last_name, self.username, self.email, self.password]):
                 raise Exception("Please fill in all fields.")
             
-            response = await api.register(
-                first_name=self.first_name,
-                last_name=self.last_name,
-                username=self.username,
-                email=self.email,
-                password=self.password,
-                profile_picture=self._upload_data
-            )
+            # Simulate API delay
+            await rx.sleep(1)
+            
+            # Mock validation
+            if self.email == "test@example.com":
+                raise Exception("Email already exists.")
+            
+            # Mock successful registration
+            self._mock_users.append({
+                "first_name": self.first_name,
+                "last_name": self.last_name,
+                "username": self.username,
+                "email": self.email,
+                "profile_picture": self.profile_picture
+            })
+            
             self.success = "Registration successful! Please login."
             self.show_login = True
             self.clear_form()
@@ -119,20 +110,18 @@ class AuthState(BaseState):
             self.is_loading = False
 
     async def handle_forgot_password(self):
-        """Handle forgot password request."""
+        """Handle mock forgot password request."""
         self.clear_messages()
         self.is_loading = True
         
         try:
-            # Check API connection first
-            if not await self.check_api():
-                return
-
             if not self.email:
                 raise Exception("Please enter your email address.")
             
-            response = await api.forgot_password(self.email)
-            self.success = "Password reset instructions sent to your email."
+            # Simulate API delay
+            await rx.sleep(1)
+            
+            self.success = "If an account exists with this email, password reset instructions will be sent."
             
         except Exception as e:
             self.error = str(e)
