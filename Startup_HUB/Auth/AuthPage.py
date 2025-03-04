@@ -66,14 +66,6 @@ class AuthState(BaseState):
         finally:
             self.is_loading = False
 
-    async def handle_profile_picture_upload(self, files: list[rx.UploadFile]):
-        """Handle profile picture upload."""
-        if not files:
-            return
-        
-        upload_file = files[0]
-        self.profile_picture = upload_file.filename
-        self._upload_data = await upload_file.read()
 
     async def handle_register(self):
         """Handle mock registration form submission."""
@@ -255,25 +247,6 @@ def signup_form() -> rx.Component:
             value=AuthState.password,
             on_change=AuthState.set_password,
             class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-500"
-        ),
-
-        # Profile picture upload
-        rx.vstack(
-            rx.upload(
-                rx.button(
-                    rx.cond(
-                        AuthState.profile_picture,
-                        rx.text(f"Selected: {AuthState.profile_picture}"),
-                        rx.text("Upload Profile Picture")
-                    ),
-                    class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 hover:bg-gray-50"
-                ),
-                on_drop=AuthState.handle_profile_picture_upload,
-                accept={".jpg", ".jpeg", ".png", ".gif"},
-                max_files=1,
-                class_name="w-full"
-            ),
-            width="100%"
         ),
 
         rx.button(
