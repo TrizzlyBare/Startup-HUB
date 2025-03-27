@@ -1,8 +1,18 @@
 import reflex as rx
 
-def sidebar() -> rx.Component:
-    # Import the state class here to avoid circular imports
-    from .Matcher_Page import MatchState
+def sidebar(state=None) -> rx.Component:
+    """
+    Sidebar component that can be used in multiple pages
+    Args:
+        state: Optional state object to use for the active tab.
+               If None, will import MatchState as default.
+    """
+    # Import the state class here to avoid circular imports, only if state is not provided
+    if state is None:
+        from .Matcher_Page import MatchState
+        active_state = MatchState
+    else:
+        active_state = state
 
     return rx.box(
         rx.vstack(
@@ -48,11 +58,11 @@ def sidebar() -> rx.Component:
                     cursor="pointer",
                     style={"fontSize": "18px"},
                     class_name=rx.cond(
-                        MatchState.active_tab == "Matches",
+                        getattr(active_state, "active_tab", "") == "Matches",
                         "border-b-2 border-sky-400",
                         ""
                     ),
-                    on_click=lambda: MatchState.set_active_tab("Matches"),
+                    on_click=lambda: active_state.set_active_tab("Matches") if hasattr(active_state, "set_active_tab") else None,
                 ),
 
                 rx.text(
@@ -62,11 +72,11 @@ def sidebar() -> rx.Component:
                     cursor="pointer",
                     style={"fontSize": "18px"},
                     class_name=rx.cond(
-                        MatchState.active_tab == "Liked",
+                        getattr(active_state, "active_tab", "") == "Liked",
                         "border-b-2 border-sky-400",
                         ""
                     ),
-                    on_click=lambda: MatchState.set_active_tab("Liked"),
+                    on_click=lambda: active_state.set_active_tab("Liked") if hasattr(active_state, "set_active_tab") else None,
                 ),
                 rx.text(
                     "Messages",
@@ -75,11 +85,11 @@ def sidebar() -> rx.Component:
                     cursor="pointer",
                     style={"fontSize": "18px"},
                     class_name=rx.cond(
-                        MatchState.active_tab == "Messages",
+                        getattr(active_state, "active_tab", "") == "Messages",
                         "border-b-2 border-sky-400",
                         ""
                     ),
-                    on_click=lambda: MatchState.set_active_tab("Messages"),
+                    on_click=lambda: active_state.set_active_tab("Messages") if hasattr(active_state, "set_active_tab") else None,
                 ),
                 spacing="6",
                 padding="4",
