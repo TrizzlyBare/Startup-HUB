@@ -10,6 +10,8 @@ class ChatState(rx.State):
     ]
     message: str = ""
     current_chat_user: str = "Andy Collins"
+    show_upload_dialog: bool = False
+    uploaded_file: str = ""
 
     @rx.event
     async def send_message(self):
@@ -17,6 +19,18 @@ class ChatState(rx.State):
             self.chat_history.append(("user", self.message))
             self.message = ""
             yield
+
+    @rx.event
+    async def handle_file_upload(self, files: list[rx.UploadFile]):
+        for file in files:
+            upload_data = await file.read()
+            outfile = rx.get_upload_dir() / file.filename
+            # Save the file
+            with outfile.open("wb") as file_object:
+                file_object.write(upload_data)
+            # You can add the file to chat history or handle it as needed
+            self.chat_history.append(("user", f"Sent file: {file.filename}"))
+        yield
 
 def user_header() -> rx.Component:
     return rx.hstack(
@@ -93,7 +107,31 @@ def chat() -> rx.Component:
 def message_input() -> rx.Component:
     return rx.hstack(
         rx.hstack(
-            rx.icon("paperclip", color="#AAAAAA", font_size="18px", margin_right="5px"),
+            rx.upload(
+                rx.button(
+                    rx.icon("paperclip", color="#AAAAAA", font_size="18px"),
+                    variant="ghost",
+                    padding="0",
+                    margin_right="5px",
+                    cursor="pointer",
+                ),
+                id="file-upload",
+                accept={
+                    "image/png": [".png"],
+                    "image/jpeg": [".jpg", ".jpeg"],
+                    "image/gif": [".gif"],
+                    "application/pdf": [".pdf"],
+                    "application/msword": [".doc"],
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"]
+                },
+                on_drop=ChatState.handle_file_upload(
+                    rx.upload_files(upload_id="file-upload")
+                ),
+                multiple=True,
+                height="40px",
+                display="inline-flex",
+                align_items="center",
+            ),
             rx.input(
                 value=ChatState.message,
                 placeholder="Type a message",
@@ -120,7 +158,6 @@ def message_input() -> rx.Component:
             width="40px",
             height="40px",
             padding="0",
-            icon_size="18px",
             margin_left="10px",
         ),
         padding="15px",
