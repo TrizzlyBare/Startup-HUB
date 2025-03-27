@@ -3,7 +3,7 @@ import reflex as rx
 def sidebar() -> rx.Component:
     # Import the state class here to avoid circular imports
     from .Matcher_Page import MatchState
-    
+
     return rx.box(
         rx.vstack(
             # Top section with search and icons
@@ -89,7 +89,7 @@ def sidebar() -> rx.Component:
             # Profile thumbnails
             rx.vstack(
                 rx.image(
-                    src="character.jpg",
+                    src="../../Jane_Doe.jpg",
                     class_name="w-20 h-40 rounded-lg object-cover cursor-pointer hover:opacity-80 m-2 border-4 border-sky-400",
                 ),
                 align_items="start",

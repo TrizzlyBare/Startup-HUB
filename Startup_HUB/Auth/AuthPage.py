@@ -282,7 +282,7 @@ def login_page() -> rx.Component:
                 rx.cond(
                     AuthState.show_login,
                     rx.image(
-                        src="/mock-image.jpg",
+                        src="/Logo.png",
                         class_name="w-full h-full object-cover"
                     ),
                     rx.box(
@@ -302,7 +302,7 @@ def login_page() -> rx.Component:
                         class_name="flex items-center justify-center h-full bg-white"
                     ),
                     rx.image(
-                        src="/mock-image.jpg",
+                        src="/Logo.png",
                         class_name="w-full h-full object-cover"
                     )
                 ),

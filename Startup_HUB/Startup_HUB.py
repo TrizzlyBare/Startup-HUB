@@ -1,6 +1,7 @@
 import reflex as rx
 import reflex_chakra as rc
 from .Auth.AuthPage import login_page, AuthState
+from .chat.Chat_Page import chat_page
 from .Profile.ProfilePage import profile_page
 from .Matcher.Matcher_Page import match_page, MatchState
 
@@ -103,3 +104,4 @@ app.add_page(index)
 app.add_page(login_page, route="/login")
 app.add_page(profile_page, route="/profile")
 app.add_page(match_page, route="/match")
+app.add_page(chat_page, route="/chat")
