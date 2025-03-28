@@ -10,8 +10,6 @@ class ChatState(rx.State):
     ]
     message: str = ""
     current_chat_user: str = "Andy Collins"
-    show_upload_dialog: bool = False
-    uploaded_file: str = ""
 
     @rx.event
     async def send_message(self):
@@ -21,16 +19,22 @@ class ChatState(rx.State):
             yield
 
     @rx.event
-    async def handle_file_upload(self, files: list[rx.UploadFile]):
+    async def handle_upload(self, files: list[rx.UploadFile]):
+        """Handle the upload of file(s).
+        Args:
+            files: The uploaded files.
+        """
         for file in files:
-            upload_data = await file.read()
+            # The file data is already in bytes format
+            upload_data = file
             outfile = rx.get_upload_dir() / file.filename
-            # Save the file
+            # Save the file.
             with outfile.open("wb") as file_object:
                 file_object.write(upload_data)
-            # You can add the file to chat history or handle it as needed
-            self.chat_history.append(("user", f"Sent file: {file.filename}"))
-        yield
+            # Update the chat history with file URL
+            file_url = rx.get_upload_url(file.filename)
+            self.chat_history.append(("user", file_url))
+            yield
 
 def user_header() -> rx.Component:
     return rx.hstack(
@@ -51,15 +55,24 @@ def user_header() -> rx.Component:
     )
 
 def message_display(sender: str, message: str) -> rx.Component:
+    is_upload = isinstance(message, str) and message.startswith("/_upload")
+    
     return rx.hstack(
-        # Use rx.cond instead of if/else
         rx.cond(
             sender == "user",
             rx.spacer(),
             rx.box(),
         ),
         rx.box(
-            rx.text(message, color="#333333"),
+            rx.cond(
+                is_upload,
+                rx.image(
+                    src=message,
+                    max_width="200px",
+                    border_radius="15px"
+                ),
+                rx.text(message, color="#333333")
+            ),
             padding="10px 15px",
             border_radius="15px",
             max_width="70%",
@@ -100,7 +113,7 @@ def chat() -> rx.Component:
         overflow="auto",
         flex="1",
         width="100%",
-        height="calc(100vh - 130px)",  # Adjust for header and input
+        height="calc(100vh - 130px)",
         bg="#2d2d2d",
     )
 
@@ -114,19 +127,16 @@ def message_input() -> rx.Component:
                     padding="0",
                     margin_right="5px",
                     cursor="pointer",
+                    _hover={"color": "#80d0ea"},
+                    transition="all 0.2s ease-in-out",
                 ),
                 id="file-upload",
                 accept={
                     "image/png": [".png"],
                     "image/jpeg": [".jpg", ".jpeg"],
-                    "image/gif": [".gif"],
-                    "application/pdf": [".pdf"],
-                    "application/msword": [".doc"],
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"]
+                    "image/gif": [".gif"]
                 },
-                on_drop=ChatState.handle_file_upload(
-                    rx.upload_files(upload_id="file-upload")
-                ),
+                on_drop=ChatState.handle_upload,
                 multiple=True,
                 height="40px",
                 display="inline-flex",
@@ -134,7 +144,7 @@ def message_input() -> rx.Component:
             ),
             rx.input(
                 value=ChatState.message,
-                placeholder="Type a message",
+                placeholder="Type a message...",
                 on_change=ChatState.set_message,
                 _placeholder={"color": "#AAAAAA"},
                 border_radius="20px",
@@ -143,11 +153,19 @@ def message_input() -> rx.Component:
                 bg="white",
                 padding="10px 15px",
                 height="40px",
+                _focus={
+                    "outline": "none",
+                    "box_shadow": "0 0 0 2px rgba(128, 208, 234, 0.3)",
+                },
+                _hover={
+                    "bg": "#f8f8f8",
+                },
             ),
             bg="white",
             border_radius="20px",
             padding_left="10px",
             width="100%",
+            box_shadow="0 2px 4px rgba(0, 0, 0, 0.05)",
         ),
         rx.button(
             rx.icon("arrow-right"),
@@ -159,6 +177,11 @@ def message_input() -> rx.Component:
             height="40px",
             padding="0",
             margin_left="10px",
+            _hover={
+                "bg": "#6bc0d9",
+                "transform": "scale(1.05)",
+            },
+            transition="all 0.2s ease-in-out",
         ),
         padding="15px",
         bg="#2d2d2d",
@@ -187,6 +210,3 @@ def chat_page() -> rx.Component:
             overflow="hidden",
         )
     )
-
-
-
