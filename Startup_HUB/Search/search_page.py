@@ -8,6 +8,11 @@ class StartupGroup(rx.Base):
     description: str
     members: int
     join_requested: bool = False
+    needed_positions: List[str] = ["Software Engineer", "Product Manager", "UI/UX Designer"]
+    project_details: str = "This is a detailed description of the project, including its goals, current status, and future plans."
+    tech_stack: List[str] = ["Python", "React", "AWS"]
+    funding_stage: str = "Seed"
+    team_size: int = 15
 
 class SearchState(rx.State):
     """The search state."""
@@ -17,11 +22,21 @@ class SearchState(rx.State):
             name="Tech Innovators Hub",
             description="A collaborative space for tech entrepreneurs and innovators working on cutting-edge solutions",
             members=150,
+            needed_positions=["Full Stack Developer", "Data Scientist", "DevOps Engineer"],
+            project_details="Building an AI-powered platform for predictive analytics in healthcare.",
+            tech_stack=["Python", "TensorFlow", "React", "AWS"],
+            funding_stage="Series A",
+            team_size=25,
         ),
         StartupGroup(
             name="FinTech Founders Circle", 
             description="Network of founders revolutionizing financial technology and digital payments",
             members=120,
+            needed_positions=["Blockchain Developer", "Security Engineer", "Product Manager"],
+            project_details="Developing a decentralized finance platform for cross-border payments.",
+            tech_stack=["Solidity", "React", "Node.js", "MongoDB"],
+            funding_stage="Seed",
+            team_size=18,
         ),
         StartupGroup(
             name="Green Energy Ventures",
@@ -45,7 +60,9 @@ class SearchState(rx.State):
         ),
     ]
     is_loading: bool = False
-    active_tab: str = "Matches"  # Add this for sidebar state
+    active_tab: str = "Matches"
+    show_details_modal: bool = False
+    selected_group: StartupGroup | None = None
 
     def request_to_join(self, group_name: str):
         """Send a request to join a startup group."""
@@ -80,34 +97,52 @@ class SearchState(rx.State):
         """Set the active tab in the sidebar."""
         self.active_tab = tab
 
+    def show_group_details(self, group: StartupGroup):
+        """Show the details modal for a specific group."""
+        self.selected_group = group
+        self.show_details_modal = True
+
+    def close_details_modal(self):
+        """Close the details modal."""
+        self.show_details_modal = False
+        self.selected_group = None
+
 def show_startup(startup: StartupGroup):
     """Show a startup group in a styled box."""
     return rx.box(
         rx.vstack(
-            rx.heading(startup.name, size="1", class_name="text-sky-600 font-bold"),  # Changed to sky blue
+            rx.heading(startup.name, size="3", class_name="text-sky-600 font-bold"),
             rx.text(
                 startup.description,
-                color="black",  # Keeping description dark
+                color="black",
                 noOfLines=3,
-                class_name="text-lg font-medium",
+                class_name="text-lg font-small",
             ),
             rx.hstack(
                 rx.text(f"Members: {startup.members}", color="black", class_name="text-lg font-medium"),
                 rx.spacer(),
-                rx.cond(
-                    startup.join_requested,
-                    rx.button(
-                        "Request Sent",
-                        color_scheme="grass",
-                        variant="outline",
-                        is_disabled=True,
-                        class_name="bg-sky-50 text-gray-700 hover:bg-sky-100 px-6 py-2 rounded-full font-medium",
+                rx.hstack(
+                    rx.cond(
+                        startup.join_requested,
+                        rx.button(
+                            "Request Sent",
+                            color_scheme="grass",
+                            variant="outline",
+                            is_disabled=True,
+                            class_name="bg-sky-50 text-gray-700 hover:bg-sky-100 px-6 py-2 rounded-lg font-medium",
+                        ),
+                        rx.button(
+                            "Join Group",
+                            on_click=lambda: SearchState.request_to_join(startup.name),
+                            class_name="bg-sky-600 text-white hover:bg-sky-700 px-6 py-2 rounded-lg font-medium",
+                        ),
                     ),
                     rx.button(
-                        "Join Group",
-                        on_click=lambda: SearchState.request_to_join(startup.name),
-                        class_name="bg-sky-600 text-white hover:bg-sky-700 px-6 py-2 rounded-full font-medium",  # Updated button to match heading
+                        "View Details",
+                        on_click=lambda: SearchState.show_group_details(startup),
+                        class_name="bg-gray-600 text-white hover:bg-gray-700 px-6 py-2 rounded-lg font-medium",
                     ),
+                    spacing="4",
                 ),
                 width="100%"
             ),
@@ -123,6 +158,117 @@ def show_startup(startup: StartupGroup):
         min_width="400px",
         height="100%",
         class_name="bg-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 rounded-lg",
+    )
+
+def details_modal():
+    """Show the details modal for a selected group."""
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title(
+                rx.cond(
+                    SearchState.selected_group,
+                    SearchState.selected_group.name,
+                    "Group Details"
+                ),
+                class_name="text-2xl font-bold text-sky-600",
+            ),
+            rx.dialog.description(
+                rx.vstack(
+                    rx.text(
+                        "Project Details",
+                        class_name="text-xl font-semibold text-gray-700 mb-2",
+                    ),
+                    rx.cond(
+                        SearchState.selected_group,
+                        rx.text(
+                            SearchState.selected_group.project_details,
+                            class_name="text-gray-600 mb-4",
+                        ),
+                        rx.text("")
+                    ),
+                    rx.text(
+                        "Needed Positions",
+                        class_name="text-xl font-semibold text-gray-700 mb-2",
+                    ),
+                    rx.cond(
+                        SearchState.selected_group,
+                        rx.unordered_list(
+                            rx.foreach(
+                                SearchState.selected_group.needed_positions,
+                                lambda pos: rx.list_item(
+                                    pos,
+                                    class_name="text-gray-600"
+                                ),
+                            ),
+                            class_name="list-disc pl-5 mb-4",
+                        ),
+                        rx.text("")
+                    ),
+                    rx.text(
+                        "Tech Stack",
+                        class_name="text-xl font-semibold text-gray-700 mb-2",
+                    ),
+                    rx.cond(
+                        SearchState.selected_group,
+                        rx.hstack(
+                            rx.foreach(
+                                SearchState.selected_group.tech_stack,
+                                lambda tech: rx.box(
+                                    tech,
+                                    class_name="bg-sky-100 text-sky-700 px-3 py-1 rounded-full m-1",
+                                ),
+                            ),
+                            wrap="wrap",
+                        ),
+                        rx.text("")
+                    ),
+                    rx.hstack(
+                        rx.vstack(
+                            rx.text(
+                                "Funding Stage",
+                                class_name="font-semibold text-gray-700",
+                            ),
+                            rx.cond(
+                                SearchState.selected_group,
+                                rx.text(
+                                    SearchState.selected_group.funding_stage,
+                                    class_name="text-gray-600",
+                                ),
+                                rx.text("")
+                            ),
+                        ),
+                        rx.vstack(
+                            rx.text(
+                                "Team Size",
+                                class_name="font-semibold text-gray-700",
+                            ),
+                            rx.cond(
+                                SearchState.selected_group,
+                                rx.text(
+                                    str(SearchState.selected_group.team_size),
+                                    class_name="text-gray-600",
+                                ),
+                                rx.text("")
+                            ),
+                        ),
+                        spacing="8",
+                    ),
+                    spacing="4",
+                    width="100%",
+                ),
+            ),
+            rx.dialog.close(
+                rx.button(
+                    "Close",
+                    on_click=SearchState.close_details_modal,
+                    class_name="bg-gray-600 text-white hover:bg-gray-700 px-6 py-2 rounded-lg font-medium",
+                ),
+            ),
+            max_width="800px",
+            width="90vw",
+            class_name="bg-white p-8 rounded-xl shadow-xl",
+        ),
+        open=SearchState.show_details_modal,  # Use open prop instead of is_open [(1)](https://reflex.dev/docs/library/overlay/dialog)
     )
 
 def search_page() -> rx.Component:
@@ -160,10 +306,10 @@ def search_page() -> rx.Component:
                                     SearchState.search_results,
                                     show_startup
                                 ),
-                                columns="2",  # Changed to 2 columns for wider cards
+                                columns="2",
                                 spacing="8",
                                 width="100%",
-                                template_columns="repeat(2, minmax(400px, 1fr))",  # Added template columns
+                                template_columns="repeat(2, minmax(400px, 1fr))",
                                 padding="8",
                             ),
                             rx.text("No results found. Try a different search term.", color="gray.300"),
@@ -175,13 +321,14 @@ def search_page() -> rx.Component:
                     justify="center",
                 ),
                 py=8,
-                px="16",  # Increased horizontal padding
-                max_width="1800px",  # Set a max width for better layout
+                px="16",
+                max_width="1800px",
                 align="center",
                 justify="center",
             ),
-            class_name="flex-1 min-h-screen bg-gray-800 flex flex-col justify-center items-center px-20",  # Increased padding
+            class_name="flex-1 min-h-screen bg-gray-800 flex flex-col justify-center items-center px-20",
         ),
+        details_modal(),
         align_items="stretch",
         spacing="0",
         width="full",
