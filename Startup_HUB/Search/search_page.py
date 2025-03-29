@@ -84,15 +84,15 @@ def show_startup(startup: StartupGroup):
     """Show a startup group in a styled box."""
     return rx.box(
         rx.vstack(
-            rx.heading(startup.name, size="1", class_name="text-sky-400"),
+            rx.heading(startup.name, size="1", class_name="text-sky-600 font-bold"),  # Changed to sky blue
             rx.text(
                 startup.description,
-                color="gray.300",
+                color="black",  # Keeping description dark
                 noOfLines=3,
-                class_name="text-lg",
+                class_name="text-lg font-medium",
             ),
             rx.hstack(
-                rx.text(f"Members: {startup.members}", color="gray.300", class_name="text-lg"),
+                rx.text(f"Members: {startup.members}", color="black", class_name="text-lg font-medium"),
                 rx.spacer(),
                 rx.cond(
                     startup.join_requested,
@@ -101,12 +101,12 @@ def show_startup(startup: StartupGroup):
                         color_scheme="grass",
                         variant="outline",
                         is_disabled=True,
-                        class_name="bg-sky-100 text-sky-400 hover:bg-sky-200 px-6 py-2",
+                        class_name="bg-sky-50 text-gray-700 hover:bg-sky-100 px-6 py-2 rounded-full font-medium",
                     ),
                     rx.button(
                         "Join Group",
                         on_click=lambda: SearchState.request_to_join(startup.name),
-                        class_name="bg-sky-400 text-white hover:bg-sky-500 px-6 py-2",
+                        class_name="bg-sky-600 text-white hover:bg-sky-700 px-6 py-2 rounded-full font-medium",  # Updated button to match heading
                     ),
                 ),
                 width="100%"
@@ -115,14 +115,14 @@ def show_startup(startup: StartupGroup):
             height="100%",
             width="100%",
         ),
-        p=8,  # Increased padding
+        p=8,
         border="1px solid",
-        border_color="gray.700",
-        border_radius="2xl",
+        border_color="blue.200",
+        border_radius="3xl",
         width="100%",
-        min_width="400px",  # Added minimum width
+        min_width="400px",
         height="100%",
-        class_name="bg-gray-800 shadow-lg hover:shadow-xl transition-shadow duration-300",
+        class_name="bg-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 rounded-lg",
     )
 
 def search_page() -> rx.Component:
