@@ -1,180 +1,190 @@
 import reflex as rx
-from pathlib import Path
-import json
-from typing import List, Dict, Optional
+from typing import List, Dict
+from ..Matcher.SideBar import sidebar
 
-# State class to manage the search state
+class StartupGroup(rx.Base):
+    """The startup group model."""
+    name: str
+    description: str
+    members: int
+    join_requested: bool = False
+
 class SearchState(rx.State):
     """The search state."""
     search_query: str = ""
-    selected_industry: str = "All"
-    selected_location: str = "All"
-    startup_groups: List[Dict] = []
-    filtered_groups: List[Dict] = []
-    industries: List[str] = []
-    locations: List[str] = []
-    selected_group: Optional[Dict] = None
+    search_results: List[StartupGroup] = [
+        StartupGroup(
+            name="Tech Innovators Hub",
+            description="A collaborative space for tech entrepreneurs and innovators working on cutting-edge solutions",
+            members=150,
+        ),
+        StartupGroup(
+            name="FinTech Founders Circle", 
+            description="Network of founders revolutionizing financial technology and digital payments",
+            members=120,
+        ),
+        StartupGroup(
+            name="Green Energy Ventures",
+            description="Community of startups focused on sustainable energy solutions",
+            members=85,
+        ),
+        StartupGroup(
+            name="HealthTech Alliance",
+            description="Healthcare technology innovators improving patient care through digital solutions",
+            members=95,
+        ),
+        StartupGroup(
+            name="AI Research Collective",
+            description="Group of AI and machine learning startups pushing the boundaries of artificial intelligence",
+            members=175,
+        ),
+        StartupGroup(
+            name="E-commerce Innovation",
+            description="Entrepreneurs building the future of online retail and digital commerce",
+            members=145,
+        ),
+    ]
+    is_loading: bool = False
+    active_tab: str = "Matches"  # Add this for sidebar state
 
-    def load_startup_groups(self):
-        """Load startup groups data from JSON file."""
-        try:
-            with open(Path("Startup_HUB/Data/startup_groups.json"), 'r', encoding='utf-8') as f:
-                self.startup_groups = json.load(f)
-                # Extract unique industries and locations
-                self.industries = sorted(list(set(
-                    group.get('industry', '') 
-                    for group in self.startup_groups 
-                    if group.get('industry')
-                )))
-                self.locations = sorted(list(set(
-                    group.get('location', '') 
-                    for group in self.startup_groups 
-                    if group.get('location')
-                )))
-                self.filtered_groups = self.startup_groups
-        except FileNotFoundError:
-            self.startup_groups = []
-            self.filtered_groups = []
+    def request_to_join(self, group_name: str):
+        """Send a request to join a startup group."""
+        for group in self.search_results:
+            if group.name == group_name:
+                group.join_requested = True
 
-    def search_groups(self):
-        """Search groups based on query and filters."""
+    def set_search_query(self, query: str):
+        """Set the search query."""
+        self.search_query = query
+    
+    def search_startups(self):
+        """Search for startup groups based on the query."""
+        self.is_loading = True
+        
         if not self.search_query:
-            self.filtered_groups = self.startup_groups
+            # If no query, show all results
+            self.is_loading = False
             return
+            
+        # Filter results based on search query
+        filtered_results = [
+            group for group in self.search_results 
+            if self.search_query.lower() in group.name.lower() or 
+               self.search_query.lower() in group.description.lower()
+        ]
+        
+        self.search_results = filtered_results
+        self.is_loading = False
 
-        query = self.search_query.lower()
-        results = []
+    def set_active_tab(self, tab: str):
+        """Set the active tab in the sidebar."""
+        self.active_tab = tab
 
-        for group in self.startup_groups:
-            # Check if group matches search criteria
-            name_match = query in group.get('name', '').lower()
-            description_match = query in group.get('description', '').lower()
-            industry_match = query in group.get('industry', '').lower()
-
-            # Apply filters
-            if self.selected_industry != "All" and group.get('industry') != self.selected_industry:
-                continue
-
-            if self.selected_location != "All" and group.get('location') != self.selected_location:
-                continue
-
-            if name_match or description_match or industry_match:
-                results.append(group)
-
-        self.filtered_groups = results
-
-    def select_group(self, group: Dict):
-        """Select a group to view details."""
-        self.selected_group = group
-
-    def clear_selection(self):
-        """Clear the selected group."""
-        self.selected_group = None
-
-def group_card(group: Dict) -> rx.Component:
-    """Create a card component for a startup group."""
+def show_startup(startup: StartupGroup):
+    """Show a startup group in a styled box."""
     return rx.box(
         rx.vstack(
-            rx.heading(group.get('name', 'Unnamed Group'), size="md"),
-            rx.text(f"Industry: {group.get('industry', 'N/A')}"),
-            rx.text(f"Location: {group.get('location', 'N/A')}"),
-            rx.text(f"Members: {len(group.get('members', []))}"),
-            rx.text(group.get('description', 'No description available.')),
-            rx.button(
-                "View Details",
-                on_click=lambda: SearchState.select_group(group),
-                color_scheme="red",
-                size="sm",
+            rx.heading(startup.name, size="1", class_name="text-sky-400"),
+            rx.text(
+                startup.description,
+                color="gray.300",
+                noOfLines=3,
+                class_name="text-lg",
+            ),
+            rx.hstack(
+                rx.text(f"Members: {startup.members}", color="gray.300", class_name="text-lg"),
+                rx.spacer(),
+                rx.cond(
+                    startup.join_requested,
+                    rx.button(
+                        "Request Sent",
+                        color_scheme="grass",
+                        variant="outline",
+                        is_disabled=True,
+                        class_name="bg-sky-100 text-sky-400 hover:bg-sky-200 px-6 py-2",
+                    ),
+                    rx.button(
+                        "Join Group",
+                        on_click=lambda: SearchState.request_to_join(startup.name),
+                        class_name="bg-sky-400 text-white hover:bg-sky-500 px-6 py-2",
+                    ),
+                ),
+                width="100%"
             ),
             spacing="4",
-            padding="4",
-            border="1px solid #eaeaea",
-            border_radius="lg",
+            height="100%",
             width="100%",
         ),
+        p=8,  # Increased padding
+        border="1px solid",
+        border_color="gray.700",
+        border_radius="2xl",
         width="100%",
+        min_width="400px",  # Added minimum width
+        height="100%",
+        class_name="bg-gray-800 shadow-lg hover:shadow-xl transition-shadow duration-300",
     )
 
 def search_page() -> rx.Component:
-    """The search page component."""
-    return rx.vstack(
-        rx.heading("🔍 Search Startup Groups", size="lg", mb="8"),
-        
-        # Search and filters section
-        rx.hstack(
-            rx.input(
-                placeholder="Search startup groups...",
-                value=SearchState.search_query,
-                on_change=SearchState.set_search_query,
-                width="60%",
-                size="lg",
-            ),
-            rx.select(
-                ["All"] + SearchState.industries,
-                value=SearchState.selected_industry,
-                on_change=SearchState.set_selected_industry,
-                placeholder="Select Industry",
-                width="20%",
-            ),
-            rx.select(
-                ["All"] + SearchState.locations,
-                value=SearchState.selected_location,
-                on_change=SearchState.set_selected_location,
-                placeholder="Select Location",
-                width="20%",
-            ),
-            spacing="4",
-            width="100%",
-            mb="8",
-        ),
-        
-        # Search button
-        rx.button(
-            "Search",
-            on_click=SearchState.search_groups,
-            color_scheme="red",
-            size="lg",
-            mb="8",
-        ),
-        
-        # Results section
-        rx.cond(
-            len(SearchState.filtered_groups) == 0,
-            rx.text("No startup groups found matching your criteria."),
-            rx.wrap(
-                *[group_card(group) for group in SearchState.filtered_groups],
-                spacing="4",
+    return rx.hstack(
+        sidebar(SearchState),
+        rx.box(
+            rx.container(
+                rx.vstack(
+                    rx.heading("Startup Groups", size="3", mb=8, class_name="text-sky-400"),
+                    rx.hstack(
+                        rx.input(
+                            placeholder="Search groups...",
+                            value=SearchState.search_query,
+                            on_change=SearchState.set_search_query,
+                            size="3",
+                            width="100%",
+                            class_name="bg-gray-700 text-white border-gray-600",
+                        ),
+                        rx.button(
+                            "Search",
+                            on_click=SearchState.search_startups,
+                            size="3",
+                            class_name="bg-sky-400 text-white hover:bg-sky-500",
+                        ),
+                        spacing="4",
+                        width="100%",
+                    ),
+                    rx.cond(
+                        SearchState.is_loading,
+                        rx.spinner(),
+                        rx.cond(
+                            SearchState.search_results,
+                            rx.grid(
+                                rx.foreach(
+                                    SearchState.search_results,
+                                    show_startup
+                                ),
+                                columns="2",  # Changed to 2 columns for wider cards
+                                spacing="8",
+                                width="100%",
+                                template_columns="repeat(2, minmax(400px, 1fr))",  # Added template columns
+                                padding="8",
+                            ),
+                            rx.text("No results found. Try a different search term.", color="gray.300"),
+                        ),
+                    ),
+                    spacing="8",
+                    width="100%",
+                    align="center",
+                    justify="center",
+                ),
+                py=8,
+                px="16",  # Increased horizontal padding
+                max_width="1800px",  # Set a max width for better layout
+                align="center",
                 justify="center",
             ),
+            class_name="flex-1 min-h-screen bg-gray-800 flex flex-col justify-center items-center px-20",  # Increased padding
         ),
-        
-        # Modal for group details
-        rx.modal(
-            rx.modal_overlay(
-                rx.modal_content(
-                    rx.modal_header(SearchState.selected_group.get('name', 'Group Details') if SearchState.selected_group else ''),
-                    rx.modal_close_button(),
-                    rx.modal_body(
-                        rx.vstack(
-                            rx.text(f"Industry: {SearchState.selected_group.get('industry', 'N/A')}"),
-                            rx.text(f"Location: {SearchState.selected_group.get('location', 'N/A')}"),
-                            rx.text(f"Members: {len(SearchState.selected_group.get('members', []))}"),
-                            rx.text(SearchState.selected_group.get('description', 'No description available.')),
-                            spacing="4",
-                        ) if SearchState.selected_group else rx.text("No details available."),
-                    ),
-                    rx.modal_footer(
-                        rx.button("Close", on_click=SearchState.clear_selection),
-                    ),
-                ),
-            ),
-            is_open=SearchState.selected_group is not None,
-            on_close=SearchState.clear_selection,
-        ),
-        
-        spacing="8",
-        padding="8",
-        width="100%",
-        max_width="1200px",
-        margin="0 auto",
-    ) 
+        align_items="stretch",
+        spacing="0",
+        width="full",
+        height="100vh",
+        overflow="hidden",
+    )
