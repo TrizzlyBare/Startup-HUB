@@ -120,28 +120,6 @@ def chat() -> rx.Component:
 def message_input() -> rx.Component:
     return rx.hstack(
         rx.hstack(
-            rx.upload(
-                rx.button(
-                    rx.icon("paperclip", color="#AAAAAA", font_size="18px"),
-                    variant="ghost",
-                    padding="0",
-                    margin_right="5px",
-                    cursor="pointer",
-                    _hover={"color": "#80d0ea"},
-                    transition="all 0.2s ease-in-out",
-                ),
-                id="file-upload",
-                accept={
-                    "image/png": [".png"],
-                    "image/jpeg": [".jpg", ".jpeg"],
-                    "image/gif": [".gif"]
-                },
-                on_drop=ChatState.handle_upload,
-                multiple=True,
-                height="40px",
-                display="inline-flex",
-                align_items="center",
-            ),
             rx.input(
                 value=ChatState.message,
                 placeholder="Type a message...",
@@ -166,6 +144,32 @@ def message_input() -> rx.Component:
             padding_left="10px",
             width="100%",
             box_shadow="0 2px 4px rgba(0, 0, 0, 0.05)",
+        ),
+        rx.upload(
+            rx.button(
+                rx.icon("paperclip"),
+                border_radius="50%",
+                bg="#80d0ea",
+                color="white", 
+                width="40px",
+                height="40px",
+                padding="0",
+                _hover={
+                    "bg": "#6bc0d9",
+                    "transform": "scale(1.05)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
+            id="chat_upload",
+            accept={
+                "image/png": [".png"],
+                "image/jpeg": [".jpg", ".jpeg"],
+                "image/gif": [".gif"],
+                "image/webp": [".webp"],
+            },
+            max_files=1,
+            on_drop=ChatState.handle_upload(rx.upload_files(upload_id="chat_upload")),
+            border="none",
         ),
         rx.button(
             rx.icon("arrow-right"),

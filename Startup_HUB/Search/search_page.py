@@ -268,7 +268,7 @@ def details_modal():
             width="90vw",
             class_name="bg-white p-8 rounded-xl shadow-xl",
         ),
-        open=SearchState.show_details_modal,  # Use open prop instead of is_open [(1)](https://reflex.dev/docs/library/overlay/dialog)
+        open=SearchState.show_details_modal,
     )
 
 def search_page() -> rx.Component:
@@ -335,3 +335,5 @@ def search_page() -> rx.Component:
         height="100vh",
         overflow="hidden",
     )
+
+    
