@@ -10,6 +10,11 @@ class ChatState(rx.State):
     ]
     message: str = ""
     current_chat_user: str = "Andy Collins"
+    show_call_popup: bool = False
+    show_video_popup: bool = False
+    call_duration: int = 0
+    is_muted: bool = False
+    is_camera_off: bool = False
 
     @rx.event
     async def send_message(self):
@@ -36,15 +41,271 @@ class ChatState(rx.State):
             self.chat_history.append(("user", file_url))
             yield
 
+    @rx.event
+    async def start_call(self):
+        self.show_call_popup = True
+        self.call_duration = 0
+        yield
+
+    @rx.event
+    async def end_call(self):
+        self.show_call_popup = False
+        yield
+
+    @rx.event
+    async def toggle_mute(self):
+        self.is_muted = not self.is_muted
+        yield
+
+    @rx.event
+    async def toggle_camera(self):
+        self.is_camera_off = not self.is_camera_off
+        yield
+
+    @rx.event
+    async def increment_call_duration(self):
+        while self.show_call_popup:
+            self.call_duration += 1
+            yield rx.utils.sleep(1)
+
+    @rx.event
+    async def start_video_call(self):
+        self.show_video_popup = True
+        yield
+
+    @rx.event
+    async def end_video_call(self):
+        self.show_video_popup = False
+        yield
+
+def call_popup() -> rx.Component:
+    return rx.cond(
+        ChatState.show_call_popup,
+        rx.box(
+            rx.center(
+                rx.vstack(
+                    rx.avatar(
+                        name=ChatState.current_chat_user,
+                        size="9",
+                        border="4px solid #80d0ea",
+                        margin_bottom="20px",
+                        border_radius="50%",
+                        width="120px",
+                        height="120px",
+                    ),
+                    rx.text(
+                        ChatState.current_chat_user,
+                        font_size="24px",
+                        font_weight="bold",
+                        color="#333333",
+                        margin_bottom="20px",
+                    ),
+                    rx.hstack(
+                        rx.button(
+                            rx.cond(
+                                ChatState.is_muted,
+                                rx.icon("mic-off"),
+                                rx.icon("mic"),
+                            ),
+                            on_click=ChatState.toggle_mute,
+                            border_radius="50%",
+                            bg="#80d0ea",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#6bc0d9",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        rx.button(
+                            rx.icon("phone-off"),
+                            on_click=ChatState.end_call,
+                            border_radius="50%",
+                            bg="#ff4444",
+                            color="gray",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#ff3333",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        rx.button(
+                            rx.cond(
+                                ChatState.is_camera_off,
+                                rx.icon("video-off"),
+                                rx.icon("video"),
+                            ),
+                            on_click=ChatState.toggle_camera,
+                            border_radius="50%",
+                            bg="#80d0ea",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#6bc0d9",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        spacing="4",
+                    ),
+                    align_items="center",
+                    justify_content="center",
+                ),
+                width="300px",
+                height="400px",
+                bg="white",
+                border_radius="20px",
+                padding="30px",
+                position="fixed",
+                top="50%",
+                left="50%",
+                transform="translate(-50%, -50%)",
+                box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
+                z_index="1000",
+            ),
+            on_mount=ChatState.increment_call_duration,
+        ),
+    )
+
+def video_call_popup() -> rx.Component:
+    return rx.cond(
+        ChatState.show_video_popup,
+        rx.box(
+            rx.center(
+                rx.vstack(
+                    rx.avatar(
+                        name=ChatState.current_chat_user,
+                        size="9",
+                        border="4px solid #80d0ea",
+                        margin_bottom="20px",
+                        border_radius="50%",
+                        width="120px",
+                        height="120px",
+                    ),
+                    rx.text(
+                        ChatState.current_chat_user,
+                        font_size="24px",
+                        font_weight="bold",
+                        color="#333333",
+                        margin_bottom="20px",
+                    ),
+                    rx.hstack(
+                        rx.button(
+                            rx.cond(
+                                ChatState.is_muted,
+                                rx.icon("mic-off"),
+                                rx.icon("mic"),
+                            ),
+                            on_click=ChatState.toggle_mute,
+                            border_radius="50%",
+                            bg="#80d0ea",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#6bc0d9",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        rx.button(
+                            rx.icon("phone-off"),
+                            on_click=ChatState.end_video_call,
+                            border_radius="50%",
+                            bg="#ff4444",
+                            color="gray",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#ff3333",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        rx.button(
+                            rx.cond(
+                                ChatState.is_camera_off,
+                                rx.icon("video-off"),
+                                rx.icon("video"),
+                            ),
+                            on_click=ChatState.toggle_camera,
+                            border_radius="50%",
+                            bg="#80d0ea",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#6bc0d9",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        spacing="4",
+                    ),
+                    align_items="center",
+                    justify_content="center",
+                ),
+                width="800px",
+                height="400px",
+                bg="white",
+                border_radius="20px",
+                padding="30px",
+                position="fixed",
+                top="50%",
+                left="50%",
+                transform="translate(-50%, -50%)",
+                box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
+                z_index="1000",
+            ),
+        ),
+    )
+
 def user_header() -> rx.Component:
     return rx.hstack(
         rx.avatar(name="Andy Collins", size="2", border="2px solid white"),
         rx.text(ChatState.current_chat_user, font_weight="bold", color="white", font_size="16px"),
         rx.spacer(),
         rx.hstack(
-            rx.icon("phone", color="white", font_size="18px"),
-            rx.icon("video", color="white", font_size="18px"),
-            rx.icon("info", color="white", font_size="18px"),
+            rx.button(
+                rx.icon("phone", color="white", font_size="18px"),
+                on_click=ChatState.start_call,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
+            rx.button(
+                rx.icon("video", color="white", font_size="18px"),
+                on_click=ChatState.start_video_call,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
+            rx.button(
+                rx.icon("info", color="white", font_size="18px"),
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
             spacing="4",
         ),
         width="100%",
@@ -212,5 +473,7 @@ def chat_page() -> rx.Component:
             width="100%",
             height="100vh",
             overflow="hidden",
-        )
+        ),
+        call_popup(),
+        video_call_popup(),
     )

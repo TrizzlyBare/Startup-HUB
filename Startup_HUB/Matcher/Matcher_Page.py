@@ -5,6 +5,8 @@ from .SideBar import sidebar
 class MatchState(rx.State):
     """State for the matcher page."""
     current_profile_index: int = 0
+    show_report_dialog: bool = False
+    selected_issue_type: str = ""
     profiles: List[Dict] = [
         {
             "name": "Soukaku",
@@ -56,7 +58,9 @@ class MatchState(rx.State):
         """Set the active tab."""
         self.active_tab = tab
 
-
+    def set_selected_issue_type(self, issue_type: str):
+        """Set the selected issue type."""
+        self.selected_issue_type = issue_type
 
 def profile_card() -> rx.Component:
     return rx.box(
@@ -106,11 +110,10 @@ def profile_card() -> rx.Component:
 def action_buttons() -> rx.Component:
     return rx.hstack(
         rx.button(
-                rx.icon("arrow-left", class_name="drop-shadow-lg"),
-                on_click=MatchState.previous_profile,
-                class_name="rounded-full font-bold w-12 h-12 bg-yellow-400 text-white hover:bg-yellow-500 transform transition-all hover:scale-110",
-            ),
-
+            rx.icon("arrow-left", class_name="drop-shadow-lg"),
+            on_click=MatchState.previous_profile,
+            class_name="rounded-full font-bold w-12 h-12 bg-yellow-400 text-white hover:bg-yellow-500 transform transition-all hover:scale-110",
+        ),
         rx.button(
             rx.icon("x", class_name="drop-shadow-lg"),
             on_click=MatchState.dislike_profile,
