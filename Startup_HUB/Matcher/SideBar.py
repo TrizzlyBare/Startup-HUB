@@ -3,12 +3,7 @@ import reflex as rx
 def matches_content() -> rx.Component:
     """Content for the Matches tab."""
     return rx.vstack(
-        rx.text(
-            "Potential Matches",
-            font_weight="bold",
-            class_name="text-xl mb-4",
-        ),
-        rx.vstack(
+        rx.grid(
             rx.image(
                 src="../../Soukaku.jpg",
                 class_name="w-20 h-40 rounded-lg object-cover cursor-pointer hover:opacity-80 m-2 border-4 border-sky-400",
@@ -21,9 +16,10 @@ def matches_content() -> rx.Component:
                 src="../../Jane_Doe.jpg",
                 class_name="w-20 h-40 rounded-lg object-cover cursor-pointer hover:opacity-80 m-2 border-4 border-sky-400",
             ),
-            align_items="start",
+            columns="3",
+            spacing="4",
             padding_x="4",
-            spacing="3",
+            align_items="center",
         ),
         align_items="stretch",
     )
@@ -31,12 +27,7 @@ def matches_content() -> rx.Component:
 def liked_content() -> rx.Component:
     """Content for the Liked tab."""
     return rx.vstack(
-        rx.text(
-            "Liked Profiles",
-            font_weight="bold",
-            class_name="text-xl mb-4",
-        ),
-        rx.vstack(
+        rx.grid(
             rx.image(
                 src="../../profile.jpg",
                 class_name="w-20 h-40 rounded-lg object-cover cursor-pointer hover:opacity-80 m-2 border-4 border-green-400",
@@ -45,9 +36,13 @@ def liked_content() -> rx.Component:
                 src="../../Soukaku.jpg",
                 class_name="w-20 h-40 rounded-lg object-cover cursor-pointer hover:opacity-80 m-2 border-4 border-green-400",
             ),
-            align_items="start",
-            padding_x="4",
-            spacing="3",
+            rx.image(
+                src="../../blue_cat.jpg",
+                class_name="w-20 h-40 rounded-lg object-cover cursor-pointer hover:opacity-80 m-2 border-4 border-green-400",
+            ),
+            columns="3",
+            spacing="4",
+            align_items="center",
         ),
         align_items="stretch",
     )
@@ -55,11 +50,6 @@ def liked_content() -> rx.Component:
 def messages_content() -> rx.Component:
     """Content for the Messages tab."""
     return rx.vstack(
-        rx.text(
-            "Messages",
-            font_weight="bold",
-            class_name="text-xl mb-4",
-        ),
         rx.vstack(
             rx.hstack(
                 rx.avatar(
@@ -68,7 +58,7 @@ def messages_content() -> rx.Component:
                     class_name="rounded-full",
                 ),
                 rx.vstack(
-                    rx.text("John Doe", font_weight="bold"),
+                    rx.text("John Doe", font_weight="bold", class_name= "text-black" ),
                     rx.text("Hey, how are you?", class_name="text-gray-600"),
                     align_items="start",
                 ),
@@ -82,7 +72,7 @@ def messages_content() -> rx.Component:
                     class_name="rounded-full",
                 ),
                 rx.vstack(
-                    rx.text("Soukaku", font_weight="bold"),
+                    rx.text("Soukaku", font_weight="bold" , class_name= "text-black"),
                     rx.text("Let's connect!", class_name="text-gray-600"),
                     align_items="start",
                 ),
@@ -97,13 +87,6 @@ def messages_content() -> rx.Component:
     )
 
 def sidebar(state=None) -> rx.Component:
-    """
-    Sidebar component that can be used in multiple pages
-    Args:
-        state: Optional state object to use for the active tab.
-               If None, will import MatchState as default.
-    """
-    # Import the state class here to avoid circular imports, only if state is not provided
     if state is None:
         from .Matcher_Page import MatchState
         active_state = MatchState

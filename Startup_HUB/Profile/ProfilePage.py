@@ -131,7 +131,7 @@ def profile_display() -> rx.Component:
                 ),
                 # Basic Info
                 rx.vstack(
-                    rx.heading(State.name, size="3"),
+                    rx.heading(State.name, size="7", class_name="text-sky-600 font-bold"),
                     rx.hstack(
                         rx.text(f"Job: {State.job_title}"),
                         align_items="center",
@@ -154,10 +154,9 @@ def profile_display() -> rx.Component:
                 rx.spacer(),
                 # Edit Profile Button
                 rx.button(
-                    "Edit Profile",
+                    rx.icon("pencil"),  # This is the pencil icon
                     on_click=State.toggle_edit_form,
-                    class_name="px-4 py-2 bg-gray-800 text-white rounded-lg"
-                ),
+                    class_name="px-6 py-3 bg-white text-gray-600 rounded-lg hover:bg-sky-200 hover:text-gray-600 transition-all duration-200"),
                 width="100%",
                 padding="4",
                 spacing="4"
@@ -165,7 +164,7 @@ def profile_display() -> rx.Component:
             
             # About Section
             rx.box(
-                rx.heading("About", size="4", margin_bottom="2"),
+                rx.heading("About", size="5", margin_bottom="2"),
                 rx.cond(
                     State.has_about,
                     rx.text(State.about),
@@ -178,7 +177,7 @@ def profile_display() -> rx.Component:
             
             # Skills Section
             rx.box(
-                rx.heading("Skill", size="4", margin_bottom="2"),
+                rx.heading("Skill", size="5", margin_bottom="2"),
                 rx.flex(
                     rx.foreach(
                         State.skills,
@@ -194,7 +193,7 @@ def profile_display() -> rx.Component:
             
             # Project Section
             rx.box(
-                rx.heading("Project", size="4", margin_bottom="2"),
+                rx.heading("Project", size="5", margin_bottom="2"),
                 rx.badge(
                     State.project,
                     class_name="bg-gray-100 text-gray-800 px-3 py-1 rounded-lg"
@@ -206,7 +205,7 @@ def profile_display() -> rx.Component:
             
             # Online Presence Section
             rx.box(
-                rx.heading("Online Presence", size="4", margin_bottom="2"),
+                rx.heading("Online Presence", size="5", margin_bottom="2"),
                 rx.vstack(
                     rx.cond(
                         State.linkedin_link != "",
@@ -249,12 +248,12 @@ def profile_display() -> rx.Component:
             ),
             
             width="100%",
-            max_width="800px",
+            max_width="1000px",
             margin="auto",
             padding="4",
             spacing="4"
         ),
-        class_name="bg-white rounded-lg shadow-lg p-6 w-full max-w-4xl mx-auto"
+        class_name="bg-white rounded-lg shadow-lg p-6 w-full max-w-6xl mx-auto"
     )
 
 def edit_form() -> rx.Component:
@@ -264,7 +263,7 @@ def edit_form() -> rx.Component:
             rx.card(
                 rx.vstack(
                     # Header
-                    rx.heading("Create Your Profile", size="4", color="black"),
+                    rx.heading("Create Your Profile", size="7", class_name="text-sky-600"),
                     rx.text("Complete your profile to connect with startups and founders", color="gray"),
                     
                     # Profile Photo Upload
