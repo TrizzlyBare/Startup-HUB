@@ -4,7 +4,7 @@ from .Auth.AuthPage import login_page, AuthState
 from .chat.Chat_Page import chat_page
 from .Profile.ProfilePage import profile_page
 from .Matcher.Matcher_Page import match_page, MatchState
-from .Search.Search_Page import search_page
+from .Search.search_page import search_page
 from .Search.my_projects_page import my_projects_page
 
 class State(rx.State):

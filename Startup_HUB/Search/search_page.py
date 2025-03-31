@@ -116,15 +116,15 @@ def show_startup(startup: StartupGroup):
     """Show a startup group in a styled box."""
     return rx.box(
         rx.vstack(
-            rx.heading(startup.name, size="3", class_name="text-sky-600 font-bold"),
+            rx.heading(startup.name, size="7", class_name="text-sky-600 font-bold pt-2 px-2 font-sans"),
             rx.text(
                 startup.description,
                 color="black",
                 noOfLines=3,
-                class_name="text-lg font-small",
+                class_name="text-base font-small pt-2 px-2",
             ),
             rx.hstack(
-                rx.text(f"Members: {startup.members}", color="black", class_name="text-lg font-medium"),
+                rx.text(f"Members: {startup.members}", color="black", class_name="text-lg font-medium pt-2 pl-1"),
                 rx.spacer(),
                 rx.hstack(
                     rx.cond(
@@ -160,7 +160,7 @@ def show_startup(startup: StartupGroup):
         border_color="blue.200",
         border_radius="3xl",
         width="100%",
-        min_width="400px",
+        min_width="450px",
         height="100%",
         class_name="bg-white shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 rounded-lg",
     )
@@ -282,7 +282,7 @@ def search_page() -> rx.Component:
         rx.box(
             rx.container(
                 rx.vstack(
-                    rx.heading("Startup Groups", size="3", mb=8, class_name="text-sky-400"),
+                    rx.heading("Startup Groups", size="9", mb=8, class_name="text-sky-400"),
                     rx.hstack(
                         rx.input(
                             placeholder="Search groups...",
@@ -290,7 +290,7 @@ def search_page() -> rx.Component:
                             on_change=SearchState.set_search_query,
                             size="3",
                             width="100%",
-                            class_name="bg-gray-700 text-white border-gray-600",
+                            class_name="bg-gray-400 text-white border-gray-600",
                         ),
                         rx.button(
                             "Search",
@@ -315,13 +315,17 @@ def search_page() -> rx.Component:
                             rx.grid(
                                 rx.foreach(
                                     SearchState.search_results,
-                                    show_startup
+                                    lambda startup: rx.box(
+                                        show_startup(startup),
+                                        width="45%",
+                                    ),
                                 ),
                                 columns="2",
                                 spacing="8",
                                 width="100%",
-                                template_columns="repeat(2, minmax(400px, 1fr))",
-                                padding="8",
+                                template_columns="repeat(2, 1fr)",
+                                gap="16",
+                                padding="16",
                             ),
                             rx.text("No results found. Try a different search term.", color="gray.300"),
                         ),
@@ -332,12 +336,12 @@ def search_page() -> rx.Component:
                     justify="center",
                 ),
                 py=8,
-                px="16",
-                max_width="1800px",
+                px="8",
+                max_width="1400px",
                 align="center",
                 justify="center",
             ),
-            class_name="flex-1 min-h-screen bg-gray-800 flex flex-col justify-center items-center px-20",
+            class_name="flex-1 min-h-screen bg-gray-800 flex flex-col justify-center items-center px-4",
         ),
         details_modal(),
         align_items="stretch",
