@@ -10,16 +10,11 @@ from cloudinary.models import CloudinaryField
 class CustomUser(AbstractUser):
     email = models.EmailField(unique=True)
     profile_picture = CloudinaryField(
-        'profile_picture',
-        folder='startup_hub/profile_pics',
+        "profile_picture",
+        folder="startup_hub/profile_pics",
         blank=True,
         null=True,
-        transformation={
-            'width': 500,
-            'height': 500,
-            'crop': 'fill',
-            'gravity': 'face'
-        }
+        transformation={"width": 500, "height": 500, "crop": "fill", "gravity": "face"},
     )
 
     groups = models.ManyToManyField(

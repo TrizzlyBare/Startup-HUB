@@ -75,7 +75,6 @@ class Participant(models.Model):
         return f"{self.user.username} in {self.room.name}"
 
     def mark_messages_as_read(self):
-        """Mark all messages in the room as read up to current time."""
         current_time = timezone.now()
         self.last_read = current_time
 

@@ -1,7 +1,6 @@
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from channels.db import database_sync_to_async
 from .models import Room, Participant
-from django.conf import settings
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -27,7 +26,6 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
 
         # Join room group
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-
         await self.accept()
 
         # Notify others that user has joined
@@ -56,42 +54,38 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
             )
 
     async def receive_json(self, content):
+        # Handle incoming messages
         message_type = content.get("type")
-
-        if message_type == "offer":
+        if message_type == "send_offer":
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
                     "type": "send_offer",
                     "offer": content["offer"],
                     "sender_id": self.scope["user"].id,
-                    "receiver_id": content["receiver_id"],
                 },
             )
-
-        elif message_type == "answer":
+        elif message_type == "send_answer":
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
                     "type": "send_answer",
                     "answer": content["answer"],
                     "sender_id": self.scope["user"].id,
-                    "receiver_id": content["receiver_id"],
                 },
             )
-
-        elif message_type == "ice_candidate":
+        elif message_type == "send_ice_candidate":
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
                     "type": "send_ice_candidate",
                     "ice_candidate": content["ice_candidate"],
                     "sender_id": self.scope["user"].id,
-                    "receiver_id": content["receiver_id"],
                 },
             )
 
     async def user_joined(self, event):
+        # Notify WebSocket about a user joining
         await self.send_json(
             {
                 "type": "user_joined",
@@ -101,6 +95,7 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
         )
 
     async def user_left(self, event):
+        # Notify WebSocket about a user leaving
         await self.send_json(
             {
                 "type": "user_left",
@@ -110,39 +105,36 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
         )
 
     async def send_offer(self, event):
-        if str(self.scope["user"].id) == str(event["receiver_id"]):
-            await self.send_json(
-                {
-                    "type": "offer",
-                    "offer": event["offer"],
-                    "sender_id": event["sender_id"],
-                }
-            )
+        # Forward offer to WebSocket
+        await self.send_json(
+            {
+                "type": "send_offer",
+                "offer": event["offer"],
+                "sender_id": event["sender_id"],
+            }
+        )
 
     async def send_answer(self, event):
-        if str(self.scope["user"].id) == str(event["receiver_id"]):
-            await self.send_json(
-                {
-                    "type": "answer",
-                    "answer": event["answer"],
-                    "sender_id": event["sender_id"],
-                }
-            )
+        # Forward answer to WebSocket
+        await self.send_json(
+            {
+                "type": "send_answer",
+                "answer": event["answer"],
+                "sender_id": event["sender_id"],
+            }
+        )
 
     async def send_ice_candidate(self, event):
-        if str(self.scope["user"].id) == str(event["receiver_id"]):
-            await self.send_json(
-                {
-                    "type": "ice_candidate",
-                    "ice_candidate": event["ice_candidate"],
-                    "sender_id": event["sender_id"],
-                }
-            )
+        # Forward ICE candidate to WebSocket
+        await self.send_json(
+            {
+                "type": "send_ice_candidate",
+                "ice_candidate": event["ice_candidate"],
+                "sender_id": event["sender_id"],
+            }
+        )
 
     @database_sync_to_async
     def is_room_participant(self, user_id, room_id):
-        try:
-            participant = Participant.objects.get(user_id=user_id, room_id=room_id)
-            return True
-        except Participant.DoesNotExist:
-            return False
+        # Check if the user is a participant in the room
+        return Participant.objects.filter(user_id=user_id, room_id=room_id).exists()
