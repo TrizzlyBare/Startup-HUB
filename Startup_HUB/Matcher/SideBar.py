@@ -156,7 +156,7 @@ def sidebar(state=None) -> rx.Component:
                         "border-b-2 border-sky-400",
                         ""
                     ),
-                    on_click=lambda: active_state.set_active_tab("Matches") if hasattr(active_state, "set_active_tab") else None,
+                    on_click=lambda: active_state.set_active_tab("Matches") if hasattr(active_state, "set_active_tab") else rx.noop(),
                 ),
                 rx.text(
                     "Liked",
@@ -169,7 +169,7 @@ def sidebar(state=None) -> rx.Component:
                         "border-b-2 border-sky-400",
                         ""
                     ),
-                    on_click=lambda: active_state.set_active_tab("Liked") if hasattr(active_state, "set_active_tab") else None,
+                    on_click=lambda: active_state.set_active_tab("Liked") if hasattr(active_state, "set_active_tab") else rx.noop(),
                 ),
                 rx.text(
                     "Messages",
@@ -182,7 +182,7 @@ def sidebar(state=None) -> rx.Component:
                         "border-b-2 border-sky-400",
                         ""
                     ),
-                    on_click=lambda: active_state.set_active_tab("Messages") if hasattr(active_state, "set_active_tab") else None,
+                    on_click=lambda: active_state.set_active_tab("Messages") if hasattr(active_state, "set_active_tab") else rx.noop(),
                 ),
                 spacing="6",
                 padding="4",

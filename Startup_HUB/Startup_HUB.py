@@ -5,6 +5,7 @@ from .chat.Chat_Page import chat_page
 from .Profile.ProfilePage import profile_page
 from .Matcher.Matcher_Page import match_page, MatchState
 from .Search.Search_Page import search_page
+from .Search.my_projects_page import my_projects_page
 
 class State(rx.State):
     """Base state for the app."""
@@ -107,3 +108,4 @@ app.add_page(profile_page, route="/profile")
 app.add_page(match_page, route="/match")
 app.add_page(chat_page, route="/chat")
 app.add_page(search_page, route="/search")
+app.add_page(my_projects_page, route="/my-projects")

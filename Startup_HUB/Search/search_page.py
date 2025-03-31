@@ -107,6 +107,11 @@ class SearchState(rx.State):
         self.show_details_modal = False
         self.selected_group = None
 
+    def show_my_projects(self):
+        """Show the my projects page."""
+        self.active_tab = "My Projects"
+        return rx.redirect("/my-projects")
+
 def show_startup(startup: StartupGroup):
     """Show a startup group in a styled box."""
     return rx.box(
@@ -290,6 +295,12 @@ def search_page() -> rx.Component:
                         rx.button(
                             "Search",
                             on_click=SearchState.search_startups,
+                            size="3",
+                            class_name="bg-sky-400 text-white hover:bg-sky-500",
+                        ),
+                        rx.button(
+                            "My Projects",
+                            on_click=SearchState.show_my_projects,
                             size="3",
                             class_name="bg-sky-400 text-white hover:bg-sky-500",
                         ),
