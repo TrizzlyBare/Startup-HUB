@@ -183,6 +183,112 @@ def report_modal() -> rx.Component:
         ),
     )
 
+def create_group_modal() -> rx.Component:
+    """Create new group chat modal component."""
+    return rx.dialog.root(
+        rx.dialog.trigger(
+            rx.icon(
+                "plus",
+                color="black",
+                class_name="w-8 h-8 bg-white rounded-full p-1 hover:bg-blue-500 hover:text-white",
+            ),
+        ),
+        rx.dialog.content(
+            rx.dialog.title(
+                "Create New Group Chat",
+                class_name="text-2xl font-bold text-sky-600 text-center"
+            ),
+            rx.dialog.description(
+                rx.form(
+                    rx.vstack(
+                        rx.input(
+                            placeholder="Group Name",
+                            name="group_name",
+                            required=True,
+                            class_name="w-full h-10 border rounded-xl bg-white",
+                        ),
+                        rx.text(
+                            "Add Members",
+                            class_name="font-semibold text-lg mt-4",
+                        ),
+                        rx.vstack(
+                            rx.hstack(
+                                rx.avatar(
+                                    src="../../profile.jpg",
+                                    size="5",
+                                    class_name="rounded-full",
+                                ),
+                                rx.text("John Doe", class_name="text-black"),
+                                rx.spacer(),
+                                rx.checkbox(
+                                    name="member1",
+                                    class_name="rounded-full",
+                                ),
+                                spacing="4",
+                                class_name="w-full p-2 hover:bg-gray-100 rounded-lg",
+                            ),
+                            rx.hstack(
+                                rx.avatar(
+                                    src="../../Soukaku.jpg",
+                                    size="5",
+                                    class_name="rounded-full",
+                                ),
+                                rx.text("Soukaku", class_name="text-black"),
+                                rx.spacer(),
+                                rx.checkbox(
+                                    name="member2",
+                                    class_name="rounded-full",
+                                ),
+                                spacing="4",
+                                class_name="w-full p-2 hover:bg-gray-100 rounded-lg",
+                            ),
+                            rx.hstack(
+                                rx.avatar(
+                                    src="../../blue_cat.jpg",
+                                    size="5",
+                                    class_name="rounded-full",
+                                ),
+                                rx.text("Blue Cat", class_name="text-black"),
+                                rx.spacer(),
+                                rx.checkbox(
+                                    name="member3",
+                                    class_name="rounded-full",
+                                ),
+                                spacing="4",
+                                class_name="w-full p-2 hover:bg-gray-100 rounded-lg",
+                            ),
+                            align_items="stretch",
+                            spacing="2",
+                        ),
+                        rx.hstack(
+                            rx.dialog.close(
+                                rx.button(
+                                    "Cancel",
+                                    variant="soft",
+                                    color_scheme="gray",
+                                    class_name="bg-red-600 text-white hover:bg-red-700",
+                                ),
+                            ),
+                            rx.button(
+                                "Create Group",
+                                type="submit",
+                                class_name="bg-green-600 text-white hover:bg-green-700",
+                            ),
+                            spacing="4",
+                            justify="end",
+                        ),
+                        spacing="4",
+                    ),
+                    on_submit=lambda form_data: rx.window_alert(f"Group created: {form_data}"),
+                    reset_on_submit=True,
+                ),
+            ),
+            max_width="500px",
+            width="90vw",
+            class_name="bg-white p-8 rounded-xl shadow-xl",
+        ),
+    )
+
 def sidebar(state=None) -> rx.Component:
     if state is None:
         from .Matcher_Page import MatchState
@@ -275,6 +381,16 @@ def sidebar(state=None) -> rx.Component:
                     liked_content(),
                     messages_content(),
                 ),
+            ),
+            # Create group button at bottom
+            rx.cond(
+                getattr(active_state, "active_tab", "") == "Messages",
+                rx.hstack(
+                    rx.spacer(),
+                    create_group_modal(),
+                    class_name="p-4",
+                ),
+                rx.spacer(),
             ),
             align_items="stretch",
             height="full",
