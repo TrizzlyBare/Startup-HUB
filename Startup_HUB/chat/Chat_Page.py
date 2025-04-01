@@ -16,7 +16,7 @@ class ChatState(rx.State):
     is_muted: bool = False
     is_camera_off: bool = False
     show_calling_popup: bool = False
-    call_type: str = "voice"
+    call_type: str = "audio"
 
     @rx.event
     async def send_message(self):
@@ -48,6 +48,7 @@ class ChatState(rx.State):
         self.show_call_popup = True
         self.call_duration = 0
         self.show_calling_popup = True
+        self.call_type = "audio"
         yield
 
     @rx.event
