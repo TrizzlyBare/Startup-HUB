@@ -15,6 +15,8 @@ class ChatState(rx.State):
     call_duration: int = 0
     is_muted: bool = False
     is_camera_off: bool = False
+    show_calling_popup: bool = False
+    call_type: str = "voice"
 
     @rx.event
     async def send_message(self):
@@ -45,11 +47,13 @@ class ChatState(rx.State):
     async def start_call(self):
         self.show_call_popup = True
         self.call_duration = 0
+        self.show_calling_popup = True
         yield
 
     @rx.event
     async def end_call(self):
         self.show_call_popup = False
+        self.show_calling_popup = False
         yield
 
     @rx.event
@@ -71,12 +75,80 @@ class ChatState(rx.State):
     @rx.event
     async def start_video_call(self):
         self.show_video_popup = True
+        self.show_calling_popup = True
+        self.call_type = "video"
         yield
 
     @rx.event
     async def end_video_call(self):
         self.show_video_popup = False
+        self.show_calling_popup = False
         yield
+
+def calling_popup() -> rx.Component:
+    return rx.cond(
+        ChatState.show_calling_popup,
+        rx.box(
+            rx.center(
+                rx.vstack(
+                    rx.avatar(
+                        name=ChatState.current_chat_user,
+                        size="9",
+                        border="4px solid #80d0ea",
+                        margin_bottom="20px",
+                        border_radius="50%",
+                        width="120px",
+                        height="120px",
+                    ),
+                    rx.text(
+                        ChatState.current_chat_user,
+                        font_size="24px",
+                        font_weight="bold",
+                        color="#333333",
+                        margin_bottom="20px",
+                    ),
+                    rx.text(
+                        "Calling...",
+                        font_size="18px",
+                        color="#666666",
+                        margin_bottom="20px",
+                    ),
+                    rx.button(
+                        rx.icon("phone-off"),
+                        on_click=ChatState.end_call,
+                        border_radius="50%",
+                        bg="#ff4444",
+                        color="white",
+                        width="60px",
+                        height="60px",
+                        padding="0",
+                        _hover={
+                            "bg": "#ff3333",
+                            "transform": "scale(1.1)",
+                        },
+                        transition="all 0.2s ease-in-out",
+                    ),
+                    align_items="center",
+                    justify_content="center",
+                ),
+                width=rx.cond(
+                    ChatState.call_type == "video",
+                    "500px",
+                    "300px"
+                ),
+                height="400px",
+                bg="white",
+                border_radius="20px",
+                padding="30px",
+                position="fixed",
+                top="50%",
+                left="30%",
+                transform="translate(-50%, -50%)",
+                box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
+                z_index="1000",
+            ),
+        ),
+    )
 
 def call_popup() -> rx.Component:
     return rx.cond(
@@ -166,7 +238,7 @@ def call_popup() -> rx.Component:
                 padding="30px",
                 position="fixed",
                 top="50%",
-                left="50%",
+                left="70%",
                 transform="translate(-50%, -50%)",
                 box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
                 z_index="1000",
@@ -256,14 +328,14 @@ def video_call_popup() -> rx.Component:
                     align_items="center",
                     justify_content="center",
                 ),
-                width="800px",
+                width="500px",
                 height="400px",
                 bg="white",
                 border_radius="20px",
                 padding="30px",
                 position="fixed",
                 top="50%",
-                left="50%",
+                left="70%",
                 transform="translate(-50%, -50%)",
                 box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
                 z_index="1000",
@@ -474,6 +546,7 @@ def chat_page() -> rx.Component:
             height="100vh",
             overflow="hidden",
         ),
+        calling_popup(),
         call_popup(),
         video_call_popup(),
     )
