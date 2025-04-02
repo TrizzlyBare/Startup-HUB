@@ -1,5 +1,19 @@
 import reflex as rx
 from ..Matcher.SideBar import sidebar
+from ..webrtc import WebRTCState
+from ..webrtc.call_utils import (
+    start_audio_call,
+    start_video_call,
+    end_call as end_webrtc_call,
+    toggle_audio,
+    toggle_video
+)
+from ..webrtc.webrtc_components import (
+    calling_popup as webrtc_calling_popup,
+    call_popup as webrtc_call_popup,
+    video_call_popup as webrtc_video_call_popup,
+    incoming_call_popup
+)
 
 class ChatState(rx.State):
     # Initialize with type annotation as required
@@ -10,6 +24,7 @@ class ChatState(rx.State):
     ]
     message: str = ""
     current_chat_user: str = "Andy Collins"
+    current_chat_user_id: str = "user123"
     show_call_popup: bool = False
     show_video_popup: bool = False
     call_duration: int = 0
@@ -45,25 +60,39 @@ class ChatState(rx.State):
 
     @rx.event
     async def start_call(self):
-        self.show_call_popup = True
-        self.call_duration = 0
-        self.show_calling_popup = True
-        self.call_type = "audio"
+        # Use WebRTC for audio call
+        webrtc_state = WebRTCState.get_state()
+        webrtc_state.start_call(self.current_chat_user_id, is_video=False)
+        webrtc_state.add_participant(self.current_chat_user_id, self.current_chat_user)
+        webrtc_state.is_call_initiator = True
+        await webrtc_state.initialize_webrtc()
+        await webrtc_state.connect_to_signaling_server()
         yield
 
     @rx.event
-    async def end_call(self):
-        self.show_call_popup = False
-        self.show_calling_popup = False
+    async def start_video_call(self):
+        # Use WebRTC for video call
+        webrtc_state = WebRTCState.get_state()
+        webrtc_state.start_call(self.current_chat_user_id, is_video=True)
+        webrtc_state.add_participant(self.current_chat_user_id, self.current_chat_user)
+        webrtc_state.is_call_initiator = True
+        await webrtc_state.initialize_webrtc()
+        await webrtc_state.connect_to_signaling_server()
         yield
 
     @rx.event
     async def toggle_mute(self):
+        # Use WebRTC to toggle audio
+        await WebRTCState.toggle_audio()
+        # Update local state for UI
         self.is_muted = not self.is_muted
         yield
 
     @rx.event
     async def toggle_camera(self):
+        # Use WebRTC to toggle video
+        await WebRTCState.toggle_video()
+        # Update local state for UI
         self.is_camera_off = not self.is_camera_off
         yield
 
@@ -74,15 +103,8 @@ class ChatState(rx.State):
             yield rx.utils.sleep(1)
 
     @rx.event
-    async def start_video_call(self):
-        self.show_video_popup = True
-        self.show_calling_popup = True
-        self.call_type = "video"
-        yield
-
-    @rx.event
-    async def end_video_call(self):
-        self.show_video_popup = False
+    async def end_call(self):
+        self.show_call_popup = False
         self.show_calling_popup = False
         yield
 
@@ -292,7 +314,7 @@ def video_call_popup() -> rx.Component:
                         ),
                         rx.button(
                             rx.icon("phone-off"),
-                            on_click=ChatState.end_video_call,
+                            on_click=ChatState.end_call,
                             border_radius="50%",
                             bg="#ff4444",
                             color="gray",
@@ -547,7 +569,9 @@ def chat_page() -> rx.Component:
             height="100vh",
             overflow="hidden",
         ),
-        calling_popup(),
-        call_popup(),
-        video_call_popup(),
+        # WebRTC call components
+        webrtc_calling_popup(),
+        webrtc_call_popup(),
+        webrtc_video_call_popup(),
+        incoming_call_popup(),
     )
