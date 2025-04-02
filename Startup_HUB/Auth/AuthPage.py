@@ -1,6 +1,6 @@
 import reflex as rx
 from typing import Optional
-from . import api
+import httpx
 from .base_state import BaseState
 
 class AuthState(BaseState):
@@ -17,25 +17,15 @@ class AuthState(BaseState):
     error: Optional[str] = None
     success: Optional[str] = None
     
-    # Loading and connection states
+    # Loading state
     is_loading: bool = False
-    api_connected: bool = False
     
     # Profile picture field
     profile_picture: Optional[str] = None
     _upload_data: Optional[bytes] = None
 
-    async def check_api(self):
-        """Check if API is reachable."""
-        try:
-            await api.check_connection()
-            self.api_connected = True
-            self.error = None
-            return True
-        except Exception as e:
-            self.api_connected = False
-            self.error = "Cannot connect to server. Please try again later."
-            return False
+    # API endpoints
+    API_BASE_URL = "http://100.95.107.24:8000/api/authen"
     
     def clear_messages(self):
         """Clear error and success messages."""
@@ -59,35 +49,31 @@ class AuthState(BaseState):
         self.is_loading = True
         
         try:
-            # Check API connection first
-            if not await self.check_api():
-                return
-
             if not self.email or not self.password:
                 raise Exception("Please fill in all fields.")
             
-            response = await api.login(self.email, self.password)
-            
-            # Store token
-            self.set_token(response["token"])
-            self.success = "Login successful!"
-            
-            # Redirect to profile page after successful login
-            return rx.redirect("/profile")
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.API_BASE_URL}/login/",
+                    json={
+                        "email": self.email,
+                        "password": self.password
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # Store the token in local storage or state management
+                    self.success = "Login successful!"
+                    return rx.redirect("/profile")
+                else:
+                    error_data = response.json()
+                    raise Exception(error_data.get("error", "Login failed. Please try again."))
             
         except Exception as e:
             self.error = str(e)
         finally:
             self.is_loading = False
-
-    async def handle_profile_picture_upload(self, files: list[rx.UploadFile]):
-        """Handle profile picture upload."""
-        if not files:
-            return
-        
-        upload_file = files[0]
-        self.profile_picture = upload_file.filename
-        self._upload_data = await upload_file.read()
 
     async def handle_register(self):
         """Handle registration form submission."""
@@ -95,23 +81,55 @@ class AuthState(BaseState):
         self.is_loading = True
         
         try:
-            if not await self.check_api():
-                return
-
+            # Validate required fields
             if not all([self.first_name, self.last_name, self.username, self.email, self.password]):
                 raise Exception("Please fill in all fields.")
             
-            response = await api.register(
-                first_name=self.first_name,
-                last_name=self.last_name,
-                username=self.username,
-                email=self.email,
-                password=self.password,
-                profile_picture=self._upload_data
-            )
-            self.success = "Registration successful! Please login."
-            self.show_login = True
-            self.clear_form()
+            # Validate email format
+            if "@" not in self.email or "." not in self.email:
+                raise Exception("Please enter a valid email address.")
+            
+            # Validate password strength
+            if len(self.password) < 8:
+                raise Exception("Password must be at least 8 characters long.")
+            
+            # Prepare form data
+            form_data = {
+                "first_name": self.first_name,
+                "last_name": self.last_name,
+                "username": self.username,
+                "email": self.email,
+                "password": self.password
+            }
+            
+            # If there's a profile picture, add it to the form data
+            files = {}
+            if self._upload_data:
+                files["profile_picture"] = ("profile.jpg", self._upload_data, "image/jpeg")
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.API_BASE_URL}/register/",
+                    data=form_data,
+                    files=files
+                )
+                
+                if response.status_code == 201:
+                    self.success = "Registration successful! Please login."
+                    self.show_login = True
+                    self.clear_form()
+                else:
+                    error_data = response.json()
+                    # Handle specific error cases
+                    if "email" in error_data:
+                        raise Exception("This email is already registered. Please use a different email or login.")
+                    elif "username" in error_data:
+                        raise Exception("This username is already taken. Please choose a different username.")
+                    elif "password" in error_data:
+                        raise Exception("Password is too weak. Please use a stronger password.")
+                    else:
+                        error_message = error_data.get("error", "Registration failed. Please try again.")
+                        raise Exception(error_message)
             
         except Exception as e:
             self.error = str(e)
@@ -124,15 +142,11 @@ class AuthState(BaseState):
         self.is_loading = True
         
         try:
-            # Check API connection first
-            if not await self.check_api():
-                return
-
             if not self.email:
                 raise Exception("Please enter your email address.")
             
-            response = await api.forgot_password(self.email)
-            self.success = "Password reset instructions sent to your email."
+            # TODO: Implement forgot password endpoint
+            self.success = "If an account exists with this email, password reset instructions will be sent."
             
         except Exception as e:
             self.error = str(e)
@@ -268,25 +282,6 @@ def signup_form() -> rx.Component:
             class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-500"
         ),
 
-        # Profile picture upload
-        rx.vstack(
-            rx.upload(
-                rx.button(
-                    rx.cond(
-                        AuthState.profile_picture,
-                        rx.text(f"Selected: {AuthState.profile_picture}"),
-                        rx.text("Upload Profile Picture")
-                    ),
-                    class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 hover:bg-gray-50"
-                ),
-                on_drop=AuthState.handle_profile_picture_upload,
-                accept={".jpg", ".jpeg", ".png", ".gif"},
-                max_files=1,
-                class_name="w-full"
-            ),
-            width="100%"
-        ),
-
         rx.button(
             rx.cond(
                 AuthState.is_loading,
@@ -320,7 +315,7 @@ def login_page() -> rx.Component:
                 rx.cond(
                     AuthState.show_login,
                     rx.image(
-                        src="/mock-image.jpg",
+                        src="/Logo.png",
                         class_name="w-full h-full object-cover"
                     ),
                     rx.box(
@@ -340,7 +335,7 @@ def login_page() -> rx.Component:
                         class_name="flex items-center justify-center h-full bg-white"
                     ),
                     rx.image(
-                        src="/mock-image.jpg",
+                        src="/Logo.png",
                         class_name="w-full h-full object-cover"
                     )
                 ),
