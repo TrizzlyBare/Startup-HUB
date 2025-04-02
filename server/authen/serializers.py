@@ -27,6 +27,7 @@ class UserSerializer(serializers.ModelSerializer):
             "first_name": {"required": True},
             "last_name": {"required": True},
             "email": {"required": True},
+            "bio": {"required": True},
         }
 
     def get_profile_picture_url(self, obj):
@@ -51,6 +52,7 @@ class UserSerializer(serializers.ModelSerializer):
             password=validated_data["password"],
             first_name=validated_data["first_name"],
             last_name=validated_data["last_name"],
+            bio=validated_data["bio"],
         )
 
         # Add optional fields if they exist
@@ -84,5 +86,6 @@ class UserInfoSerializer(serializers.ModelSerializer):
             "last_name",
             "email",
             "profile_picture",
+            "bio",
         ]
         read_only_fields = ["id"]
