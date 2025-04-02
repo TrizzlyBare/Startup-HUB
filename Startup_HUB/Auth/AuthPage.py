@@ -1,5 +1,6 @@
 import reflex as rx
 from typing import Optional
+import httpx
 from .base_state import BaseState
 
 class AuthState(BaseState):
@@ -23,8 +24,8 @@ class AuthState(BaseState):
     profile_picture: Optional[str] = None
     _upload_data: Optional[bytes] = None
 
-    # Mock user database
-    _mock_users = []
+    # API endpoints
+    API_BASE_URL = "http://100.95.107.24:8000/api/authen"
     
     def clear_messages(self):
         """Clear error and success messages."""
@@ -43,7 +44,7 @@ class AuthState(BaseState):
         self.clear_messages()
 
     async def handle_login(self):
-        """Handle mock login form submission."""
+        """Handle login form submission."""
         self.clear_messages()
         self.is_loading = True
         
@@ -51,50 +52,84 @@ class AuthState(BaseState):
             if not self.email or not self.password:
                 raise Exception("Please fill in all fields.")
             
-            # Simulate API delay
-            await rx.sleep(1)
-            
-            # Mock validation
-            if self.email == "test@example.com" and self.password == "password":
-                self.success = "Login successful!"
-                return rx.redirect("/profile")
-            else:
-                raise Exception("Invalid email or password.")
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.API_BASE_URL}/login/",
+                    json={
+                        "email": self.email,
+                        "password": self.password
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # Store the token in local storage or state management
+                    self.success = "Login successful!"
+                    return rx.redirect("/profile")
+                else:
+                    error_data = response.json()
+                    raise Exception(error_data.get("error", "Login failed. Please try again."))
             
         except Exception as e:
             self.error = str(e)
         finally:
             self.is_loading = False
 
-
     async def handle_register(self):
-        """Handle mock registration form submission."""
+        """Handle registration form submission."""
         self.clear_messages()
         self.is_loading = True
         
         try:
+            # Validate required fields
             if not all([self.first_name, self.last_name, self.username, self.email, self.password]):
                 raise Exception("Please fill in all fields.")
             
-            # Simulate API delay
-            await rx.sleep(1)
+            # Validate email format
+            if "@" not in self.email or "." not in self.email:
+                raise Exception("Please enter a valid email address.")
             
-            # Mock validation
-            if self.email == "test@example.com":
-                raise Exception("Email already exists.")
+            # Validate password strength
+            if len(self.password) < 8:
+                raise Exception("Password must be at least 8 characters long.")
             
-            # Mock successful registration
-            self._mock_users.append({
+            # Prepare form data
+            form_data = {
                 "first_name": self.first_name,
                 "last_name": self.last_name,
                 "username": self.username,
                 "email": self.email,
-                "profile_picture": self.profile_picture
-            })
+                "password": self.password
+            }
             
-            self.success = "Registration successful! Please login."
-            self.show_login = True
-            self.clear_form()
+            # If there's a profile picture, add it to the form data
+            files = {}
+            if self._upload_data:
+                files["profile_picture"] = ("profile.jpg", self._upload_data, "image/jpeg")
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.API_BASE_URL}/register/",
+                    data=form_data,
+                    files=files
+                )
+                
+                if response.status_code == 201:
+                    self.success = "Registration successful! Please login."
+                    self.show_login = True
+                    self.clear_form()
+                else:
+                    error_data = response.json()
+                    # Handle specific error cases
+                    if "email" in error_data:
+                        raise Exception("This email is already registered. Please use a different email or login.")
+                    elif "username" in error_data:
+                        raise Exception("This username is already taken. Please choose a different username.")
+                    elif "password" in error_data:
+                        raise Exception("Password is too weak. Please use a stronger password.")
+                    else:
+                        error_message = error_data.get("error", "Registration failed. Please try again.")
+                        raise Exception(error_message)
             
         except Exception as e:
             self.error = str(e)
@@ -102,7 +137,7 @@ class AuthState(BaseState):
             self.is_loading = False
 
     async def handle_forgot_password(self):
-        """Handle mock forgot password request."""
+        """Handle forgot password request."""
         self.clear_messages()
         self.is_loading = True
         
@@ -110,9 +145,7 @@ class AuthState(BaseState):
             if not self.email:
                 raise Exception("Please enter your email address.")
             
-            # Simulate API delay
-            await rx.sleep(1)
-            
+            # TODO: Implement forgot password endpoint
             self.success = "If an account exists with this email, password reset instructions will be sent."
             
         except Exception as e:
