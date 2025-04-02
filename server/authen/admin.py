@@ -1,6 +1,11 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import CustomUser
+from .models import CustomUser, ContactLink
+
+
+class ContactLinkInline(admin.TabularInline):
+    model = ContactLink
+    extra = 1
 
 
 @admin.register(CustomUser)
@@ -10,18 +15,31 @@ class CustomUserAdmin(UserAdmin):
         "email",
         "first_name",
         "last_name",
+        "industry",
         "is_staff",
         "is_active",
     )
-    list_filter = ("is_staff", "is_active", "date_joined")
-    search_fields = ("username", "email", "first_name", "last_name")
+    list_filter = ("industry", "is_staff", "is_active", "date_joined")
+    search_fields = (
+        "username",
+        "email",
+        "first_name",
+        "last_name",
+        "skills",
+        "industry",
+    )
     ordering = ("username",)
+    inlines = [ContactLinkInline]
 
     fieldsets = (
         (None, {"fields": ("username", "password")}),
         (
             "Personal Info",
             {"fields": ("first_name", "last_name", "email", "profile_picture", "bio")},
+        ),
+        (
+            "Professional Info",
+            {"fields": ("industry", "experience", "skills")},
         ),
         (
             "Permissions",
@@ -54,3 +72,10 @@ class CustomUserAdmin(UserAdmin):
             },
         ),
     )
+
+
+@admin.register(ContactLink)
+class ContactLinkAdmin(admin.ModelAdmin):
+    list_display = ("user", "title", "url")
+    search_fields = ("user__username", "user__email", "title", "url")
+    list_filter = ("title",)

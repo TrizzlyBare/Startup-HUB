@@ -7,6 +7,21 @@ from django.dispatch import receiver
 from cloudinary.models import CloudinaryField
 
 
+class ContactLink(models.Model):
+    """Model to store contact links for users"""
+
+    user = models.ForeignKey(
+        "CustomUser", related_name="contact_links", on_delete=models.CASCADE
+    )
+    title = models.CharField(
+        max_length=100, help_text="Link title (e.g., LinkedIn, GitHub)"
+    )
+    url = models.URLField(help_text="URL to contact resource")
+
+    def __str__(self):
+        return f"{self.title}: {self.url}"
+
+
 class CustomUser(AbstractUser):
     email = models.EmailField(unique=True)
     profile_picture = CloudinaryField(
@@ -24,6 +39,29 @@ class CustomUser(AbstractUser):
         null=True,
         help_text="A short description about yourself",
     )
+
+    # New fields matching UserInfoSerializer
+    industry = models.CharField(
+        "industry",
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Your industry or sector",
+    )
+
+    experience = models.CharField(
+        "experience",
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Your years of experience",
+    )
+
+    skills = models.TextField(
+        "skills", blank=True, null=True, help_text="Comma-separated list of your skills"
+    )
+
+    # Contact links are now handled through the ContactLink model
 
     groups = models.ManyToManyField(
         "auth.Group",

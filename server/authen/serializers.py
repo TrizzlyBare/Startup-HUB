@@ -1,11 +1,18 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
-from .models import CustomUser
+from .models import CustomUser, ContactLink
 from cloudinary.utils import cloudinary_url
+
+
+class ContactLinkSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContactLink
+        fields = ["id", "title", "url"]
 
 
 class UserSerializer(serializers.ModelSerializer):
     profile_picture_url = serializers.SerializerMethodField()
+    contact_links = ContactLinkSerializer(many=True, read_only=True)
 
     class Meta:
         model = CustomUser
@@ -19,6 +26,7 @@ class UserSerializer(serializers.ModelSerializer):
             "profile_picture",
             "profile_picture_url",
             "bio",
+            "contact_links",
         ]
         extra_kwargs = {
             "password": {"write_only": True},
@@ -64,6 +72,8 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserInfoSerializer(serializers.ModelSerializer):
+    contact_links = ContactLinkSerializer(many=True, required=False)
+
     class Meta:
         model = CustomUser
         fields = [
@@ -74,8 +84,30 @@ class UserInfoSerializer(serializers.ModelSerializer):
             "email",
             "profile_picture",
             "bio",
+            "industry",
+            "experience",
+            "skills",
+            "contact_links",
         ]
         read_only_fields = ["id"]
+
+    def update(self, instance, validated_data):
+        """Handle nested contact links update"""
+        contact_links_data = validated_data.pop("contact_links", None)
+
+        # Update the user instance with the remaining validated data
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update contact links if provided
+        if contact_links_data is not None:
+            # Remove existing contact links and create new ones
+            instance.contact_links.all().delete()
+            for link_data in contact_links_data:
+                ContactLink.objects.create(user=instance, **link_data)
+
+        return instance
 
 
 class LoginSerializer(serializers.Serializer):
