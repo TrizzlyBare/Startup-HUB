@@ -37,15 +37,15 @@ class UserSerializer(serializers.ModelSerializer):
         return None
 
     def validate_password(self, value):
-        # Use Django's password validation
+        """Validate the password using Django's built-in password validators"""
         validate_password(value)
         return value
 
     def create(self, validated_data):
-        # Remove profile picture from validated_data if it's None
+        """Create a new user instance with the validated data"""
         profile_picture = validated_data.pop("profile_picture", None)
 
-        # Create user with required fields
+        # Create the user with the required fields
         user = CustomUser.objects.create_user(
             username=validated_data["username"],
             email=validated_data["email"],
@@ -62,19 +62,6 @@ class UserSerializer(serializers.ModelSerializer):
         user.save()
         return user
 
-    def update(self, instance, validated_data):
-        # Handle password separately
-        if "password" in validated_data:
-            password = validated_data.pop("password")
-            instance.set_password(password)
-
-        # Update all other fields
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-
-        instance.save()
-        return instance
-
 
 class UserInfoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -89,3 +76,8 @@ class UserInfoSerializer(serializers.ModelSerializer):
             "bio",
         ]
         read_only_fields = ["id"]
+
+
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    password = serializers.CharField(required=True, style={"input_type": "password"})

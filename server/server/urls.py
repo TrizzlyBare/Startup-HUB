@@ -15,17 +15,28 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+"""
+URL configuration for server project.
+"""
 from django.contrib import admin
 from django.urls import path, include
-
-# urlpatterns = [
-#     path("admin/", admin.site.urls),
-# ]
+from django.conf import settings
+from django.conf.urls.static import static
 
 urlpatterns = [
     path("api/admin/", admin.site.urls),
     path("api/startup-profile/", include("myapp.urls")),
-    path("api/webcall/", include("webcall.urls")),  # Include webcall URLs
-    path("api/authen/", include("authen.urls")),  # Include authen URLs
-    path("api/message/", include("message.urls")),  # Include message URLs
+    path("api/webcall/", include("webcall.urls")),
+    path(
+        "api/auth/", include("authen.urls")
+    ),  # Changed from authen/ to auth/ for clarity
+    path("api/message/", include("message.urls")),
+    # Add direct browser-accessible API authentication URLs
+    path(
+        "api/", include("rest_framework.urls", namespace="rest_framework")
+    ),  # Provides login/logout views for the browsable API
 ]
+
+# Add media URL configuration for profile pictures if needed
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
