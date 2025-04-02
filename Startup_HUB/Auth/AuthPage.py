@@ -25,7 +25,7 @@ class AuthState(BaseState):
     _upload_data: Optional[bytes] = None
 
     # API endpoints
-    API_BASE_URL = "http://100.95.107.24:8000/api/authen"
+    API_BASE_URL = "http://127.0.0.1:8000/api/auth"
     
     def clear_messages(self):
         """Clear error and success messages."""

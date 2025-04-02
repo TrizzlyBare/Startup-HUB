@@ -19,8 +19,9 @@ class State(rx.State):
     skills: list = ["Product Management", "UX/UI", "Marketing"]
     new_skill: str = ""
     
-    # Project
-    project: str = "SE Library"
+    # Projects (list of projects)
+    projects: list = ["SE Library"]
+    new_project: str = ""
     
     # Online presence links
     linkedin_link: str = ""
@@ -39,10 +40,23 @@ class State(rx.State):
         """Toggle edit form visibility."""
         self.show_edit_form = not self.show_edit_form
 
-    def save_changes(self):
+    def save_changes(self, form_data: dict):
         """Save profile changes."""
+        # Update profile data from form
+        self.first_name = form_data.get("first_name", self.first_name)
+        self.last_name = form_data.get("last_name", self.last_name)
+        self.job_title = form_data.get("job_title", self.job_title)
+        self.about = form_data.get("about", self.about)
+        self.category = form_data.get("category", self.category)
+        self.experience_level = form_data.get("experience_level", self.experience_level)
+        self.linkedin_link = form_data.get("linkedin_link", self.linkedin_link)
+        self.github_link = form_data.get("github_link", self.github_link)
+        self.portfolio_link = form_data.get("portfolio_link", self.portfolio_link)
+        
+        # Compose full name
         self.name = f"{self.first_name} {self.last_name}"
-        self.edit_mode = False
+        
+        # Close the form modal
         self.show_edit_form = False
 
     def cancel_edit(self):
@@ -84,6 +98,10 @@ class State(rx.State):
     def set_new_skill(self, value: str):
         """Set new skill to be added."""
         self.new_skill = value
+        
+    def set_new_project(self, value: str):
+        """Set new project to be added."""
+        self.new_project = value
 
     def add_skill(self, key_event=None):
         """Add a new skill to the skills list.
@@ -101,6 +119,23 @@ class State(rx.State):
         """Remove a skill from the skills list."""
         if skill in self.skills:
             self.skills.remove(skill)
+            
+    def add_project(self, key_event=None):
+        """Add a new project to the projects list.
+        
+        Args:
+            key_event: The keyboard event, if triggered by a key press.
+        """
+        # Only proceed if it's not a key event or if the key is Enter
+        if key_event is None or key_event.key == "Enter":
+            if self.new_project and self.new_project not in self.projects:
+                self.projects.append(self.new_project)
+                self.new_project = ""
+
+    def remove_project(self, project: str):
+        """Remove a project from the projects list."""
+        if project in self.projects:
+            self.projects.remove(project)
 
     @rx.var
     def has_about(self) -> bool:
@@ -111,6 +146,13 @@ def skill_badge(skill: str) -> rx.Component:
     """Create a badge for a skill."""
     return rx.badge(
         skill,
+        class_name="bg-gray-100 text-gray-800 px-3 py-1 rounded-lg m-1"
+    )
+
+def project_badge(project: str) -> rx.Component:
+    """Create a badge for a project."""
+    return rx.badge(
+        project,
         class_name="bg-gray-100 text-gray-800 px-3 py-1 rounded-lg m-1"
     )
 
@@ -177,7 +219,12 @@ def profile_display() -> rx.Component:
             
             # Skills Section
             rx.box(
-                rx.heading("Skill", size="5", margin_bottom="2"),
+                rx.hstack(
+                    rx.heading("Skills", size="5"),
+                    rx.spacer(),
+                    width="100%",
+                    margin_bottom="2",
+                ),
                 rx.flex(
                     rx.foreach(
                         State.skills,
@@ -191,12 +238,25 @@ def profile_display() -> rx.Component:
                 class_name="bg-white rounded-lg shadow"
             ),
             
-            # Project Section
+            # Projects Section
             rx.box(
-                rx.heading("Project", size="5", margin_bottom="2"),
-                rx.badge(
-                    State.project,
-                    class_name="bg-gray-100 text-gray-800 px-3 py-1 rounded-lg"
+                rx.hstack(
+                    rx.heading("Projects", size="5"),
+                    rx.spacer(),
+                    width="100%",
+                    margin_bottom="2",
+                ),
+                rx.cond(
+                    State.projects.length() > 0,
+                    rx.flex(
+                        rx.foreach(
+                            State.projects,
+                            project_badge
+                        ),
+                        wrap="wrap",
+                        gap="2"
+                    ),
+                    rx.text("No projects added yet.", class_name="text-gray-500 italic")
                 ),
                 width="100%",
                 padding="4",
@@ -257,110 +317,80 @@ def profile_display() -> rx.Component:
     )
 
 def edit_form() -> rx.Component:
-    """Render the edit form."""
-    return rx.box(
-        rx.container(
-            rx.card(
-                rx.vstack(
-                    # Header
-                    rx.heading("Create Your Profile", size="7", class_name="text-sky-600"),
-                    rx.text("Complete your profile to connect with startups and founders", color="gray"),
-                    
-                    # Profile Photo Upload
+    """Render the edit form as a modal dialog."""
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title(
+                "Edit Profile", 
+                class_name="text-3xl font-bold mb-4 text-blue-600",
+            ),
+            rx.dialog.description(
+                rx.form(
                     rx.vstack(
-                        rx.box(
-                            rx.cond(
-                                AuthState.profile_picture,
-                                rx.image(
-                                    src=AuthState.profile_picture,
-                                    width="100%",
-                                    height="100%",
-                                    object_fit="cover",
-                                    border_radius="full",
+                        # Profile Photo Upload
+                        rx.vstack(
+                            rx.box(
+                                rx.cond(
+                                    AuthState.profile_picture,
+                                    rx.image(
+                                        src=AuthState.profile_picture,
+                                        width="100%",
+                                        height="100%",
+                                        object_fit="cover",
+                                        border_radius="full",
+                                    ),
+                                    rx.center(
+                                        rx.icon("image", color="gray", size=24),
+                                        width="100%",
+                                        height="100%",
+                                        border_radius="full"
+                                    )
                                 ),
-                                rx.center(
-                                    rx.icon("image", color="gray", size=24),
-                                    width="100%",
-                                    height="100%",
-                                    border_radius="full"
-                                )
+                                width="120px",
+                                height="120px",
+                                border_radius="full",
+                                bg="gray.100",
+                                border="2px solid",
+                                border_color="gray.200",
+                                overflow="hidden"
                             ),
-                            width="120px",
-                            height="120px",
-                            border_radius="full",
-                            bg="gray.100",
-                            border="2px solid",
-                            border_color="gray.200",
-                            overflow="hidden"
-                        ),
-                        rx.button(
-                            rx.hstack(
-                                rx.icon("plus", size=16),
-                                rx.text("Upload profile photo"),
-                                spacing="1"
+                            rx.button(
+                                rx.hstack(
+                                    rx.icon("plus", size=16),
+                                    rx.text("Upload profile photo"),
+                                    spacing="1"
+                                ),
+                                class_name="px-4 py-2 bg-gray-200 text-gray-700 hover:bg-gray-300 rounded-lg mt-2",
                             ),
-                            variant="outline",
-                            size="2",
-                            color_scheme="blue",
-                            margin_top="2",
+                            align="center",
+                            spacing="2",
+                            margin_bottom="6"
                         ),
-                        align="center",
-                        spacing="2",
-                        margin_bottom="6"
-                    ),
-                    
-                    # Name Fields
-                    rx.hstack(
-                        rx.vstack(
-                            rx.text("First Name", font_weight="medium", size="2", align="left", width="100%"),
-                            rx.input(
-                                placeholder="First Name",
-                                value=State.first_name,
-                                on_change=State.set_first_name,
-                                width="100%"
-                            ),
-                            width="100%",
-                            align_items="start"
-                        ),
-                        rx.vstack(
-                            rx.text("Last Name", font_weight="medium", size="2", align="left", width="100%"),
-                            rx.input(
-                                placeholder="Last Name",
-                                value=State.last_name,
-                                on_change=State.set_last_name,
-                                width="100%"
-                            ),
-                            width="100%",
-                            align_items="start"
-                        ),
-                        width="100%",
-                        spacing="4"
-                    ),
-                    
-                    # Industry & Experience
-                    rx.vstack(
-                        rx.heading("Industry & Experience", size="5", margin_top="6", margin_bottom="2"),
+                        
+                        # Name Fields
                         rx.hstack(
                             rx.vstack(
-                                rx.text("Industry", font_weight="medium", size="2", align="left", width="100%"),
-                                rx.select(
-                                    ["Technology", "Finance", "Healthcare", "Education", "E-commerce", "Other"],
-                                    placeholder="Select industry",
-                                    value=State.category,
-                                    on_change=State.set_category,
-                                    width="100%"
+                                rx.text("First Name", font_weight="medium", align="left", width="100%"),
+                                rx.input(
+                                    placeholder="First Name",
+                                    name="first_name",
+                                    required=True,
+                                    value=State.first_name,
+                                    on_change=State.set_first_name,
+                                    class_name="w-full p-2 border rounded-lg bg-white",
                                 ),
                                 width="100%",
                                 align_items="start"
                             ),
                             rx.vstack(
-                                rx.text("Years of Experience", font_weight="medium", size="2", align="left", width="100%"),
-                                rx.select(
-                                    ["< 1 year", "1-3 years", "3-5 years", "5-10 years", "10+ years"],
-                                    placeholder="Select experience",
-                                    value=State.experience_level,
-                                    on_change=State.set_experience_level,
-                                    width="100%"
+                                rx.text("Last Name", font_weight="medium", align="left", width="100%"),
+                                rx.input(
+                                    placeholder="Last Name",
+                                    name="last_name",
+                                    required=True,
+                                    value=State.last_name,
+                                    on_change=State.set_last_name,
+                                    class_name="w-full p-2 border rounded-lg bg-white",
                                 ),
                                 width="100%",
                                 align_items="start"
@@ -368,27 +398,61 @@ def edit_form() -> rx.Component:
                             width="100%",
                             spacing="4"
                         ),
-                        width="100%",
-                        align_items="start"
-                    ),
-                    
-                    # About Section
-                    rx.vstack(
-                        rx.heading("About", size="5", margin_top="6", margin_bottom="2"),
+                        
+                        # Job Title Field
+                        rx.text("Job Title", font_weight="medium", align="left", width="100%"),
+                        rx.input(
+                            placeholder="Your job title",
+                            name="job_title",
+                            value=State.job_title,
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                        ),
+                        
+                        # Industry & Experience
+                        rx.hstack(
+                            rx.vstack(
+                                rx.text("Industry", font_weight="medium", align="left", width="100%"),
+                                rx.select(
+                                    ["Technology", "Finance", "Healthcare", "Education", "E-commerce", "Other"],
+                                    placeholder="Select industry",
+                                    name="category",
+                                    value=State.category,
+                                    on_change=State.set_category,
+                                    class_name="w-full p-2 border rounded-lg bg-white",
+                                ),
+                                width="100%",
+                                align_items="start"
+                            ),
+                            rx.vstack(
+                                rx.text("Years of Experience", font_weight="medium", align="left", width="100%"),
+                                rx.select(
+                                    ["< 1 year", "1-3 years", "3-5 years", "5-10 years", "10+ years"],
+                                    placeholder="Select experience",
+                                    name="experience_level",
+                                    value=State.experience_level,
+                                    on_change=State.set_experience_level,
+                                    class_name="w-full p-2 border rounded-lg bg-white",
+                                ),
+                                width="100%",
+                                align_items="start"
+                            ),
+                            width="100%",
+                            spacing="4"
+                        ),
+                        
+                        # About Section
+                        rx.text("About", font_weight="medium", align="left", width="100%"),
                         rx.text_area(
                             placeholder="Tell us about yourself...",
+                            name="about",
                             value=State.about,
                             on_change=State.set_about,
-                            width="100%",
-                            min_height="120px"
+                            height="120px",
+                            class_name="w-full p-2 border rounded-lg bg-white",
                         ),
-                        width="100%",
-                        align_items="start"
-                    ),
-                    
-                    # Skills Section
-                    rx.vstack(
-                        rx.heading("Skills", size="5", margin_top="6", margin_bottom="2"),
+                        
+                        # Skills Section
+                        rx.text("Skills", font_weight="medium", align="left", width="100%", margin_top="4"),
                         rx.flex(
                             rx.foreach(
                                 State.skills,
@@ -401,114 +465,145 @@ def edit_form() -> rx.Component:
                                         color="gray",
                                         size=16
                                     ),
-                                    bg="blue.100",
-                                    color="blue.700",
-                                    border_radius="full",
-                                    padding_x="3",
-                                    padding_y="1",
-                                    margin="1"
+                                    class_name="bg-blue-100 text-blue-700 px-3 py-1 rounded-full m-1",
                                 )
                             ),
-                            wrap="wrap"
+                            wrap="wrap",
+                            margin_bottom="2",
                         ),
-                        rx.input(
-                            placeholder="Add more skills...",
-                            value=State.new_skill,
-                            on_change=State.set_new_skill,
-                            on_key_down=State.add_skill,
-                            width="100%",
-                            margin_top="2"
-                        ),
-                        width="100%",
-                        align_items="start"
-                    ),
-                    
-                    # Online Presence
-                    rx.vstack(
-                        rx.heading("Online Presence", size="5", margin_top="6", margin_bottom="2"),
                         rx.hstack(
-                            rx.icon("linkedin", color="gray"),
+                            rx.input(
+                                placeholder="Add more skills...",
+                                name="new_skill",
+                                value=State.new_skill,
+                                on_change=State.set_new_skill,
+                                on_key_down=State.add_skill,
+                                class_name="w-full p-2 border rounded-lg bg-white",
+                            ),
+                            rx.button(
+                                "Add",
+                                on_click=State.add_skill,
+                                class_name="bg-sky-600 text-white px-4 py-1 ml-2 rounded-lg",
+                            ),
+                            width="100%",
+                        ),
+                        
+                        # Projects Section
+                        rx.text("Projects", font_weight="medium", align="left", width="100%", margin_top="4"),
+                        rx.flex(
+                            rx.foreach(
+                                State.projects,
+                                lambda project: rx.hstack(
+                                    rx.text(project),
+                                    rx.icon(
+                                        "x",
+                                        cursor="pointer",
+                                        on_click=lambda p=project: State.remove_project(p),
+                                        color="gray",
+                                        size=16
+                                    ),
+                                    class_name="bg-green-100 text-green-700 px-3 py-1 rounded-full m-1",
+                                )
+                            ),
+                            wrap="wrap",
+                            margin_bottom="2",
+                        ),
+                        rx.hstack(
+                            rx.input(
+                                placeholder="Add project...",
+                                name="new_project",
+                                value=State.new_project,
+                                on_change=State.set_new_project,
+                                on_key_down=State.add_project,
+                                class_name="w-full p-2 border rounded-lg bg-white",
+                            ),
+                            rx.button(
+                                "Add",
+                                on_click=State.add_project,
+                                class_name="bg-sky-600 text-white px-4 py-1 ml-2 rounded-lg",
+                            ),
+                            width="100%",
+                        ),
+                        
+                        # Online Presence
+                        rx.text("Online Presence", font_weight="medium", align="left", width="100%", margin_top="4"),
+                        rx.hstack(
+                            rx.icon("linkedin", color="blue.500"),
                             rx.input(
                                 placeholder="LinkedIn URL",
+                                name="linkedin_link",
                                 value=State.linkedin_link,
                                 on_change=State.set_linkedin_link,
-                                width="100%"
+                                class_name="w-full p-2 border rounded-lg bg-white",
                             ),
                             width="100%"
                         ),
                         rx.hstack(
-                            rx.icon("github", color="gray"),
+                            rx.icon("github", color="gray.800"),
                             rx.input(
                                 placeholder="GitHub URL",
+                                name="github_link",
                                 value=State.github_link,
                                 on_change=State.set_github_link,
-                                width="100%"
+                                class_name="w-full p-2 border rounded-lg bg-white",
                             ),
                             width="100%"
                         ),
                         rx.hstack(
-                            rx.icon("globe", color="gray"),
+                            rx.icon("globe", color="green.500"),
                             rx.input(
                                 placeholder="Portfolio Website",
+                                name="portfolio_link",
                                 value=State.portfolio_link,
                                 on_change=State.set_portfolio_link,
-                                width="100%"
+                                class_name="w-full p-2 border rounded-lg bg-white",
                             ),
                             width="100%"
                         ),
-                        width="100%",
-                        align_items="start",
-                        spacing="4"
-                    ),
-                    
-                    # Action Buttons
-                    rx.hstack(
-                        rx.button(
-                            "Cancel",
-                            on_click=State.cancel_edit,
-                            variant="outline",
-                            color_scheme="gray",
-                            size="2"
+                        
+                        # Buttons
+                        rx.hstack(
+                            rx.dialog.close(
+                                rx.button(
+                                    "Cancel",
+                                    class_name="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg",
+                                ),
+                            ),
+                            rx.dialog.close(
+                                rx.button(
+                                    "Save Profile",
+                                    type="submit",
+                                    class_name="px-6 py-2 bg-sky-600 text-white hover:bg-sky-700 rounded-lg",
+                                ),
+                            ),
+                            spacing="4",
+                            justify="end",
+                            width="100%",
+                            margin_top="6",
                         ),
-                        rx.button(
-                            "Save Profile",
-                            on_click=State.save_changes,
-                            color_scheme="blue",
-                            size="2"
-                        ),
-                        margin_top="8",
-                        width="100%",
-                        justify="end",
-                        spacing="4"
+                        spacing="6",
+                        padding="4",
                     ),
-                    
-                    width="100%",
-                    spacing="4",
-                    align_items="start",
-                    padding="6"
+                    on_submit=State.save_changes,
+                    reset_on_submit=False,
                 ),
                 width="100%",
-                max_width="600px",
-                margin="auto",
-                border_radius="lg",
-                shadow="lg"
             ),
-            padding_y="8",
-            center_content=True,
-            width="100%"
+            max_width="600px",
+            width="90vw",
+            class_name="bg-white p-8 rounded-xl shadow-2xl border border-gray-200",
         ),
-        class_name="bg-white rounded-lg shadow-lg p-6 w-full max-w-4xl mx-auto"
+        open=State.show_edit_form,
     )
 
 def profile_page() -> rx.Component:
     """Render the profile page."""
     return rx.box(
         rx.center(
-            rx.cond(
-                State.show_edit_form,
-                edit_form(),
-                profile_display()
-            ),
+            # Always display the profile
+            profile_display(),
+            # Include the edit form modal
+            edit_form(),
             width="100%",
             padding="4",
             height="100vh"
