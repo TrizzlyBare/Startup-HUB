@@ -17,6 +17,14 @@ class CustomUser(AbstractUser):
         transformation={"width": 500, "height": 500, "crop": "fill", "gravity": "face"},
     )
 
+    bio = models.TextField(
+        "bio",
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="A short description about yourself",
+    )
+
     groups = models.ManyToManyField(
         "auth.Group",
         verbose_name="groups",
