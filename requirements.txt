@@ -1,2 +1,7 @@
-reflex==0.6.8
-channels-redis==4.1.0
+reflex>=0.7.5
+reflex-chakra>=0.6.3 
+python-dotenv>=1.0.0
+aiortc>=1.11.0
+aioice>=0.9.0
+python-socketio>=5.12.1
+python-engineio>=4.11.2

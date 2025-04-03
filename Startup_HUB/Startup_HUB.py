@@ -1,15 +1,45 @@
 import reflex as rx
 import reflex_chakra as rc
+from Startup_HUB.webrtc.webrtc_state import WebRTCState
 from .Auth.AuthPage import login_page, AuthState
+from .chat.Chat_Page import chat_page
 from .Profile.ProfilePage import profile_page
 from .Matcher.Matcher_Page import match_page, MatchState
+from .Search.search_page import search_page
+from .Search.my_projects_page import my_projects_page
+from .webrtc.webrtc_components import (
+    calling_popup,
+    call_popup, 
+    video_call_popup,
+    incoming_call_popup
+)
 
 class State(rx.State):
-    """Base state for the app."""
-    pass
-    
+    """The app state."""
+    count: int = 0
+    current_user_id: str = "demo123"
+    current_username: str = "Demo User"
+
+    def increment(self):
+        """Increment the count."""
+        self.count += 1
+
+# For version compatibility, we'll need to use a workaround for adding scripts
+# Create a custom index page with embedded scripts
+def custom_index():
+    return rx.fragment(
+        rx.script("""
+        window.__USER_ID__ = 'demo123'; 
+        window.__USER_NAME__ = 'Demo User';
+        console.log('Set user ID:', window.__USER_ID__);
+        console.log('Set username:', window.__USER_NAME__);
+        """),
+        rx.script(src="/static/js/webrtc.js"),
+        index(),
+    )
 
 def index() -> rx.Component:
+    """The main page of the app."""
     return rx.vstack(
         # Navbar
         rx.box(
@@ -99,7 +129,12 @@ def index() -> rx.Component:
 
 # Initialize the app with states
 app = rx.App()
-app.add_page(index)
+
+
+app.add_page(custom_index, route="/")
 app.add_page(login_page, route="/login")
 app.add_page(profile_page, route="/profile")
 app.add_page(match_page, route="/match")
+app.add_page(chat_page, route="/chat")
+app.add_page(search_page, route="/search")
+app.add_page(my_projects_page, route="/my-projects")

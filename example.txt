@@ -1,0 +1,7 @@
+SERVER_URL="http://(server_ip):(server_port)"
+
+use tailscale command to get the server ip and port
+
+tailscale ip
+
+

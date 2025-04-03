@@ -8,10 +8,6 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.conf import settings
 
-from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
-from .models import Room, Participant
-
 
 @login_required
 def create_room(request):
