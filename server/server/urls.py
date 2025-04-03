@@ -35,6 +35,7 @@ urlpatterns = [
     path(
         "api/", include("rest_framework.urls", namespace="rest_framework")
     ),  # Provides login/logout views for the browsable API
+    path("api/matches/", include("matches.urls")),
 ]
 
 # Add media URL configuration for profile pictures if needed
