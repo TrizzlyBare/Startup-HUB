@@ -9,14 +9,20 @@ https://docs.djangoproject.com/en/5.1/howto/deployment/asgi/
 
 # asgi.py
 import os
+import django
 from django.core.asgi import get_asgi_application
+
+# Set up Django BEFORE importing routing modules
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.settings")
+django.setup()
+
+# Now import routing modules
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
 import message.routing
 import webcall.routing
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.settings")
-
+# Initialize Django ASGI application
 django_asgi_app = get_asgi_application()
 
 application = ProtocolTypeRouter(
@@ -30,6 +36,5 @@ application = ProtocolTypeRouter(
         ),
     }
 )
-
 
 ASGI_APPLICATION = "server.asgi.application"
