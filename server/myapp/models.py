@@ -64,6 +64,14 @@ class StartupIdea(models.Model):
         help_text="Your role in this startup idea",
     )
 
+    # Add members field - a many-to-many relationship to users
+    members = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name="member_startups",
+        blank=True,
+        help_text="Team members for this startup idea",
+    )
+
     website = models.URLField(blank=True)
     funding_stage = models.CharField(max_length=100, blank=True)
     investment_needed = models.DecimalField(
@@ -87,6 +95,14 @@ class StartupIdea(models.Model):
         if not self.skills:
             return []
         return [item.strip() for item in self.skills.split(",")]
+
+    @property
+    def member_count(self):
+        """Return the count of members including the owner"""
+        # Add 1 to include the owner (if the owner isn't already in members)
+        return self.members.count() + (
+            0 if self.members.filter(id=self.user.id).exists() else 1
+        )
 
     class Meta:
         ordering = ["-created_at"]

@@ -6,6 +6,37 @@ from django.contrib.auth import get_user_model
 CustomUser = get_user_model()
 
 
+class UserBasicSerializer(serializers.ModelSerializer):
+    """Basic serializer for user information"""
+
+    profile_picture_url = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = CustomUser
+        fields = [
+            "id",
+            "username",
+            "profile_picture",
+            "profile_picture_url",
+            "skills",
+            "industry",
+        ]
+        read_only_fields = [
+            "id",
+            "username",
+            "profile_picture",
+            "profile_picture_url",
+            "skills",
+            "industry",
+        ]
+        extra_kwargs = {"profile_picture": {"write_only": True}}
+
+    def get_profile_picture_url(self, obj):
+        if obj.profile_picture:
+            return obj.profile_picture.url
+        return None
+
+
 class StartupImageSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
 
@@ -23,13 +54,24 @@ class StartupImageSerializer(serializers.ModelSerializer):
 class StartupIdeaSerializer(serializers.ModelSerializer):
     images = StartupImageSerializer(many=True, read_only=True)
     pitch_deck_url = serializers.SerializerMethodField()
+
+    # Owner information
     username = serializers.CharField(source="user.username", read_only=True)
     user_profile_picture = serializers.SerializerMethodField(read_only=True)
     user_role_display = serializers.CharField(
         source="get_user_role_display", read_only=True
     )
+
+    # Fields for lists
     looking_for_list = serializers.SerializerMethodField()
     skills_list = serializers.SerializerMethodField()
+
+    # Member information
+    members = UserBasicSerializer(many=True, read_only=True)
+    member_count = serializers.IntegerField(read_only=True)
+
+    # Explicitly identify the owner
+    owner = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = StartupIdea
@@ -37,6 +79,7 @@ class StartupIdeaSerializer(serializers.ModelSerializer):
             "id",
             "username",
             "user_profile_picture",
+            "owner",
             "name",
             "stage",
             "user_role",
@@ -53,6 +96,8 @@ class StartupIdeaSerializer(serializers.ModelSerializer):
             "website",
             "funding_stage",
             "investment_needed",
+            "members",
+            "member_count",
             "created_at",
             "updated_at",
         ]
@@ -63,6 +108,9 @@ class StartupIdeaSerializer(serializers.ModelSerializer):
             "user_role_display",
             "skills_list",
             "looking_for_list",
+            "owner",
+            "member_count",
+            "members",
             "created_at",
             "updated_at",
         ]
@@ -83,6 +131,16 @@ class StartupIdeaSerializer(serializers.ModelSerializer):
 
     def get_skills_list(self, obj):
         return obj.skills_list
+
+    def get_owner(self, obj):
+        """Return basic information about the owner"""
+        return {
+            "id": obj.user.id,
+            "username": obj.user.username,
+            "profile_picture": (
+                obj.user.profile_picture.url if obj.user.profile_picture else None
+            ),
+        }
 
     # Convert lists to comma-separated strings when saving
     def validate_looking_for(self, value):

@@ -7,9 +7,16 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.exceptions import PermissionDenied
 from django.db.models import Q
 import cloudinary
+from django.contrib.auth import get_user_model
 
 from .models import StartupIdea, StartupImage
-from .serializers import StartupIdeaSerializer, StartupImageSerializer
+from .serializers import (
+    StartupIdeaSerializer,
+    StartupImageSerializer,
+    UserBasicSerializer,
+)
+
+User = get_user_model()
 
 
 class StartupIdeaViewSet(viewsets.ModelViewSet):
@@ -28,7 +35,9 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """Associate the new idea with the current user"""
-        serializer.save(user=self.request.user)
+        startup = serializer.save(user=self.request.user)
+        # Automatically add the owner as a member if needed
+        startup.members.add(self.request.user)
 
     def perform_update(self, serializer):
         """Ensure users can only update their own ideas"""
@@ -103,6 +112,15 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
     def my_ideas(self, request):
         """Get all startup ideas for the current user"""
         ideas = StartupIdea.objects.filter(user=request.user)
+        serializer = self.get_serializer(ideas, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def my_memberships(self, request):
+        """Get all startup ideas where the current user is a member but not the owner"""
+        ideas = StartupIdea.objects.filter(members=request.user).exclude(
+            user=request.user
+        )
         serializer = self.get_serializer(ideas, many=True)
         return Response(serializer.data)
 
@@ -198,3 +216,163 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
             return Response(
                 {"error": "Image not found"}, status=status.HTTP_404_NOT_FOUND
             )
+
+    @action(detail=True, methods=["post"])
+    def add_member(self, request, pk=None):
+        """Add a member to the startup idea"""
+        idea = self.get_object()
+
+        # Check if user has permission to add members to this idea
+        if idea.user != request.user:
+            return Response(
+                {"error": "You do not have permission to add members to this idea"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        username = request.data.get("username")
+
+        if not username:
+            return Response(
+                {"error": "No username provided"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            user = User.objects.get(username=username)
+
+            # Check if user is already a member
+            if idea.members.filter(id=user.id).exists():
+                return Response(
+                    {"error": "User is already a member of this startup idea"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Add user to members
+            idea.members.add(user)
+
+            return Response(
+                {"message": f"{username} added as a member successfully"},
+                status=status.HTTP_200_OK,
+            )
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=True, methods=["post"])
+    def remove_member(self, request, pk=None):
+        """Remove a member from the startup idea"""
+        idea = self.get_object()
+
+        # Check if user has permission to remove members from this idea
+        if idea.user != request.user:
+            return Response(
+                {
+                    "error": "You do not have permission to remove members from this idea"
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        user_id = request.data.get("user_id")
+
+        if not user_id:
+            return Response(
+                {"error": "No user ID provided"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            user = User.objects.get(id=user_id)
+
+            # Check if user is a member
+            if not idea.members.filter(id=user.id).exists():
+                return Response(
+                    {"error": "User is not a member of this startup idea"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Prevent removing the owner from members
+            if user.id == idea.user.id:
+                return Response(
+                    {"error": "Cannot remove the owner from members"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Remove user from members
+            idea.members.remove(user)
+
+            return Response(
+                {"message": f"{user.username} removed as a member successfully"},
+                status=status.HTTP_200_OK,
+            )
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=True, methods=["get"])
+    def members(self, request, pk=None):
+        """Get all members of a startup idea, including the owner"""
+        idea = self.get_object()
+
+        # Get all members
+        members = list(idea.members.all())
+
+        # Add the owner if not already in members
+        if not idea.members.filter(id=idea.user.id).exists():
+            members.append(idea.user)
+
+        serializer = UserBasicSerializer(members, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def join_startup(self, request, pk=None):
+        """Allow a user to join a startup idea as a member"""
+        idea = self.get_object()
+
+        # Check if user is already a member
+        if idea.members.filter(id=request.user.id).exists():
+            return Response(
+                {"error": "You are already a member of this startup idea"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if user is the owner
+        if idea.user.id == request.user.id:
+            return Response(
+                {"error": "You are the owner of this startup idea"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Add user to members
+        idea.members.add(request.user)
+
+        return Response(
+            {"message": "You have successfully joined this startup idea"},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"])
+    def leave_startup(self, request, pk=None):
+        """Allow a user to leave a startup idea"""
+        idea = self.get_object()
+
+        # Check if user is the owner
+        if idea.user.id == request.user.id:
+            return Response(
+                {"error": "As the owner, you cannot leave your own startup idea"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if user is a member
+        if not idea.members.filter(id=request.user.id).exists():
+            return Response(
+                {"error": "You are not a member of this startup idea"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Remove user from members
+        idea.members.remove(request.user)
+
+        return Response(
+            {"message": "You have successfully left this startup idea"},
+            status=status.HTTP_200_OK,
+        )

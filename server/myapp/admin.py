@@ -24,6 +24,7 @@ class StartupIdeaAdmin(admin.ModelAdmin):
         "get_user_profile_picture",
         "stage",
         "user_role",
+        "get_member_count",
         "created_at",
     )
     list_filter = ("stage", "user_role", "created_at")
@@ -35,12 +36,17 @@ class StartupIdeaAdmin(admin.ModelAdmin):
         "user__email",
         "skills",
         "looking_for",
+        "members__username",
     )
     readonly_fields = ("created_at", "updated_at")
     inlines = [StartupImageInline]
+    filter_horizontal = (
+        "members",
+    )  # Add a nice widget for managing many-to-many relationships
 
     fieldsets = (
         ("Basic Info", {"fields": ("user", "name", "stage", "user_role")}),
+        ("Team", {"fields": ("members",)}),
         ("Details", {"fields": ("pitch", "description", "skills", "looking_for")}),
         ("Documents", {"fields": ("pitch_deck",)}),
         (
@@ -56,7 +62,7 @@ class StartupIdeaAdmin(admin.ModelAdmin):
     def get_user_username(self, obj):
         return obj.user.username
 
-    get_user_username.short_description = "Username"
+    get_user_username.short_description = "Owner"
     get_user_username.admin_order_field = "user__username"
 
     def get_user_profile_picture(self, obj):
@@ -67,6 +73,11 @@ class StartupIdeaAdmin(admin.ModelAdmin):
         return "No picture"
 
     get_user_profile_picture.short_description = "Profile Picture"
+
+    def get_member_count(self, obj):
+        return obj.member_count
+
+    get_member_count.short_description = "Team Size"
 
 
 @admin.register(StartupImage)
