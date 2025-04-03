@@ -2,7 +2,7 @@ from rest_framework import viewsets, status, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from rest_framework.authentication import TokenAuthentication, SessionAuthentication
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.contrib.auth import authenticate
@@ -14,12 +14,13 @@ from django.conf import settings
 from django.http import Http404
 from .serializers import UserSerializer, UserInfoSerializer, LoginSerializer
 from .models import CustomUser
+from .authentication import BearerTokenAuthentication
 
 
 class AuthViewSet(viewsets.ViewSet):
     """ViewSet for authentication-related actions"""
 
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_permissions(self):
@@ -62,6 +63,8 @@ class AuthViewSet(viewsets.ViewSet):
             return Response(
                 {
                     "token": token.key,
+                    "token_type": "Bearer",
+                    "auth_header": f"Bearer {token.key}",
                     "user": UserSerializer(user).data,
                     "message": "User registered successfully",
                 },
@@ -105,6 +108,8 @@ class AuthViewSet(viewsets.ViewSet):
         return Response(
             {
                 "token": token.key,
+                "token_type": "Bearer",
+                "auth_header": f"Bearer {token.key}",
                 "user": UserSerializer(user).data,
                 "message": "Login successful",
             },
@@ -135,7 +140,7 @@ class AuthViewSet(viewsets.ViewSet):
 
     @action(
         detail=False,
-        methods=["put"],  # Changed from 'patch' to 'put'
+        methods=["put"],
         parser_classes=[MultiPartParser, FormParser, JSONParser],
     )
     def update_profile(self, request):
@@ -174,6 +179,8 @@ class AuthViewSet(viewsets.ViewSet):
         return Response(
             {
                 "token": token.key,
+                "token_type": "Bearer",
+                "auth_header": f"Bearer {token.key}",
                 "created": created,
                 "user_id": request.user.id,
                 "username": request.user.username,
@@ -207,6 +214,8 @@ class RegisterView(generics.CreateAPIView):
             return Response(
                 {
                     "token": token.key,
+                    "token_type": "Bearer",
+                    "auth_header": f"Bearer {token.key}",
                     "user": UserSerializer(user).data,
                     "message": "User registered successfully",
                 },
@@ -253,6 +262,8 @@ class LoginView(generics.GenericAPIView):
         return Response(
             {
                 "token": token.key,
+                "token_type": "Bearer",
+                "auth_header": f"Bearer {token.key}",
                 "user": UserSerializer(user).data,
                 "message": "Login successful",
             },
@@ -263,7 +274,7 @@ class LoginView(generics.GenericAPIView):
 class LogoutView(generics.GenericAPIView):
     """Logout user by deleting token"""
 
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
@@ -284,11 +295,11 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
     """View, update and delete user profile"""
 
     serializer_class = UserInfoSerializer
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    http_method_names = ["get", "put", "delete"]  # Changed 'patch' to 'put'
-    lookup_field = "username"  # Use username to locate the user
+    http_method_names = ["get", "put", "delete"]
+    lookup_field = "username"
     queryset = CustomUser.objects.all()
 
     def get_object(self):
@@ -335,7 +346,7 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
 class PasswordChangeView(generics.GenericAPIView):
     """Change user password with old password verification"""
 
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
@@ -364,7 +375,12 @@ class PasswordChangeView(generics.GenericAPIView):
         token, _ = Token.objects.get_or_create(user=user)
 
         return Response(
-            {"message": "Password changed successfully", "token": token.key},
+            {
+                "message": "Password changed successfully",
+                "token": token.key,
+                "token_type": "Bearer",
+                "auth_header": f"Bearer {token.key}",
+            },
             status=status.HTTP_200_OK,
         )
 
@@ -373,7 +389,7 @@ class ProfileDetailView(generics.RetrieveAPIView):
     """View other user profiles by username"""
 
     serializer_class = UserInfoSerializer
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
     queryset = CustomUser.objects.all()
     lookup_field = "username"
@@ -398,7 +414,7 @@ class ProfileDetailView(generics.RetrieveAPIView):
 class GetTokenView(generics.GenericAPIView):
     """Retrieve current user's token"""
 
-    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
@@ -410,9 +426,69 @@ class GetTokenView(generics.GenericAPIView):
         return Response(
             {
                 "token": token.key,
+                "token_type": "Bearer",
+                "auth_header": f"Bearer {token.key}",
                 "created": created,
                 "user_id": request.user.id,
                 "username": request.user.username,
             },
             status=status.HTTP_200_OK,
+        )
+
+
+class AuthDebugView(generics.GenericAPIView):
+    """Debug view to help diagnose authentication issues"""
+
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
+    permission_classes = [AllowAny]  # Allow unauthenticated access for debugging
+
+    def get(self, request, *args, **kwargs):
+        """Return debug information about the request's authentication"""
+        auth_header = request.META.get("HTTP_AUTHORIZATION", "None")
+        token_param = request.GET.get("token", "None")
+
+        # Check if there's a token in the authorization header
+        token_from_header = None
+        if auth_header != "None":
+            parts = auth_header.split()
+            if len(parts) >= 2 and parts[0] in ["Bearer", "Token"]:
+                token_from_header = parts[1]
+            elif len(parts) == 1:
+                token_from_header = parts[0]
+
+        # Check if the token is valid
+        token_valid = False
+        user_from_token = None
+        if token_from_header:
+            try:
+                token = Token.objects.get(key=token_from_header)
+                token_valid = True
+                user_from_token = token.user.username
+            except Token.DoesNotExist:
+                pass
+        elif token_param != "None":
+            try:
+                token = Token.objects.get(key=token_param)
+                token_valid = True
+                user_from_token = token.user.username
+            except Token.DoesNotExist:
+                pass
+
+        # Is the user authenticated in this request?
+        is_authenticated = request.user.is_authenticated
+
+        return Response(
+            {
+                "is_authenticated": is_authenticated,
+                "user": request.user.username if is_authenticated else None,
+                "auth_header": auth_header,
+                "token_from_query_param": token_param,
+                "token_from_header": token_from_header,
+                "token_valid": token_valid,
+                "user_from_token": user_from_token,
+                "auth_classes": [
+                    str(auth_class.__class__.__name__)
+                    for auth_class in self.authentication_classes
+                ],
+            }
         )

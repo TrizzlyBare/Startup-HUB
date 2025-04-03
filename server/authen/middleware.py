@@ -1,4 +1,3 @@
-from rest_framework.authentication import TokenAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 from django.conf import settings
 from django.utils.deprecation import MiddlewareMixin
@@ -8,8 +7,8 @@ import re
 
 class BearerTokenAuthMiddleware(MiddlewareMixin):
     """
-    Middleware to handle both 'Bearer token' and 'Token token' authentication formats
-    in headers and extract tokens from query parameters if needed.
+    Middleware to handle multiple token authentication formats
+    in headers and extract tokens from query parameters.
     """
 
     def process_request(self, request):
@@ -24,21 +23,29 @@ class BearerTokenAuthMiddleware(MiddlewareMixin):
                 r"^/api/login/",
                 r"^/swagger/",
                 r"^/redoc/",
+                r"^/api/auth-debug/",  # Skip for auth debugging
             ]
         ):
             return None
 
-        # Check Authorization header first (both Bearer and Token formats)
+        # Check Authorization header first (various formats)
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+        token_key = None
 
-        if auth_header.startswith("Bearer "):
-            token_key = auth_header.split(" ")[1]
-        elif auth_header.startswith("Token "):
-            token_key = auth_header.split(" ")[1]
+        if auth_header:
+            auth_parts = auth_header.split()
+            if len(auth_parts) == 1:
+                # Just the token
+                token_key = auth_parts[0]
+            elif len(auth_parts) == 2 and auth_parts[0] in ["Bearer", "Token"]:
+                # Bearer or Token prefix
+                token_key = auth_parts[1]
+
         # Check for token query parameter as fallback
-        elif request.GET.get("token"):
+        if not token_key and request.GET.get("token"):
             token_key = request.GET.get("token")
-        else:
+
+        if not token_key:
             # No token found, continue with view's permission checks
             return None
 
