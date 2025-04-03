@@ -45,8 +45,10 @@ INSTALLED_APPS = [
     "myapp",
     "webcall",
     "authen",
+    "communication",
     "message",
     "matches",
+    "cloudinary_storage",
     "cloudinary",
     "drf_yasg",  # Added for API documentation
 ]
