@@ -22,6 +22,16 @@ class AuthViewSet(viewsets.ViewSet):
     authentication_classes = [TokenAuthentication, SessionAuthentication]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    def get_permissions(self):
+        """
+        Instantiates and returns the list of permissions that this view requires.
+        """
+        if self.action in ["register", "login"]:
+            permission_classes = [AllowAny]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
+
     def get_serializer(self, *args, **kwargs):
         """
         This method is needed for the browsable API to render forms
@@ -30,7 +40,7 @@ class AuthViewSet(viewsets.ViewSet):
         kwargs.setdefault("context", {"request": self.request})
         return serializer_class(*args, **kwargs)
 
-    @action(detail=False, methods=["post"], permission_classes=[AllowAny])
+    @action(detail=False, methods=["post"])
     def register(self, request):
         """Handle user registration with profile picture upload"""
         serializer = UserSerializer(data=request.data)
@@ -59,17 +69,16 @@ class AuthViewSet(viewsets.ViewSet):
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=["post"], permission_classes=[AllowAny])
+    @action(detail=False, methods=["post"])
     def login(self, request):
         """Handle user login and return authentication token"""
-        email = request.data.get("email")
-        password = request.data.get("password")
+        serializer = LoginSerializer(data=request.data)
 
-        if not email or not password:
-            return Response(
-                {"error": "Please provide both email and password"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        email = serializer.validated_data["email"]
+        password = serializer.validated_data["password"]
 
         try:
             # First try to get the user by email
@@ -80,7 +89,7 @@ class AuthViewSet(viewsets.ViewSet):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        # Use Django's authenticate method instead of manual password check
+        # Use Django's authenticate method with username and password
         user = authenticate(username=user.username, password=password)
         if not user:
             return Response(
@@ -88,7 +97,9 @@ class AuthViewSet(viewsets.ViewSet):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        # Generate or retrieve the token
+        # Always create a new token to ensure it's valid
+        if hasattr(user, "auth_token"):
+            user.auth_token.delete()
         token, _ = Token.objects.get_or_create(user=user)
 
         return Response(
@@ -100,12 +111,13 @@ class AuthViewSet(viewsets.ViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["post"], permission_classes=[IsAuthenticated])
+    @action(detail=False, methods=["post"])
     def logout(self, request):
         """Handle user logout by deleting the token"""
         try:
             # Delete the user's token to logout
-            request.user.auth_token.delete()
+            if hasattr(request.user, "auth_token"):
+                request.user.auth_token.delete()
             return Response(
                 {"message": "Successfully logged out"}, status=status.HTTP_200_OK
             )
@@ -115,7 +127,7 @@ class AuthViewSet(viewsets.ViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
+    @action(detail=False, methods=["get"])
     def me(self, request):
         """Get current user profile"""
         serializer = UserSerializer(request.user)
@@ -123,12 +135,11 @@ class AuthViewSet(viewsets.ViewSet):
 
     @action(
         detail=False,
-        methods=["put", "patch"],
-        permission_classes=[IsAuthenticated],
+        methods=["patch"],  # Changed from 'put' to 'patch'
         parser_classes=[MultiPartParser, FormParser, JSONParser],
     )
     def update_profile(self, request):
-        """Update user profile information"""
+        """Update user profile information using PATCH method"""
         serializer = UserInfoSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
@@ -138,7 +149,7 @@ class AuthViewSet(viewsets.ViewSet):
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=["delete"], permission_classes=[IsAuthenticated])
+    @action(detail=False, methods=["delete"])
     def delete_account(self, request):
         """Delete user account"""
         user = request.user
@@ -197,14 +208,12 @@ class LoginView(generics.GenericAPIView):
     http_method_names = ["post", "get"]  # Allow both POST and GET for form rendering
 
     def post(self, request, *args, **kwargs):
-        email = request.data.get("email")
-        password = request.data.get("password")
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        if not email or not password:
-            return Response(
-                {"error": "Please provide both email and password"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        email = serializer.validated_data["email"]
+        password = serializer.validated_data["password"]
 
         try:
             user = CustomUser.objects.get(email=email)
@@ -221,6 +230,9 @@ class LoginView(generics.GenericAPIView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
+        # Always create a new token to ensure it's valid
+        if hasattr(user, "auth_token"):
+            user.auth_token.delete()
         token, _ = Token.objects.get_or_create(user=user)
 
         return Response(
@@ -241,7 +253,8 @@ class LogoutView(generics.GenericAPIView):
 
     def post(self, request, *args, **kwargs):
         try:
-            request.user.auth_token.delete()
+            if hasattr(request.user, "auth_token"):
+                request.user.auth_token.delete()
             return Response(
                 {"message": "Successfully logged out"}, status=status.HTTP_200_OK
             )
@@ -259,6 +272,7 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
     authentication_classes = [TokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+    http_method_names = ["get", "patch", "delete"]  # Changed 'put' to 'patch'
 
     def get_object(self):
         return self.request.user
@@ -268,10 +282,10 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
-    def update(self, request, *args, **kwargs):
-        partial = kwargs.pop("partial", False)
+    def patch(self, request, *args, **kwargs):
+        """Update user profile with partial data using PATCH"""
         instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(
@@ -322,7 +336,8 @@ class PasswordChangeView(generics.GenericAPIView):
         user.save()
 
         # Update token to force re-login with new password
-        user.auth_token.delete()
+        if hasattr(user, "auth_token"):
+            user.auth_token.delete()
         token, _ = Token.objects.get_or_create(user=user)
 
         return Response(

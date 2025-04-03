@@ -33,23 +33,24 @@ router.register(r"auth", AuthViewSet, basename="auth")
 
 # URL patterns with both ViewSet routes and class-based view routes
 urlpatterns = [
-    # ViewSet routes (maintained for compatibility)
+    # ViewSet routes
     path("", include(router.urls)),
-    # Class-based view routes (better for browser testing)
+    # Auth endpoints (no auth required)
     path("register/", RegisterView.as_view(), name="register"),
     path("login/", LoginView.as_view(), name="login"),
+    # Auth endpoints (auth required)
     path("logout/", LogoutView.as_view(), name="logout"),
-    path(
-        "profile/", ProfileView.as_view(), name="profile"
-    ),  # This route handles viewing, updating, and deleting profile
-    # New profile detail endpoint with optional username parameter
+    path("profile/", ProfileView.as_view(), name="profile"),
+    path("change-password/", PasswordChangeView.as_view(), name="change-password"),
+    # Profile detail endpoints
     path("profiles/", ProfileDetailView.as_view(), name="profile-detail"),
     path(
         "profiles/<str:username>/",
         ProfileDetailView.as_view(),
         name="profile-detail-username",
     ),
-    path("change-password/", PasswordChangeView.as_view(), name="change-password"),
+    # Token validation endpoint (useful for frontend)
+    path("validate-token/", ProfileView.as_view(), name="validate-token"),
     # API documentation
     path(
         "swagger/",
@@ -62,3 +63,5 @@ urlpatterns = [
         name="schema-redoc",
     ),
 ]
+
+# Note: Don't add api-auth/ URLs here to avoid namespace collision warning

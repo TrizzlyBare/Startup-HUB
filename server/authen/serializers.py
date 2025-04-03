@@ -26,6 +26,9 @@ class UserSerializer(serializers.ModelSerializer):
             "profile_picture",
             "profile_picture_url",
             "bio",
+            "industry",
+            "experience",
+            "skills",
             "contact_links",
         ]
         extra_kwargs = {
@@ -35,7 +38,7 @@ class UserSerializer(serializers.ModelSerializer):
             "first_name": {"required": True},
             "last_name": {"required": True},
             "email": {"required": True},
-            "bio": {"required": True},
+            "bio": {"required": False},  # Made optional for better user experience
         }
 
     def get_profile_picture_url(self, obj):
@@ -53,6 +56,12 @@ class UserSerializer(serializers.ModelSerializer):
         """Create a new user instance with the validated data"""
         profile_picture = validated_data.pop("profile_picture", None)
 
+        # Extract optional fields
+        bio = validated_data.pop("bio", "")
+        industry = validated_data.pop("industry", None)
+        experience = validated_data.pop("experience", None)
+        skills = validated_data.pop("skills", None)
+
         # Create the user with the required fields
         user = CustomUser.objects.create_user(
             username=validated_data["username"],
@@ -60,10 +69,16 @@ class UserSerializer(serializers.ModelSerializer):
             password=validated_data["password"],
             first_name=validated_data["first_name"],
             last_name=validated_data["last_name"],
-            bio=validated_data["bio"],
         )
 
         # Add optional fields if they exist
+        user.bio = bio
+        if industry:
+            user.industry = industry
+        if experience:
+            user.experience = experience
+        if skills:
+            user.skills = skills
         if profile_picture:
             user.profile_picture = profile_picture
 
@@ -73,6 +88,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 class UserInfoSerializer(serializers.ModelSerializer):
     contact_links = ContactLinkSerializer(many=True, required=False)
+    profile_picture_url = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomUser
@@ -83,13 +99,20 @@ class UserInfoSerializer(serializers.ModelSerializer):
             "last_name",
             "email",
             "profile_picture",
+            "profile_picture_url",
             "bio",
             "industry",
             "experience",
             "skills",
             "contact_links",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = ["id", "email"]  # Make email read-only for security
+
+    def get_profile_picture_url(self, obj):
+        """Get the Cloudinary URL for the profile picture"""
+        if obj.profile_picture:
+            return obj.profile_picture.url
+        return None
 
     def update(self, instance, validated_data):
         """Handle nested contact links update"""
