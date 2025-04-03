@@ -26,6 +26,9 @@ class AuthState(BaseState):
     # API endpoints
     API_BASE_URL = "http://100.95.107.24:8000/api/auth"
     
+    # Add auth debug result field
+    auth_debug_result: str = ""
+    
     def clear_messages(self):
         """Clear error and success messages."""
         self.error = None
@@ -40,6 +43,35 @@ class AuthState(BaseState):
         self.password = ""
         self.profile_picture = None
         self.clear_messages()
+
+    # Override set_token to ensure localStorage is properly updated
+    def set_token(self, token: str):
+        """Set the token and save to localStorage."""
+        # Call parent method to update state variables
+        super().set_token(token)
+        
+        # Debug the token after setting
+        print(f"Token set in AuthState: {self.token}")
+    
+    # Add a method for successful login that correctly stores token
+    def login_success(self, data):
+        """Handle successful login."""
+        token = data.get("token", "")
+        username = data.get("username", "") or self.email.split('@')[0]
+        
+        # Set the token in state
+        self.set_token(token)
+        
+        print(f"Login success - Token: {token}")
+        print(f"Login success - Username: {username}")
+        
+        # Return the redirect only (token is stored in set_token)
+        return rx.redirect(f"/profile/{username}")
+    
+    # Add a method to get token that tries both state and localStorage
+    def get_token_value(self) -> str:
+        """Get the actual token value from either state or localStorage."""
+        return self.token
 
     async def handle_login(self):
         """Handle login form submission."""
@@ -61,14 +93,20 @@ class AuthState(BaseState):
                 
                 if response.status_code == 200:
                     data = response.json()
-                    # Get username from response data
-                    username = data.get("username")
-                    if not username:
-                        # If username not in response, use email prefix as fallback
-                        username = self.email.split('@')[0]
                     
+                    # Get token from response
+                    token = data.get("token")
+                    if not token:
+                        raise Exception("No token received from server")
+                    
+                    print(f"Login response token: {token}")
+                    
+                    # Debug the token
+                    await self.debug_auth_token(token)
+                    
+                    # Use the login_success method to handle token and redirection
                     self.success = "Login successful!"
-                    return rx.redirect(f"/profile/{username}")
+                    return self.login_success(data)
                 else:
                     error_data = response.json()
                     raise Exception(error_data.get("error", "Login failed. Please try again."))
@@ -107,22 +145,32 @@ class AuthState(BaseState):
                 "bio": None  # Add bio field set to None
             }
             
-            print(f"Attempting to register with data: {form_data}")  # Debug print
+            print(f"Attempting to register with data: {form_data}")
             
             async with httpx.AsyncClient() as client:
                 try:
                     response = await client.post(
                         f"{self.API_BASE_URL}/register/",
                         json=form_data,
-                        timeout=30.0  # Add timeout
+                        timeout=30.0
                     )
                     
-                    print(f"Registration response status: {response.status_code}")  # Debug print
-                    print(f"Registration response: {response.text}")  # Debug print
+                    print(f"Registration response status: {response.status_code}")
+                    print(f"Registration response: {response.text}")
                     
                     if response.status_code == 201:
                         data = response.json()
                         username = self.username
+                        
+                        # Store the token from the response
+                        token = data.get("token")
+                        if token:
+                            self.set_token(token)
+                            print(f"Token stored during registration: {token}")  # Debug print
+                            
+                            # Debug the token
+                            await self.debug_auth_token(token)
+                            
                         self.success = "Registration successful!"
                         self.clear_form()
                         return rx.redirect(f"/profile/{username}")
@@ -176,6 +224,30 @@ class AuthState(BaseState):
         self.show_login = not self.show_login
         self.clear_form()
 
+    async def debug_auth_token(self, token: str):
+        """Debug authentication token validity using the auth-debug endpoint."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.API_BASE_URL}/auth-debug/",
+                    headers={
+                        "Authorization": f"Token {token}",
+                        "Accept": "application/json"
+                    }
+                )
+                
+                print(f"Auth debug response: Status {response.status_code}")
+                debug_data = response.json() if response.status_code == 200 else {"error": response.text}
+                print(f"Auth debug data: {debug_data}")
+                
+                # Store debug result
+                self.auth_debug_result = f"Auth debug: {debug_data}"
+                return debug_data
+        except Exception as e:
+            print(f"Error in debug_auth_token: {e}")
+            self.auth_debug_result = f"Auth debug error: {str(e)}"
+            return {"error": str(e)}
+
 def login_form() -> rx.Component:
     return rx.vstack(
         rx.text("Welcome back", class_name="text-gray-600 text-sm"),
@@ -190,6 +262,17 @@ def login_form() -> rx.Component:
         rx.cond(
             AuthState.success,
             rx.text(AuthState.success, class_name="text-green-500 text-sm"),
+            rx.text("", class_name="hidden"),
+        ),
+        
+        # Auth Debug Information
+        rx.cond(
+            AuthState.auth_debug_result != "",
+            rx.box(
+                rx.heading("Auth Debug", size="6", class_name="text-blue-600 text-sm mb-2"),
+                rx.text(AuthState.auth_debug_result, class_name="text-gray-700 text-xs"),
+                class_name="bg-gray-100 p-2 rounded mb-4 w-full"
+            ),
             rx.text("", class_name="hidden"),
         ),
 
@@ -258,6 +341,17 @@ def signup_form() -> rx.Component:
         rx.cond(
             AuthState.success,
             rx.text(AuthState.success, class_name="text-green-500 text-sm"),
+            rx.text("", class_name="hidden"),
+        ),
+        
+        # Auth Debug Information
+        rx.cond(
+            AuthState.auth_debug_result != "",
+            rx.box(
+                rx.heading("Auth Debug", size="6", class_name="text-blue-600 text-sm mb-2"),
+                rx.text(AuthState.auth_debug_result, class_name="text-gray-700 text-xs"),
+                class_name="bg-gray-100 p-2 rounded mb-4 w-full"
+            ),
             rx.text("", class_name="hidden"),
         ),
 
