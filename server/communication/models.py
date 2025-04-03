@@ -3,6 +3,16 @@ import uuid
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
+import cloudinary
+import cloudinary.api
+import cloudinary.uploader
+
+
+cloudinary.config(
+    cloud_name="dnggowads",
+    api_key="437578293728877",
+    api_secret="5u4gxfznYm3mgzTEWDxDejF-BBY",
+)
 
 
 class Room(models.Model):

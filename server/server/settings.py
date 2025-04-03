@@ -112,6 +112,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "authen.middleware.BearerTokenAuthMiddleware",  # Added custom middleware
+    "communication.middleware.CloudinaryConfigMiddleware",
 ]
 
 ROOT_URLCONF = "server.urls"
