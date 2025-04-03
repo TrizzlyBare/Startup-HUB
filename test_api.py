@@ -17,7 +17,7 @@ async def test_registration():
         "Content-Type": "application/json"
     }
     
-    url = "http://127.0.0.1:8000/api/auth/register/"
+    url = "http://100.95.107.24:8000/api/auth/register/"
     
     print(f"Making POST request to: {url}")
     print(f"Payload: {json.dumps(payload, indent=2)}")

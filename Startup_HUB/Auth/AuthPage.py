@@ -20,12 +20,11 @@ class AuthState(BaseState):
     # Loading state
     is_loading: bool = False
     
-    # Profile picture field
+    # Profile picture field (set to None by default)
     profile_picture: Optional[str] = None
-    _upload_data: Optional[bytes] = None
 
     # API endpoints
-    API_BASE_URL = "http://127.0.0.1:8000/api/auth"
+    API_BASE_URL = "http://100.95.107.24:8000/api/auth"
     
     def clear_messages(self):
         """Clear error and success messages."""
@@ -40,7 +39,6 @@ class AuthState(BaseState):
         self.email = ""
         self.password = ""
         self.profile_picture = None
-        self._upload_data = None
         self.clear_messages()
 
     async def handle_login(self):
@@ -104,43 +102,54 @@ class AuthState(BaseState):
                 "last_name": self.last_name,
                 "username": self.username,
                 "email": self.email,
-                "password": self.password
+                "password": self.password,
+                "profile_picture": None,
+                "bio": None  # Add bio field set to None
             }
             
-            # If there's a profile picture, add it to the form data
-            files = {}
-            if self._upload_data:
-                files["profile_picture"] = ("profile.jpg", self._upload_data, "image/jpeg")
+            print(f"Attempting to register with data: {form_data}")  # Debug print
             
             async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.API_BASE_URL}/register/",
-                    data=form_data,
-                    files=files
-                )
-                
-                if response.status_code == 201:
-                    data = response.json()
-                    # Use the username we sent in the registration form
-                    username = self.username
+                try:
+                    response = await client.post(
+                        f"{self.API_BASE_URL}/register/",
+                        json=form_data,
+                        timeout=30.0  # Add timeout
+                    )
                     
-                    self.success = "Registration successful!"
-                    self.clear_form()
-                    return rx.redirect(f"/profile/{username}")
-                else:
-                    error_data = response.json()
-                    # Handle specific error cases
-                    if "email" in error_data:
-                        raise Exception("This email is already registered. Please use a different email or login.")
-                    elif "username" in error_data:
-                        raise Exception("This username is already taken. Please choose a different username.")
-                    elif "password" in error_data:
-                        raise Exception("Password is too weak. Please use a stronger password.")
+                    print(f"Registration response status: {response.status_code}")  # Debug print
+                    print(f"Registration response: {response.text}")  # Debug print
+                    
+                    if response.status_code == 201:
+                        data = response.json()
+                        username = self.username
+                        self.success = "Registration successful!"
+                        self.clear_form()
+                        return rx.redirect(f"/profile/{username}")
                     else:
-                        error_message = error_data.get("error", "Registration failed. Please try again.")
-                        raise Exception(error_message)
+                        error_data = response.json()
+                        print(f"Error data: {error_data}")  # Debug print
+                        
+                        # Handle specific error cases
+                        if "email" in error_data:
+                            raise Exception("This email is already registered. Please use a different email or login.")
+                        elif "username" in error_data:
+                            raise Exception("This username is already taken. Please choose a different username.")
+                        elif "password" in error_data:
+                            raise Exception("Password is too weak. Please use a stronger password.")
+                        else:
+                            error_message = error_data.get("error", "Registration failed. Please try again.")
+                            raise Exception(error_message)
+                            
+                except httpx.ConnectError:
+                    raise Exception("Could not connect to the server. Please check your internet connection.")
+                except httpx.TimeoutException:
+                    raise Exception("Request timed out. Please try again.")
+                except httpx.HTTPError as e:
+                    raise Exception(f"HTTP error occurred: {str(e)}")
             
         except Exception as e:
+            print(f"Registration error: {str(e)}")  # Debug print
             self.error = str(e)
         finally:
             self.is_loading = False

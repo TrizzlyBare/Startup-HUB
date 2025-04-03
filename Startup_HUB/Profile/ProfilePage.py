@@ -106,7 +106,7 @@ class State(rx.State):
                 # Make API call to update profile
                 async with httpx.AsyncClient() as client:
                     response = await client.put(
-                        f"http://127.0.0.1:8000/api/auth/profile/{username}",
+                        f"http://100.95.107.24:8000/api/auth/profile/{username}",
                         json=profile_data
                     )
                     
@@ -208,7 +208,7 @@ class State(rx.State):
                 # Make API call to fetch user profile data
                 async with httpx.AsyncClient() as client:
                     response = await client.get(
-                        f"http://127.0.0.1:8000/api/auth/profile/{self.profile_username}",
+                        f"http://100.95.107.24:8000/api/auth/profile/{self.profile_username}",
                         headers={
                             "Accept": "application/json",
                             "Content-Type": "application/json"
