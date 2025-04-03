@@ -38,10 +38,46 @@ class State(rx.State):
     async def on_mount(self):
         """Load profile data when component mounts."""
         if hasattr(self, "router"):
+            # Initialize token from localStorage if needed
+            auth_state = await self.get_state(AuthState)
+            if not auth_state.token:
+                token_from_storage = await rx.call_script("localStorage.getItem('auth_token')")
+                if token_from_storage:
+                    auth_state.set_token(token_from_storage)
+                    print(f"Token initialized from localStorage: {token_from_storage}")
+            
             # We can't use AuthState.is_authed directly in if statements
             # Instead, load profile data and let the UI handle auth
             params = getattr(self.router.page, "params", {})
             username = params.get("profile_name", "")
+            
+            # Get the correct username case from auth debug if available
+            if username and auth_state.token:
+                try:
+                    auth_debug_data = await self.debug_auth_token(auth_state.token)
+                    user_data = auth_debug_data.get("user_from_token", {})
+                    if user_data and "username" in user_data:
+                        # Use the username from the auth debug data to ensure case consistency
+                        correct_username = user_data["username"]
+                        print(f"Using username from auth debug: {correct_username}")
+                        
+                        # If the username case doesn't match, redirect to the correct URL
+                        if correct_username.lower() != username.lower():
+                            print(f"Username case mismatch: {username} vs {correct_username}")
+                            return rx.redirect(f"/profile/{correct_username}")
+                        
+                        username = correct_username
+                        
+                        # Ensure token is synchronized with the server
+                        token_from_header = auth_debug_data.get("token_from_header")
+                        if token_from_header and token_from_header != auth_state.token:
+                            print(f"Token mismatch detected. Updating token from {auth_state.token} to {token_from_header}")
+                            auth_state.set_token(token_from_header)
+                            # Update localStorage with the correct token
+                            await rx.call_script(f"localStorage.setItem('auth_token', '{token_from_header}')")
+                except Exception as e:
+                    print(f"Error getting username from auth debug: {e}")
+            
             if username:
                 self.profile_username = username
                 await self.load_profile_data()
@@ -134,15 +170,32 @@ class State(rx.State):
         """Load profile data based on the username from the URL."""
         if self.profile_username:
             try:
-                # Get token directly from AuthState without conditional checks
+                # Get token from AuthState
                 auth_state = await self.get_state(AuthState)
                 auth_token = auth_state.token
                 
+                # If token is None, try to get it from localStorage
+                if not auth_token:
+                    auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                    if auth_token:
+                        # Update AuthState with the token from localStorage
+                        auth_state.set_token(auth_token)
+                
                 print(f"Retrieved auth token from AuthState: {auth_token}")
                 
-                # Debug the token
+                # Debug the token to get the correct username case
                 try:
-                    await self.debug_auth_token(auth_token)
+                    auth_debug_data = await self.debug_auth_token(auth_token)
+                    user_data = auth_debug_data.get("user_from_token", {})
+                    if user_data and "username" in user_data:
+                        # Use the username from the auth debug data to ensure case consistency
+                        correct_username = user_data["username"]
+                        print(f"Using username from auth debug: {correct_username}")
+                        
+                        # If the username case doesn't match, update it
+                        if correct_username.lower() != self.profile_username.lower():
+                            print(f"Username case mismatch: {self.profile_username} vs {correct_username}")
+                            self.profile_username = correct_username
                 except Exception as e:
                     print(f"Debug token error: {e}")
                 
@@ -155,7 +208,7 @@ class State(rx.State):
                             "Authorization": f"Token {auth_token}"
                         }
                         
-                        # Make the request
+                        # Make the request with the correct username case
                         response = await client.get(
                             f"{self.API_URL}/profiles/{self.profile_username}/",
                             headers=headers,
@@ -173,10 +226,12 @@ class State(rx.State):
                             self.first_name = data.get("first_name") or ""
                             self.last_name = data.get("last_name") or ""
                             self.name = f"{self.first_name} {self.last_name}".strip() or "No Name"
+                            
+                            # Handle field name differences
                             self.job_title = data.get("job_title") or "No Job Title"
-                            self.experience_level = data.get("experience_level") or "Not Specified" 
-                            self.category = data.get("category") or "Not Specified"
-                            self.about = data.get("about") or ""
+                            self.experience_level = data.get("experience_level") or data.get("experience") or "Not Specified"
+                            self.category = data.get("category") or data.get("industry") or "Not Specified"
+                            self.about = data.get("about") or data.get("bio") or ""
                             
                             # Handle skills - ensure null data shows properly
                             skills_data = data.get("skills") or []
@@ -199,9 +254,55 @@ class State(rx.State):
                                 self.projects = []
                                 
                             # Handle social links - ensure null data shows properly
-                            self.linkedin_link = data.get("linkedin_link") or ""
-                            self.github_link = data.get("github_link") or ""
-                            self.portfolio_link = data.get("portfolio_link") or ""
+                            # Check for contact_links array first
+                            contact_links = data.get("contact_links") or []
+                            if contact_links:
+                                # Extract links from contact_links array
+                                for link in contact_links:
+                                    if "linkedin" in link.lower():
+                                        self.linkedin_link = link
+                                    elif "github" in link.lower():
+                                        self.github_link = link
+                                    elif "portfolio" in link.lower() or "website" in link.lower():
+                                        self.portfolio_link = link
+                            else:
+                                # Fall back to individual link fields
+                                self.linkedin_link = data.get("linkedin_link") or ""
+                                self.github_link = data.get("github_link") or ""
+                                self.portfolio_link = data.get("portfolio_link") or ""
+                        elif response.status_code == 404:
+                            # Profile doesn't exist yet, create it
+                            print(f"Profile for {self.profile_username} doesn't exist yet. Creating it...")
+                            
+                            # Get user data from auth debug
+                            auth_debug_data = await self.debug_auth_token(auth_token)
+                            user_data = auth_debug_data.get("user_from_token", {})
+                            
+                            # Create a new profile
+                            create_response = await client.post(
+                                f"{self.API_URL}/profiles/",
+                                headers=headers,
+                                json={
+                                    "username": self.profile_username,
+                                    "first_name": user_data.get("first_name", ""),
+                                    "last_name": user_data.get("last_name", ""),
+                                    "email": user_data.get("email", ""),
+                                    "bio": "",
+                                    "industry": "Not Specified",
+                                    "experience": "Not Specified",
+                                    "skills": [],
+                                    "contact_links": []
+                                }
+                            )
+                            
+                            print(f"Profile creation response: {create_response.status_code}")
+                            
+                            if create_response.status_code in [200, 201]:
+                                # Profile created successfully, load it
+                                print("Profile created successfully. Loading profile data...")
+                                return await self.load_profile_data()
+                            else:
+                                print(f"Error creating profile: {create_response.text}")
                         elif response.status_code == 401:
                             print(f"Authentication error: {response.status_code}")
                             # Use a non-event-handler function to redirect for auth errors
@@ -250,20 +351,50 @@ class State(rx.State):
         auth_state = await self.get_state(AuthState)
         auth_token = auth_state.token
         
-        # Create profile data for API
+        # If token is not in AuthState, try to get it from localStorage
+        if not auth_token:
+            auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+            if auth_token:
+                # Update AuthState with the token from localStorage
+                auth_state.set_token(auth_token)
+            else:
+                # If no token found, redirect to login
+                return self.handle_auth_error()
+        
+        # Get the correct username case from auth debug
+        try:
+            auth_debug_data = await self.debug_auth_token(auth_token)
+            user_data = auth_debug_data.get("user_from_token", {})
+            if user_data and "username" in user_data:
+                # Use the username from the auth debug data to ensure case consistency
+                correct_username = user_data["username"]
+                print(f"Using username from auth debug for update: {correct_username}")
+                
+                # If the username case doesn't match, update it
+                if correct_username.lower() != self.profile_username.lower():
+                    print(f"Username case mismatch for update: {self.profile_username} vs {correct_username}")
+                    self.profile_username = correct_username
+        except Exception as e:
+            print(f"Debug token error during update: {e}")
+        
+        # Create profile data for API - map to correct field names
         profile_data = {
+            "username": self.profile_username,  # Include username field
             "first_name": self.first_name,
             "last_name": self.last_name,
-            "job_title": self.job_title,
-            "about": self.about,
-            "category": self.category,
-            "experience_level": self.experience_level,
-            "skills": self.skills,
-            "projects": self.projects,
-            "linkedin_link": self.linkedin_link,
-            "github_link": self.github_link,
-            "portfolio_link": self.portfolio_link
+            "bio": self.about,  # Map about to bio
+            "industry": self.category,  # Map category to industry
+            "experience": self.experience_level,  # Map experience_level to experience
+            "skills": ",".join(self.skills) if self.skills else "",  # Send skills as a comma-separated string
+            "contact_links": [
+                {"platform": "linkedin", "url": self.linkedin_link} if self.linkedin_link else None,
+                {"platform": "github", "url": self.github_link} if self.github_link else None,
+                {"platform": "portfolio", "url": self.portfolio_link} if self.portfolio_link else None
+            ]
         }
+        
+        # Remove None values from contact_links
+        profile_data["contact_links"] = [link for link in profile_data["contact_links"] if link is not None]
         
         try:
             # Make the API request directly with httpx
@@ -273,24 +404,50 @@ class State(rx.State):
                     "Authorization": f"Token {auth_token}"
                 }
                 
+                # Try updating the profile using PUT method
                 response = await client.put(
-                    f"{self.API_URL}/profile/{self.profile_username}/",
+                    f"{self.API_URL}/profiles/{self.profile_username}/",
                     json=profile_data,
                     headers=headers
                 )
                 
                 print(f"Profile update response: {response.status_code}")
+                print(f"Profile update response text: {response.text}")
                 
                 if response.status_code in [200, 201]:
                     print("Profile updated successfully")
                     # Close the form
                     self.show_edit_form = False
+                    # Reload profile data to show updates
+                    await self.load_profile_data()
                 elif response.status_code == 401:
                     print("Authentication error when saving profile")
                     # Handle auth errors
                     return self.handle_auth_error()
                 else:
                     print(f"Error updating profile: {response.text}")
+                    # Try updating with a different endpoint
+                    try:
+                        # Try updating the profile with a different endpoint
+                        update_response = await client.put(
+                            f"{self.API_URL}/profile/{self.profile_username}/",
+                            json=profile_data,
+                            headers=headers
+                        )
+                        
+                        print(f"Profile update (alternative) response: {update_response.status_code}")
+                        print(f"Profile update (alternative) response text: {update_response.text}")
+                        
+                        if update_response.status_code in [200, 201]:
+                            print("Profile updated successfully with alternative endpoint")
+                            # Close the form
+                            self.show_edit_form = False
+                            # Reload profile data to show updates
+                            await self.load_profile_data()
+                        else:
+                            print(f"Error updating profile with alternative endpoint: {update_response.text}")
+                    except Exception as alt_error:
+                        print(f"Error with alternative update request: {alt_error}")
         
         except Exception as e:
             print(f"Error saving profile changes: {e}")
@@ -723,8 +880,11 @@ def profile_page() -> rx.Component:
                         window.location.href = '/login';
                     } else {
                         console.log('Token found in localStorage:', token);
-                        // Set token in state for consistency
-                        state.token = token;
+                        // Update token display
+                        const displayElement = document.getElementById('token-display');
+                        if (displayElement) {
+                            displayElement.textContent = `Token from localStorage: ${token}`;
+                        }
                     }
                 """),
                 
@@ -757,14 +917,6 @@ def profile_page() -> rx.Component:
                         tag="p", 
                         color="white",
                     ),
-                    rx.script("""
-                        // Safer approach: Get token and update element by ID
-                        const debugToken = localStorage.getItem('auth_token');
-                        const displayElement = document.getElementById('token-display');
-                        if (displayElement) {
-                            displayElement.textContent = `Token from localStorage: ${debugToken || 'null'}`;
-                        }
-                    """),
                     width="100%",
                     padding="4",
                     class_name="bg-gray-800 rounded-lg mb-4"

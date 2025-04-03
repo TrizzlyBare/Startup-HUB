@@ -50,8 +50,17 @@ class AuthState(BaseState):
         # Call parent method to update state variables
         super().set_token(token)
         
+        # Ensure token is set in state
+        self.token = token
+        
         # Debug the token after setting
         print(f"Token set in AuthState: {self.token}")
+        
+        # Return the localStorage update
+        return rx.call_script(f"""
+            localStorage.setItem('auth_token', '{token}');
+            console.log('Token saved to localStorage:', '{token}');
+        """)
     
     # Add a method for successful login that correctly stores token
     def login_success(self, data):
@@ -65,8 +74,35 @@ class AuthState(BaseState):
         print(f"Login success - Token: {token}")
         print(f"Login success - Username: {username}")
         
-        # Return the redirect only (token is stored in set_token)
-        return rx.redirect(f"/profile/{username}")
+        # First set the token in localStorage
+        return rx.call_script(f"""
+            // Set token in localStorage
+            localStorage.setItem('auth_token', '{token}');
+            console.log('Token saved to localStorage:', '{token}');
+            
+            // Make the auth debug request
+            fetch('{self.API_BASE_URL}/auth-debug/', {{
+                method: 'GET',
+                headers: {{
+                    'Authorization': 'Token {token}',
+                    'Accept': 'application/json'
+                }}
+            }})
+            .then(response => response.json())
+            .then(data => {{
+                // Get the username from the auth debug response
+                const username = data.user_from_token?.username || '{username}';
+                console.log('Username from auth debug:', username);
+                
+                // Redirect to the profile page with the correct username case
+                window.location.href = '/profile/' + username;
+            }})
+            .catch(error => {{
+                console.error('Error getting username from auth debug:', error);
+                // Fall back to the original username
+                window.location.href = '/profile/{username}';
+            }});
+        """)
     
     # Add a method to get token that tries both state and localStorage
     def get_token_value(self) -> str:
@@ -173,7 +209,33 @@ class AuthState(BaseState):
                             
                         self.success = "Registration successful!"
                         self.clear_form()
-                        return rx.redirect(f"/profile/{username}")
+                        
+                        # Get the correct username case from auth debug
+                        # We'll use a script to make the auth debug request and get the correct username
+                        return rx.call_script(f"""
+                            // Make the auth debug request
+                            fetch('{self.API_BASE_URL}/auth-debug/', {{
+                                method: 'GET',
+                                headers: {{
+                                    'Authorization': 'Token {token}',
+                                    'Accept': 'application/json'
+                                }}
+                            }})
+                            .then(response => response.json())
+                            .then(data => {{
+                                // Get the username from the auth debug response
+                                const username = data.user_from_token?.username || '{username}';
+                                console.log('Username from auth debug:', username);
+                                
+                                // Redirect to the profile page with the correct username case
+                                window.location.href = '/profile/' + username;
+                            }})
+                            .catch(error => {{
+                                console.error('Error getting username from auth debug:', error);
+                                // Fall back to the original username
+                                window.location.href = '/profile/{username}';
+                            }});
+                        """)
                     else:
                         error_data = response.json()
                         print(f"Error data: {error_data}")  # Debug print
