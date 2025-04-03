@@ -1,6 +1,3 @@
-# Note: Your existing models.py is already well-structured and doesn't need changes.
-# Redis integration primarily affects the communication layer, not the data models.
-
 from django.db import models
 import uuid
 from django.conf import settings

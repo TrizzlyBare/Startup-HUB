@@ -4,14 +4,28 @@ from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 from rest_framework import permissions
 from .views import (
+    # ViewSet
     AuthViewSet,
+    # Authentication Views
     RegisterView,
     LoginView,
     LogoutView,
+    # Profile Views
     ProfileView,
-    PasswordChangeView,
     ProfileDetailView,
+    PublicProfileView,
+    # Password Management
+    PasswordChangeView,
+    # Token Views
     GetTokenView,
+    # Past Projects
+    PastProjectView,
+    PastProjectDetailView,
+    # Career Summary
+    CareerSummaryView,
+    # User Search
+    UserSearchView,
+    # Debug Views
     AuthDebugView,
     token_debug,
 )
@@ -19,9 +33,9 @@ from .views import (
 # Create a schema view for API documentation
 schema_view = get_schema_view(
     openapi.Info(
-        title="Authentication API",
+        title="Authentication & Profile API",
         default_version="v1",
-        description="API documentation for authentication and user management endpoints",
+        description="API documentation for user management, authentication, and professional profiles",
         terms_of_service="https://www.yourapp.com/terms/",
         contact=openapi.Contact(email="contact@yourapp.com"),
         license=openapi.License(name="Your License"),
@@ -34,33 +48,43 @@ schema_view = get_schema_view(
 router = DefaultRouter()
 router.register(r"auth", AuthViewSet, basename="auth")
 
-# URL patterns with both ViewSet routes and class-based view routes
+# URL patterns
 urlpatterns = [
-    # ViewSet routes
+    # Router URLs
     path("", include(router.urls)),
-    # Auth endpoints (no auth required)
+    # Authentication Endpoints
     path("register/", RegisterView.as_view(), name="register"),
     path("login/", LoginView.as_view(), name="login"),
-    # Auth endpoints (auth required)
     path("logout/", LogoutView.as_view(), name="logout"),
+    # Profile Endpoints
     path("profile/", ProfileView.as_view(), name="profile"),
     path("profile/<str:username>/", ProfileView.as_view(), name="profile-username"),
-    path("change-password/", PasswordChangeView.as_view(), name="change-password"),
-    # Profile detail endpoints
-    path("profiles/", ProfileDetailView.as_view(), name="profile-detail"),
+    path("profiles/", ProfileDetailView.as_view(), name="profile-list"),
+    # Public Profile Endpoint
     path(
-        "profiles/<str:username>/",
-        ProfileDetailView.as_view(),
-        name="profile-detail-username",
+        "public-profile/<str:username>/",
+        PublicProfileView.as_view(),
+        name="public-profile",
     ),
-    # Token validation endpoint (useful for frontend)
-    path("validate-token/", ProfileView.as_view(), name="validate-token"),
-    # Token retrieval endpoint
+    # User Search Endpoint
+    path("users/search/", UserSearchView.as_view(), name="user-search"),
+    # Past Projects Endpoints
+    path("past-projects/", PastProjectView.as_view(), name="past-projects-list"),
+    path(
+        "past-projects/<int:pk>/",
+        PastProjectDetailView.as_view(),
+        name="past-projects-detail",
+    ),
+    # Career Summary Endpoint
+    path("career-summary/", CareerSummaryView.as_view(), name="career-summary"),
+    # Password Management
+    path("change-password/", PasswordChangeView.as_view(), name="change-password"),
+    # Token Endpoints
     path("token/", GetTokenView.as_view(), name="get-token"),
     path("token-debug/", token_debug, name="token-debug"),
-    # Auth debug endpoint
+    # Auth Debug Endpoint
     path("auth-debug/", AuthDebugView.as_view(), name="auth-debug"),
-    # API documentation
+    # API Documentation
     path(
         "swagger/",
         schema_view.with_ui("swagger", cache_timeout=0),
@@ -72,5 +96,3 @@ urlpatterns = [
         name="schema-redoc",
     ),
 ]
-
-# Note: Don't add api-auth/ URLs here to avoid namespace collision warning

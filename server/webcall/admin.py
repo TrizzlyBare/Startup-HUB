@@ -73,24 +73,27 @@ class ParticipantAdmin(admin.ModelAdmin):
         "joined_at",
         "last_active",
         "is_active",
-        "is_audio_muted",
-        "is_video_muted",
+        # Replace these with actual fields or remove them
+        "is_muted",
     )
-    list_filter = ("joined_at", "last_active", "is_audio_muted", "is_video_muted")
+    list_filter = (
+        "joined_at",
+        "last_active",
+        # Replace these with actual fields or remove them
+        "is_muted",
+    )
     search_fields = ("user__username", "room__name")
     readonly_fields = ("joined_at", "last_active")
     date_hierarchy = "joined_at"
     raw_id_fields = ["user", "room"]
 
     def user_link(self, obj):
-        return get_user_admin_link(obj.user.id, obj.user.username)
+        # Implement or remove
+        pass
 
     def room_link(self, obj):
-        try:
-            url = reverse("admin:webcall_room_change", args=[obj.room.id])
-            return format_html('<a href="{}">{}</a>', url, obj.room.name)
-        except NoReverseMatch:
-            return obj.room.name
+        # Implement or remove
+        pass
 
     def is_active(self, obj):
         from django.utils import timezone
@@ -99,6 +102,3 @@ class ParticipantAdmin(admin.ModelAdmin):
         return obj.last_active and obj.last_active >= thirty_sec_ago
 
     is_active.boolean = True
-    user_link.short_description = "User"
-    room_link.short_description = "Room"
-    is_active.short_description = "Is Active"

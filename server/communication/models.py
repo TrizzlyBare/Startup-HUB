@@ -28,7 +28,7 @@ class Room(models.Model):
 class Participant(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     room = models.ForeignKey(
-        Room, on_delete=models.CASCADE, related_name="participants"
+        Room, on_delete=models.CASCADE, related_name="communication_participants"
     )
     joined_at = models.DateTimeField(auto_now_add=True)
     last_active = models.DateTimeField(null=True, blank=True)
@@ -135,7 +135,9 @@ class MediaFile(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
     public_id = models.CharField(max_length=255, blank=True, null=True)
     user = models.ForeignKey(
-        "auth.User", on_delete=models.CASCADE, related_name="uploaded_media"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="communication_media_files",
     )
 
     def save(self, *args, **kwargs):

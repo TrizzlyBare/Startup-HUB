@@ -1,3 +1,4 @@
+import asyncio
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer, WebsocketConsumer
 from channels.db import database_sync_to_async
@@ -5,7 +6,6 @@ from .models import Room, Message, Participant, MessageReceipt
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from uuid import UUID
-import asyncio
 
 User = get_user_model()
 
@@ -23,7 +23,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
         self.user = self.scope["user"]
         self.room_id = self.scope["url_route"]["kwargs"]["room_id"]
         self.room_group_name = f"chat_{self.room_id}"
-        self.user_specific_group = f"user_{self.user.id}"
 
         # Check if user is participant in this room
         is_participant = await self.is_room_participant(self.user.id, self.room_id)
@@ -33,9 +32,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         # Join room group
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-
-        # Join user-specific group for targeted notifications
-        await self.channel_layer.group_add(self.user_specific_group, self.channel_name)
 
         await self.accept()
 
@@ -348,10 +344,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
         """Update user's last activity in the participant record"""
         try:
             # Get the actual user ID from the lazy object
-            user_id = self.user.id if hasattr(self.user, "id") else None
+            user_id = self.user.id if hasattr(self.user, 'id') else None
             if not user_id:
                 return
-
+                
             participant = Participant.objects.get(user_id=user_id, room_id=self.room_id)
             if is_online:
                 participant.last_active = timezone.now()
@@ -438,7 +434,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
 class EchoConsumer(WebsocketConsumer):
     channel_layer_alias = None  # Disable channel layer for echo consumer
-
+    
     def connect(self):
         self.accept()
 

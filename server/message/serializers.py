@@ -2,7 +2,6 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import Room, Message, Participant, MessageReceipt
 from django.db import transaction
-from django.db.models import Count, Q
 
 User = get_user_model()
 
@@ -52,88 +51,19 @@ class MessageSerializer(serializers.ModelSerializer):
 class ParticipantSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     unread_count = serializers.SerializerMethodField()
-    last_active_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Participant
-        fields = [
-            "id",
-            "user",
-            "room",
-            "joined_at",
-            "last_read",
-            "unread_count",
-            "last_active_status",
-            "last_active",
-        ]
-        read_only_fields = ["joined_at", "last_read", "last_active"]
+        fields = ["id", "user", "room", "joined_at", "last_read", "unread_count"]
+        read_only_fields = ["joined_at", "last_read"]
 
     def get_unread_count(self, obj):
         return obj.unread_messages_count()
-
-    def get_last_active_status(self, obj):
-        """Determine if user is online based on last_active timestamp"""
-        from django.utils import timezone
-
-        if not obj.last_active:
-            return "offline"
-
-        five_min_ago = timezone.now() - timezone.timedelta(minutes=5)
-        return "online" if obj.last_active >= five_min_ago else "offline"
-
-
-class RoomListSerializer(serializers.ModelSerializer):
-    """Lightweight serializer for room listings"""
-
-    unread_count = serializers.IntegerField(read_only=True)
-    latest_message_preview = serializers.SerializerMethodField()
-    other_participant = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Room
-        fields = [
-            "id",
-            "name",
-            "updated_at",
-            "is_group_chat",
-            "unread_count",
-            "latest_message_preview",
-            "other_participant",
-        ]
-
-    def get_latest_message_preview(self, obj):
-        """Get preview of the latest message"""
-        latest_message = Message.objects.filter(room=obj).order_by("-sent_at").first()
-        if not latest_message:
-            return None
-
-        return {
-            "content": latest_message.content[:100]
-            + ("..." if len(latest_message.content) > 100 else ""),
-            "sender_username": latest_message.sender.username,
-            "sent_at": latest_message.sent_at,
-        }
-
-    def get_other_participant(self, obj):
-        """For direct chats, get the other participant"""
-        if obj.is_group_chat:
-            return None
-
-        request = self.context.get("request")
-        if not request or not request.user:
-            return None
-
-        other = Participant.objects.filter(room=obj).exclude(user=request.user).first()
-        if not other:
-            return None
-
-        return {"user_id": str(other.user.id), "username": other.user.username}
 
 
 class RoomSerializer(serializers.ModelSerializer):
     participants = ParticipantSerializer(many=True, read_only=True)
     latest_message = serializers.SerializerMethodField()
-    unread_count = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = Room
@@ -145,7 +75,6 @@ class RoomSerializer(serializers.ModelSerializer):
             "is_group_chat",
             "participants",
             "latest_message",
-            "unread_count",
         ]
         read_only_fields = ["created_at", "updated_at"]
 

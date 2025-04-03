@@ -1,5 +1,5 @@
-from rest_framework import viewsets, status, generics
-from rest_framework.decorators import action
+from rest_framework import viewsets, status, generics, filters
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.authentication import SessionAuthentication
@@ -12,11 +12,16 @@ from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from django.conf import settings
 from django.http import Http404
-from .serializers import UserSerializer, UserInfoSerializer, LoginSerializer
-from .models import CustomUser
+from django.db.models import Q
+from .serializers import (
+    UserSerializer,
+    UserInfoSerializer,
+    LoginSerializer,
+    PastProjectSerializer,
+)
+from .models import CustomUser, PastProject
 from .authentication import BearerTokenAuthentication
 import logging
-from rest_framework.decorators import api_view, permission_classes
 
 
 class AuthViewSet(viewsets.ViewSet):
@@ -589,3 +594,252 @@ def get_client_ip(request):
     else:
         ip = request.META.get("REMOTE_ADDR")
     return ip
+
+
+class PastProjectViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing past projects
+    """
+
+    serializer_class = PastProjectSerializer
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["title", "description", "technologies", "role"]
+    ordering_fields = ["start_date", "end_date", "title"]
+
+    def get_queryset(self):
+        """
+        Return past projects for the current user with optional filtering
+        """
+        queryset = PastProject.objects.filter(user=self.request.user)
+
+        # Filter by status if provided
+        status = self.request.query_params.get("status", None)
+        if status:
+            queryset = queryset.filter(status=status)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        """
+        Create a new past project for the current user
+        """
+        serializer.save(user=self.request.user)
+
+    def perform_update(self, serializer):
+        """
+        Ensure the project belongs to the current user
+        """
+        instance = self.get_object()
+        if instance.user != self.request.user:
+            raise Http404("Project not found")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        """
+        Ensure the project belongs to the current user before deletion
+        """
+        if instance.user != self.request.user:
+            raise Http404("Project not found")
+        instance.delete()
+
+
+class CareerSummaryView(generics.RetrieveUpdateAPIView):
+    """
+    View to retrieve and update user's career summary
+    """
+
+    serializer_class = UserSerializer
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        """
+        Return the current user
+        """
+        return self.request.user
+
+    def update(self, request, *args, **kwargs):
+        """
+        Update only the career summary
+        """
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance,
+            data={"career_summary": request.data.get("career_summary")},
+            partial=True,
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    "message": "Career summary updated successfully",
+                    "career_summary": serializer.data.get("career_summary"),
+                }
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserSearchView(generics.ListAPIView):
+    """
+    View to search users based on various criteria
+    """
+
+    serializer_class = UserInfoSerializer
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+
+    # Fields to search across
+    search_fields = [
+        "username",
+        "first_name",
+        "last_name",
+        "email",
+        "skills",
+        "industry",
+        "career_summary",
+    ]
+
+    # Fields to order by
+    ordering_fields = ["username", "first_name", "last_name", "date_joined"]
+
+    def get_queryset(self):
+        """
+        Retrieve and filter users
+        Support multiple search and filter parameters
+        """
+        queryset = CustomUser.objects.all()
+
+        # Filter by industry if provided
+        industry = self.request.query_params.get("industry", None)
+        if industry:
+            queryset = queryset.filter(industry__icontains=industry)
+
+        # Filter by skills
+        skills = self.request.query_params.get("skills", None)
+        if skills:
+            # Split skills and filter users who have all skills
+            skill_list = [skill.strip() for skill in skills.split(",")]
+            for skill in skill_list:
+                queryset = queryset.filter(skills__icontains=skill)
+
+        # Filter by experience range
+        min_experience = self.request.query_params.get("min_experience", None)
+        max_experience = self.request.query_params.get("max_experience", None)
+        if min_experience or max_experience:
+            # Basic experience filtering (assumes experience is a string)
+            if min_experience:
+                queryset = queryset.filter(Q(experience__gte=min_experience))
+            if max_experience:
+                queryset = queryset.filter(Q(experience__lte=max_experience))
+
+        return queryset
+
+
+class PublicProfileView(generics.RetrieveAPIView):
+    """
+    View to retrieve public profile information
+    Provides a limited view of user profile accessible without authentication
+    """
+
+    serializer_class = UserInfoSerializer
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    lookup_field = "username"
+    queryset = CustomUser.objects.all()
+
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Retrieve public profile with limited information
+        """
+        try:
+            instance = self.get_object()
+            serializer = self.get_serializer(instance)
+
+            # Customize the response to return only public information
+            public_data = {
+                "id": serializer.data.get("id"),
+                "username": serializer.data.get("username"),
+                "first_name": serializer.data.get("first_name"),
+                "last_name": serializer.data.get("last_name"),
+                "profile_picture_url": serializer.data.get("profile_picture_url"),
+                "bio": serializer.data.get("bio"),
+                "industry": serializer.data.get("industry"),
+                "skills": serializer.data.get("skills"),
+                "career_summary": serializer.data.get("career_summary"),
+                "past_projects": serializer.data.get("past_projects", []),
+            }
+
+            return Response(public_data)
+        except Http404:
+            return Response(
+                {"error": "User profile not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+
+class PastProjectView(generics.ListCreateAPIView):
+    """
+    View to list and create past projects for the authenticated user
+    """
+
+    serializer_class = PastProjectSerializer
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["title", "description", "technologies", "role"]
+    ordering_fields = ["start_date", "end_date", "title"]
+
+    def get_queryset(self):
+        """
+        Return past projects for the current user with optional filtering
+        """
+        queryset = PastProject.objects.filter(user=self.request.user)
+
+        # Filter by status if provided
+        status = self.request.query_params.get("status", None)
+        if status:
+            queryset = queryset.filter(status=status)
+
+        return queryset
+
+    def perform_create(self, serializer):
+        """
+        Create a new past project for the current user
+        """
+        serializer.save(user=self.request.user)
+
+
+class PastProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    View to retrieve, update, and delete a specific past project
+    """
+
+    serializer_class = PastProjectSerializer
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """
+        Return past projects for the current user
+        """
+        return PastProject.objects.filter(user=self.request.user)
+
+    def perform_update(self, serializer):
+        """
+        Ensure the project belongs to the current user
+        """
+        instance = self.get_object()
+        if instance.user != self.request.user:
+            raise Http404("Project not found")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        """
+        Ensure the project belongs to the current user before deletion
+        """
+        if instance.user != self.request.user:
+            raise Http404("Project not found")
+        instance.delete()
