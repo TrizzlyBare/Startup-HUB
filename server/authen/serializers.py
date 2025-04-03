@@ -47,6 +47,14 @@ class UserSerializer(serializers.ModelSerializer):
             return obj.profile_picture.url
         return None
 
+    def validate_username(self, value):
+        """Explicitly validate that the username is unique"""
+        if CustomUser.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError(
+                "This username is already in use. Please choose a different one."
+            )
+        return value
+
     def validate_password(self, value):
         """Validate the password using Django's built-in password validators"""
         validate_password(value)
@@ -113,6 +121,21 @@ class UserInfoSerializer(serializers.ModelSerializer):
         if obj.profile_picture:
             return obj.profile_picture.url
         return None
+
+    def validate_username(self, value):
+        """Validate that the username is unique"""
+        # Get the current instance if we're updating
+        instance = getattr(self, "instance", None)
+
+        # If this is an update, exclude the current instance from the uniqueness check
+        if instance and instance.username == value:
+            return value
+
+        if CustomUser.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError(
+                "This username is already in use. Please choose a different one."
+            )
+        return value
 
     def update(self, instance, validated_data):
         """Handle nested contact links update"""
