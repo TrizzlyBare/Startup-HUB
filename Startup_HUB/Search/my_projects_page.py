@@ -21,33 +21,102 @@ def show_project(project: rx.Var[Project]) -> rx.Component:
             
             # Project details section
             rx.vstack(
+                # Stage and User Role
                 rx.hstack(
-                    rx.text(f"Team Size: {project.team_size}", color="black", class_name="text-md px-2"),
-                    rx.text(f"Stage: {project.funding_stage}", color="black", class_name="text-md px-2"),
+                    rx.text(f"Stage: {project.stage}", color="black", class_name="text-md px-2"),
+                    rx.text(f"Your Role: {project.user_role}", color="black", class_name="text-md px-2"),
                     spacing="4",
                 ),
-                rx.text("Tech Stack:", color="black", class_name="text-lg font-medium mt-2 px-2"),
-                rx.hstack(
-                    rx.foreach(
-                        project.tech_stack,
-                        lambda tech: rx.box(
-                            tech,
-                            class_name="bg-sky-100 text-sky-700 px-3 py-1 rounded-full m-1 px-2",
-                        ),
+                
+                # Pitch
+                rx.box(
+                    rx.text("Elevator Pitch:", color="black", class_name="text-lg font-medium mt-2 px-2"),
+                    rx.text(
+                        project.pitch,
+                        noOfLines=2,
+                        class_name="text-md px-2 text-gray-600",
                     ),
-                    wrap="wrap",
+                    width="100%",
                 ),
-                rx.text("Looking for:", color="black", class_name="text-lg font-medium mt-2 px-2"),
+                
+                # Team Size and Funding Stage
                 rx.hstack(
-                    rx.foreach(
-                        project.looking_for,
-                        lambda role: rx.box(
-                            role,
-                            class_name="bg-green-100 text-green-700 px-3 py-1 rounded-full m-1 px-2",
-                        ),
-                    ),
-                    wrap="wrap",
+                    rx.text(f"Team Size: {project.team_size}", color="black", class_name="text-md px-2"),
+                    rx.text(f"Funding Stage: {project.funding_stage}", color="black", class_name="text-md px-2"),
+                    spacing="4",
                 ),
+                
+                # Tech Stack
+                rx.box(
+                    rx.text("Tech Stack:", color="black", class_name="text-lg font-medium mt-2 px-2"),
+                    rx.hstack(
+                        rx.foreach(
+                            project.tech_stack,
+                            lambda tech: rx.box(
+                                tech,
+                                class_name="bg-sky-100 text-sky-700 px-3 py-1 rounded-full m-1 px-2",
+                            ),
+                        ),
+                        wrap="wrap",
+                    ),
+                    width="100%",
+                ),
+                
+                # Looking for
+                rx.box(
+                    rx.text("Looking for:", color="black", class_name="text-lg font-medium mt-2 px-2"),
+                    rx.hstack(
+                        rx.foreach(
+                            project.looking_for,
+                            lambda role: rx.box(
+                                role,
+                                class_name="bg-green-100 text-green-700 px-3 py-1 rounded-full m-1 px-2",
+                            ),
+                        ),
+                        wrap="wrap",
+                    ),
+                    width="100%",
+                ),
+                
+                # Website and Pitch Deck
+                rx.hstack(
+                    rx.cond(
+                        project.website,
+                        rx.link(
+                            rx.text("Website", class_name="text-blue-600 hover:underline"),
+                            href=project.website,
+                            is_external=True,
+                        ),
+                        rx.text("No website", class_name="text-gray-400"),
+                    ),
+                    rx.cond(
+                        project.pitch_deck,
+                        rx.link(
+                            rx.text("Pitch Deck", class_name="text-blue-600 hover:underline"),
+                            href=project.pitch_deck,
+                            is_external=True,
+                        ),
+                        rx.text("No pitch deck", class_name="text-gray-400"),
+                    ),
+                    spacing="4",
+                    width="100%",
+                    padding_x="2",
+                ),
+                
+                # Investment Needed
+                rx.box(
+                    rx.text(
+                        rx.cond(
+                            project.investment_needed,
+                            f"Investment Needed: ${project.investment_needed:,.2f}",
+                            "Investment Needed: Not specified"
+                        ),
+                        color="black",
+                        class_name="text-md px-2",
+                    ),
+                    width="100%",
+                ),
+                
                 align_items="start",
                 width="100%",
                 padding_x="24",
@@ -114,6 +183,27 @@ def create_project_modal() -> rx.Component:
                             style={"& textarea::placeholder": {"color": "grey"}},
                             class_name="w-full p-2 border rounded-lg bg-white",
                         ),
+                        rx.text_area(
+                            placeholder="Elevator Pitch", 
+                            name="pitch",
+                            height="100px",
+                            style={"& textarea::placeholder": {"color": "grey"}},
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                        ),
+                        rx.select(
+                            ["IDEA", "MVP", "BETA", "LAUNCHED", "SCALING"],
+                            placeholder="Stage",
+                            name="stage",
+                            style={"& select::placeholder": {"color": "grey"}},
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                        ),
+                        rx.select(
+                            ["FOUNDER", "CO-FOUNDER", "TEAM_MEMBER", "INVESTOR", "ADVISOR"],
+                            placeholder="Your Role",
+                            name="user_role",
+                            style={"& select::placeholder": {"color": "grey"}},
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                        ),
                         rx.input(
                             placeholder="Tech Stack (comma-separated)",
                             name="tech_stack",
@@ -140,6 +230,26 @@ def create_project_modal() -> rx.Component:
                             placeholder="Looking for (comma-separated roles)",
                             style={"& input::placeholder": {"color": "grey"}},
                             name="looking_for",
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                        ),
+                        rx.input(
+                            placeholder="Website URL",
+                            name="website",
+                            style={"& input::placeholder": {"color": "grey"}},
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                        ),
+                        rx.input(
+                            placeholder="Investment Needed (amount)",
+                            name="investment_needed",
+                            type="number",
+                            min_value=0,
+                            style={"& input::placeholder": {"color": "grey"}},
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                        ),
+                        rx.input(
+                            placeholder="Pitch Deck URL",
+                            name="pitch_deck",
+                            style={"& input::placeholder": {"color": "grey"}},
                             class_name="w-full p-2 border rounded-lg bg-white",
                         ),
                         
@@ -213,6 +323,42 @@ def edit_project_modal() -> rx.Component:
                                 ""
                             ),
                         ),
+                        rx.text_area(
+                            placeholder="Elevator Pitch", 
+                            name="pitch",
+                            height="100px",
+                            style={"& textarea::placeholder": {"color": "grey"}},
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                            default_value=rx.cond(
+                                MyProjectsState.editing_project,
+                                MyProjectsState.editing_project.pitch,
+                                ""
+                            ),
+                        ),
+                        rx.select(
+                            ["IDEA", "MVP", "BETA", "LAUNCHED", "SCALING"],
+                            placeholder="Stage",
+                            name="stage",
+                            style={"& select::placeholder": {"color": "grey"}},
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                            default_value=rx.cond(
+                                MyProjectsState.editing_project,
+                                MyProjectsState.editing_project.stage,
+                                "IDEA"
+                            ),
+                        ),
+                        rx.select(
+                            ["FOUNDER", "CO-FOUNDER", "TEAM_MEMBER", "INVESTOR", "ADVISOR"],
+                            placeholder="Your Role",
+                            name="user_role",
+                            style={"& select::placeholder": {"color": "grey"}},
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                            default_value=rx.cond(
+                                MyProjectsState.editing_project,
+                                MyProjectsState.editing_project.user_role,
+                                "FOUNDER"
+                            ),
+                        ),
                         rx.input(
                             placeholder="Tech Stack (comma-separated)",
                             name="tech_stack",
@@ -247,6 +393,45 @@ def edit_project_modal() -> rx.Component:
                             style={"& input::placeholder": {"color": "grey"}},
                             class_name="w-full p-2 border rounded-lg bg-white",
                             default_value=MyProjectsState.formatted_looking_for
+                        ),
+                        rx.input(
+                            placeholder="Website URL",
+                            name="website",
+                            style={"& input::placeholder": {"color": "grey"}},
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                            default_value=rx.cond(
+                                MyProjectsState.editing_project,
+                                MyProjectsState.editing_project.website,
+                                ""
+                            ),
+                        ),
+                        rx.input(
+                            placeholder="Investment Needed (amount)",
+                            name="investment_needed",
+                            type="number",
+                            min_value=0,
+                            style={"& input::placeholder": {"color": "grey"}},
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                            default_value=rx.cond(
+                                MyProjectsState.editing_project,
+                                rx.cond(
+                                    MyProjectsState.editing_project.investment_needed,
+                                    str(MyProjectsState.editing_project.investment_needed),
+                                    ""
+                                ),
+                                ""
+                            ),
+                        ),
+                        rx.input(
+                            placeholder="Pitch Deck URL",
+                            name="pitch_deck",
+                            style={"& input::placeholder": {"color": "grey"}},
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                            default_value=rx.cond(
+                                MyProjectsState.editing_project,
+                                MyProjectsState.editing_project.pitch_deck,
+                                ""
+                            ),
                         ),
                         
                         # Buttons
@@ -312,6 +497,19 @@ def my_projects_page() -> rx.Component:
                         width="100%",
                         margin_bottom="20",
                         padding_x="4",
+                    ),
+                    # Error message section
+                    rx.cond(
+                        MyProjectsState.error_message,
+                        rx.box(
+                            rx.text(
+                                MyProjectsState.error_message,
+                                class_name="text-red-500 bg-red-100 p-4 rounded-lg"
+                            ),
+                            width="100%",
+                            padding_x="4",
+                            margin_bottom="4",
+                        ),
                     ),
                     # Projects grid section
                     rx.cond(

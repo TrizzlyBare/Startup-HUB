@@ -64,6 +64,13 @@ class SearchState(rx.State):
     show_details_modal: bool = False
     selected_group: StartupGroup | None = None
 
+    @rx.var
+    def selected_group_team_size(self) -> str:
+        """Get the team size of the selected group as a string."""
+        if self.selected_group and hasattr(self.selected_group, 'team_size'):
+            return str(self.selected_group.team_size)
+        return "N/A"
+
     def request_to_join(self, group_name: str):
         """Send a request to join a startup group."""
         for group in self.search_results:
@@ -250,7 +257,7 @@ def details_modal():
                             rx.cond(
                                 SearchState.selected_group,
                                 rx.text(
-                                    str(SearchState.selected_group.team_size),
+                                    SearchState.selected_group_team_size,
                                     class_name="text-gray-600",
                                 ),
                                 rx.text("")

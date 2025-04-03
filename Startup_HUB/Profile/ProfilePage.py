@@ -897,6 +897,12 @@ def profile_page() -> rx.Component:
                         class_name="mb-4"
                     ),
                     rx.spacer(),
+                    # Add Find Matches button
+                    rx.button(
+                        "Find Matches",
+                        on_click=rx.redirect("/match"),
+                        class_name="px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 mr-2"
+                    ),
                     # Add logout button
                     rx.button(
                         "Log Out",
