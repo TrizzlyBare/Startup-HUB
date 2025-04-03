@@ -1,5 +1,6 @@
 import reflex as rx
 from ..Auth.AuthPage import AuthState
+import httpx
 
 class State(rx.State):
     """State for the profile page."""
@@ -12,15 +13,42 @@ class State(rx.State):
     experience_level: str = "1-3 years"
     category: str = "Technology"
     
+    # Profile username (different from route parameter)
+    profile_username: str = ""
+    
+    @rx.var
+    def get_username(self) -> str:
+        """Get username from route parameters."""
+        if not self.profile_username and hasattr(self, "router"):
+            params = getattr(self.router.page, "params", {})
+            self.profile_username = params.get("profile_name", "")
+        return self.profile_username
+    
+    @rx.var
+    def current_url(self) -> str:
+        """Get the current full URL."""
+        return self.router.page.full_raw_path
+
+    async def on_mount(self):
+        """Load profile data when component mounts."""
+        if hasattr(self, "router"):
+            params = getattr(self.router.page, "params", {})
+            username = params.get("profile_name", "")
+            if username:
+                self.profile_username = username
+                await self.load_profile_data()
+            else:
+                return rx.redirect("/")
+    
     # About section
     about: str = ""
     
     # Skills (list for better management)
-    skills: list = ["Product Management", "UX/UI", "Marketing"]
+    skills: list = []
     new_skill: str = ""
     
     # Projects (list of projects)
-    projects: list = ["SE Library"]
+    projects: list = []
     new_project: str = ""
     
     # Online presence links
@@ -40,8 +68,8 @@ class State(rx.State):
         """Toggle edit form visibility."""
         self.show_edit_form = not self.show_edit_form
 
-    def save_changes(self, form_data: dict):
-        """Save profile changes."""
+    async def save_changes(self, form_data: dict):
+        """Save profile changes to the API."""
         # Update profile data from form
         self.first_name = form_data.get("first_name", self.first_name)
         self.last_name = form_data.get("last_name", self.last_name)
@@ -55,6 +83,37 @@ class State(rx.State):
         
         # Compose full name
         self.name = f"{self.first_name} {self.last_name}"
+        
+        # Get username from router
+        username = self.router.page.params.get("profile_name", "")
+        if username:
+            try:
+                # Prepare data to send to API
+                profile_data = {
+                    "first_name": self.first_name,
+                    "last_name": self.last_name,
+                    "job_title": self.job_title,
+                    "about": self.about,
+                    "category": self.category,
+                    "experience_level": self.experience_level,
+                    "skills": self.skills,
+                    "projects": self.projects,
+                    "linkedin_link": self.linkedin_link,
+                    "github_link": self.github_link,
+                    "portfolio_link": self.portfolio_link
+                }
+                
+                # Make API call to update profile
+                async with httpx.AsyncClient() as client:
+                    response = await client.put(
+                        f"http://127.0.0.1:8000/api/auth/profile/{username}",
+                        json=profile_data
+                    )
+                    
+                    if response.status_code != 200:
+                        print(f"Error updating profile: {response.text}")
+            except Exception as e:
+                print(f"Error saving profile changes: {e}")
         
         # Close the form modal
         self.show_edit_form = False
@@ -141,6 +200,68 @@ class State(rx.State):
     def has_about(self) -> bool:
         """Check if about text exists."""
         return len(self.about) > 0
+
+    async def load_profile_data(self):
+        """Load profile data based on the username from the URL."""
+        if self.profile_username:
+            try:
+                # Make API call to fetch user profile data
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        f"http://127.0.0.1:8000/api/auth/profile/{self.profile_username}",
+                        headers={
+                            "Accept": "application/json",
+                            "Content-Type": "application/json"
+                        }
+                    )
+                    
+                    if response.status_code == 200:
+                        user_data = response.json()
+                        print(f"Received user data: {user_data}")  # Debug print
+                        
+                        # Update basic info
+                        self.first_name = user_data.get("first_name", "")
+                        self.last_name = user_data.get("last_name", "")
+                        self.name = f"{self.first_name} {self.last_name}"
+                        self.job_title = user_data.get("job_title", "")
+                        self.experience_level = user_data.get("experience_level", "")
+                        self.category = user_data.get("category", "")
+                        self.about = user_data.get("about", "")
+                        
+                        # Handle skills
+                        skills_data = user_data.get("skills", [])
+                        if isinstance(skills_data, list):
+                            self.skills = skills_data
+                        elif isinstance(skills_data, str):
+                            # Handle case where skills might be a comma-separated string
+                            self.skills = [s.strip() for s in skills_data.split(",") if s.strip()]
+                        
+                        # Handle projects
+                        projects_data = user_data.get("projects", [])
+                        if isinstance(projects_data, list):
+                            self.projects = projects_data
+                        elif isinstance(projects_data, str):
+                            # Handle case where projects might be a comma-separated string
+                            self.projects = [p.strip() for p in projects_data.split(",") if p.strip()]
+                            
+                        # Handle social links
+                        self.linkedin_link = user_data.get("linkedin_link", "")
+                        self.github_link = user_data.get("github_link", "")
+                        self.portfolio_link = user_data.get("portfolio_link", "")
+                        
+                        # Handle profile picture if available
+                        if "profile_picture" in user_data:
+                            AuthState.profile_picture = user_data["profile_picture"]
+                    else:
+                        print(f"Error fetching profile data: {response.status_code}")
+                        print(f"Response: {response.text}")
+                        # Use demo data as fallback
+                        self.name = f"Profile of {self.profile_username}"
+                        
+            except Exception as e:
+                print(f"Error in load_profile_data: {str(e)}")
+                # Use demo data as fallback
+                self.name = f"Profile of {self.profile_username}"
 
 def skill_badge(skill: str) -> rx.Component:
     """Create a badge for a skill."""
@@ -596,21 +717,73 @@ def edit_form() -> rx.Component:
         open=State.show_edit_form,
     )
 
+@rx.page(route="/profile/[profile_name]")
 def profile_page() -> rx.Component:
     """Render the profile page."""
     return rx.box(
         rx.center(
-            # Always display the profile
-            profile_display(),
-            # Include the edit form modal
-            edit_form(),
+            rx.cond(
+                State.get_username != "",
+                # Profile loaded successfully
+                rx.vstack(
+                    rx.hstack(
+                        rx.heading(
+                            State.name,
+                            size="4",
+                            color="white",
+                            class_name="mb-4"
+                        ),
+                        rx.spacer(),
+                        width="100%",
+                    ),
+                    # Profile content
+                    profile_display(),
+                    # Edit form modal
+                    edit_form(),
+                    width="100%",
+                    padding="4",
+                ),
+                # Loading or error state
+                rx.vstack(
+                    rx.heading(
+                        "Loading profile...",
+                        size="4",
+                        color="white",
+                        class_name="mb-4"
+                    ),
+                    rx.spinner(
+                        color="white",
+                        size="3",
+                        thickness=4,
+                    ),
+                    padding="8",
+                ),
+            ),
+            width="100%",
+            padding="4",
+            height="100vh"
+        ),
+        on_mount=State.on_mount,
+        class_name="min-h-screen bg-gray-900 py-8 items-center justify-center"
+    )
+
+@rx.page(route="/profile")
+def base_profile_page() -> rx.Component:
+    """Render the base profile page."""
+    return rx.box(
+        rx.center(
+            rx.vstack(
+                rx.heading("Please provide a username", size="4", color="white"),
+                rx.button(
+                    "Go Home",
+                    on_click=rx.redirect("/"),
+                    class_name="bg-sky-600 text-white px-6 py-2 rounded-lg"
+                ),
+                padding="8",
+            ),
             width="100%",
             padding="4",
             height="100vh"
         ),
         class_name="min-h-screen bg-gray-900 py-8 items-center justify-center"
     )
-
-# Create the Reflex app
-app = rx.App()
-app.add_page(profile_page, route="/profile")

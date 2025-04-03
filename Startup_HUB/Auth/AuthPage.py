@@ -63,9 +63,14 @@ class AuthState(BaseState):
                 
                 if response.status_code == 200:
                     data = response.json()
-                    # Store the token in local storage or state management
+                    # Get username from response data
+                    username = data.get("username")
+                    if not username:
+                        # If username not in response, use email prefix as fallback
+                        username = self.email.split('@')[0]
+                    
                     self.success = "Login successful!"
-                    return rx.redirect("/profile")
+                    return rx.redirect(f"/profile/{username}")
                 else:
                     error_data = response.json()
                     raise Exception(error_data.get("error", "Login failed. Please try again."))
@@ -115,9 +120,13 @@ class AuthState(BaseState):
                 )
                 
                 if response.status_code == 201:
-                    self.success = "Registration successful! Please login."
-                    self.show_login = True
+                    data = response.json()
+                    # Use the username we sent in the registration form
+                    username = self.username
+                    
+                    self.success = "Registration successful!"
                     self.clear_form()
+                    return rx.redirect(f"/profile/{username}")
                 else:
                     error_data = response.json()
                     # Handle specific error cases
@@ -307,6 +316,7 @@ def signup_form() -> rx.Component:
         class_name="w-full max-w-md p-8"
     )
 
+@rx.page(route="/login")
 def login_page() -> rx.Component:
     return rx.box(
         rx.hstack(
@@ -347,5 +357,31 @@ def login_page() -> rx.Component:
         class_name="min-h-screen flex justify-center items-center bg-gray-900 px-4"
     )
 
+@rx.page(route="/register")
+def register_page() -> rx.Component:
+    return rx.box(
+        rx.hstack(
+            # Left box - Signup form
+            rx.box(
+                signup_form(),
+                class_name="w-1/2 h-[600px] rounded-l-2xl overflow-hidden flex items-center justify-center bg-white"
+            ),
+            
+            # Right box - Image
+            rx.box(
+                rx.image(
+                    src="/Logo.png",
+                    class_name="w-full h-full object-cover"
+                ),
+                class_name="w-1/2 h-[600px] rounded-r-2xl overflow-hidden"
+            ),
+            
+            class_name="w-full max-w-4xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden"
+        ),
+        class_name="min-h-screen flex justify-center items-center bg-gray-900 px-4"
+    )
+
+# Initialize the app with both routes
 app = rx.App()
 app.add_page(login_page)
+app.add_page(register_page)

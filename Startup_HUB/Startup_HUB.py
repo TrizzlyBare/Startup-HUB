@@ -130,11 +130,10 @@ def index() -> rx.Component:
 # Initialize the app with states
 app = rx.App()
 
-
 app.add_page(custom_index, route="/")
 app.add_page(login_page, route="/login")
-app.add_page(profile_page, route="/profile")
 app.add_page(match_page, route="/match")
 app.add_page(chat_page, route="/chat")
 app.add_page(search_page, route="/search")
 app.add_page(my_projects_page, route="/my-projects")
+app.add_page(profile_page, route="/profile/[profile_name]")
