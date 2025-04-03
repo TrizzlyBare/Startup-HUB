@@ -304,20 +304,41 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
     authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    http_method_names = ["get", "put", "delete"]
+    http_method_names = ["get", "put", "delete", "post"]  # Add POST method
     lookup_field = "username"
     queryset = CustomUser.objects.all()
 
     def get_object(self):
+        """
+        Retrieve or create user profile
+        """
         username = self.kwargs.get("username")
         if username:
             try:
                 return CustomUser.objects.get(username=username)
             except CustomUser.DoesNotExist:
+                # If using POST and profile doesn't exist, create it for the current user
+                if self.request.method == "POST":
+                    return self.request.user
                 raise Http404("User not found")
         return self.request.user
 
+    def create(self, request, *args, **kwargs):
+        """
+        Create or update profile for the current user
+        """
+        # Ensure only authenticated users can create/update their own profile
+        if request.user.username != kwargs.get("username", request.user.username):
+            return Response(
+                {"error": "You can only create/update your own profile"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Use the update method for creating/updating
+        return self.update(request, *args, **kwargs)
+
     def retrieve(self, request, *args, **kwargs):
+        """Retrieve user profile"""
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
@@ -334,6 +355,7 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def destroy(self, request, *args, **kwargs):
+        """Delete user account"""
         user = self.get_object()
 
         # Delete auth token first if it exists
@@ -347,6 +369,12 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
             {"message": "Your account has been permanently deleted"},
             status=status.HTTP_204_NO_CONTENT,
         )
+
+    def post(self, request, *args, **kwargs):
+        """
+        Handle profile creation or update
+        """
+        return self.create(request, *args, **kwargs)
 
 
 class PasswordChangeView(generics.GenericAPIView):
