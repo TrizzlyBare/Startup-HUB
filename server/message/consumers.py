@@ -54,15 +54,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
         )
 
-        # Fetch online participants
-        participants = await self.get_online_participants()
-        await self.send(
-            text_data=json.dumps(
-                {"type": "participants.list", "participants": participants},
-                cls=UUIDEncoder,
-            )
-        )
-
     async def disconnect(self, close_code):
         # Leave room group
         if hasattr(self, "room_group_name"):
@@ -70,7 +61,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 self.room_group_name, self.channel_name
             )
 
-            # Leave user-specific group
             await self.channel_layer.group_discard(
                 self.user_specific_group, self.channel_name
             )
@@ -95,12 +85,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 )
 
         elif message_type == "typing.status":
-            # Store typing status in Redis with expiration
-            is_typing = data.get("is_typing", False)
-            if is_typing:
-                # Set typing status with 3-second expiration
-                await self.set_typing_status(is_typing)
-
             # Forward typing status
             await self.channel_layer.group_send(
                 self.room_group_name,
@@ -108,7 +92,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     "type": "typing.status",
                     "user_id": str(self.user.id),
                     "username": self.user.username,
-                    "is_typing": is_typing,
+                    "is_typing": data.get("is_typing", False),
                 },
             )
 
@@ -127,23 +111,78 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 },
             )
 
-        elif message_type == "fetch.history":
-            # Fetch chat history with pagination
-            before_id = data.get("before_id")
-            limit = data.get("limit", 20)
+        elif message_type == "initiate_video_call":
+            # User wants to start a video call with room participants
+            video_room_id = await self.initiate_video_call()
 
-            history = await self.get_message_history(before_id, limit)
-
+            # Notify the user about the created room
             await self.send(
                 text_data=json.dumps(
                     {
-                        "type": "chat.history",
-                        "messages": history,
-                        "room_id": str(self.room_id),
-                    },
-                    cls=UUIDEncoder,
+                        "type": "video_call_created",
+                        "video_room_id": str(video_room_id),
+                        "message_room_id": str(self.room_id),
+                    }
                 )
             )
+
+        elif message_type == "invite_to_video_call":
+            # User wants to invite specific users to a video call
+            recipient_id = data.get("recipient_id")
+            video_room_id = data.get("video_room_id")
+
+            if recipient_id and video_room_id:
+                # Check if recipient is in this chat room
+                is_participant = await self.is_user_in_room(recipient_id, self.room_id)
+                if is_participant:
+                    recipient_username = await self.get_username(recipient_id)
+
+                    # Send invitation to specific user
+                    await self.channel_layer.group_send(
+                        f"user_{recipient_id}",
+                        {
+                            "type": "notification",
+                            "message": "video_call_invitation",
+                            "data": {
+                                "video_room_id": video_room_id,
+                                "message_room_id": str(self.room_id),
+                                "inviter_id": self.user.id,
+                                "inviter_username": self.user.username,
+                            },
+                        },
+                    )
+
+                    # Notify room about the invitation
+                    await self.channel_layer.group_send(
+                        self.room_group_name,
+                        {
+                            "type": "notification",
+                            "message": "video_call_invitation_sent",
+                            "data": {
+                                "video_room_id": video_room_id,
+                                "message_room_id": str(self.room_id),
+                                "inviter_id": self.user.id,
+                                "inviter_username": self.user.username,
+                                "invited_user_id": recipient_id,
+                                "invited_username": recipient_username,
+                            },
+                        },
+                    )
+
+                    # Create a system message about the invitation
+                    await self.save_system_message(
+                        f"invited {recipient_username} to join a video call"
+                    )
+                else:
+                    # Recipient not in this room
+                    await self.send(
+                        text_data=json.dumps(
+                            {
+                                "type": "error",
+                                "message": "The invited user is not a participant in this room",
+                            }
+                        )
+                    )
 
     async def chat_message(self, event):
         """Handler for chat messages"""
@@ -198,15 +237,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
 
     async def notification(self, event):
-        """Handler for user notifications"""
-        # Send notification to WebSocket
+        """Handler for generic notifications including video calls"""
         await self.send(
             text_data=json.dumps(
                 {
                     "type": "notification",
                     "message": event["message"],
-                    "data": event.get("data", {}),
-                }
+                    "data": event["data"],
+                },
+                cls=UUIDEncoder,
             )
         )
 
@@ -244,7 +283,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         f"user_{participant.user.id}",
                         {
                             "type": "notification",
-                            "message": "New message",
+                            "message": "new_message",
                             "data": {
                                 "room_id": str(self.room_id),
                                 "sender": self.user.username,
@@ -320,17 +359,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except Participant.DoesNotExist:
             pass
 
-    async def set_typing_status(self, is_typing):
-        """Store typing status in Redis with expiration"""
-        # Using Redis channel layer to store ephemeral data
-        channel_name = f"typing:{self.room_id}:{self.user.id}"
-
-        if is_typing:
-            # This will be automatically cleaned up by Redis after 3 seconds
-            await self.channel_layer.send(
-                channel_name, {"type": "typing_indicator", "is_typing": True}
-            )
-
     @database_sync_to_async
     def get_unread_count(self):
         """Get count of unread messages for current user in this room"""
@@ -341,77 +369,71 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return 0
 
     @database_sync_to_async
-    def get_message_history(self, before_id=None, limit=20):
-        """Get paginated message history"""
-        query = Message.objects.filter(room_id=self.room_id)
-
-        if before_id:
-            try:
-                before_message = Message.objects.get(id=before_id)
-                query = query.filter(sent_at__lt=before_message.sent_at)
-            except (Message.DoesNotExist, ValueError):
-                pass
-
-        messages = (
-            query.select_related("sender")
-            .prefetch_related("receipts__recipient")
-            .order_by("-sent_at")[:limit]
-        )
-
-        # Convert to list of dictionaries
-        result = []
-        for message in messages:
-            receipts_data = [
-                {
-                    "recipient_id": str(receipt.recipient.id),
-                    "recipient_username": receipt.recipient.username,
-                    "is_read": receipt.is_read,
-                }
-                for receipt in message.receipts.all()
-            ]
-
-            total = len(receipts_data)
-            read = sum(1 for r in receipts_data if r["is_read"])
-
-            result.append(
-                {
-                    "id": str(message.id),
-                    "content": message.content,
-                    "sender_id": str(message.sender.id),
-                    "sender_username": message.sender.username,
-                    "sent_at": message.sent_at.isoformat(),
-                    "receipts": receipts_data,
-                    "read_status": {
-                        "total": total,
-                        "read": read,
-                        "unread": total - read,
-                    },
-                }
-            )
-
-        return result
+    def is_user_in_room(self, user_id, room_id):
+        """Check if a user is participant in this room"""
+        return Participant.objects.filter(user_id=user_id, room_id=room_id).exists()
 
     @database_sync_to_async
-    def get_online_participants(self):
-        """Get list of online participants"""
-        # Online participants are those who have been active in the last 5 minutes
-        five_min_ago = timezone.now() - timezone.timedelta(minutes=5)
-        participants = Participant.objects.filter(
-            room_id=self.room_id, last_active__gte=five_min_ago
-        ).select_related("user")
+    def get_username(self, user_id):
+        """Get a username for a user ID"""
+        try:
+            user = User.objects.get(id=user_id)
+            return user.username
+        except User.DoesNotExist:
+            return "Unknown User"
 
-        return [
-            {
-                "user_id": str(participant.user.id),
-                "username": participant.user.username,
-                "last_active": (
-                    participant.last_active.isoformat()
-                    if participant.last_active
-                    else None
-                ),
-            }
-            for participant in participants
-        ]
+    @database_sync_to_async
+    def save_system_message(self, content):
+        """Save a system message"""
+        room = Room.objects.get(id=self.room_id)
+        Message.objects.create(room=room, sender=self.user, content=content)
+
+    @database_sync_to_async
+    def initiate_video_call(self):
+        """Create a video call room linked to this chat room"""
+        from webcall.models import Room as VideoRoom, Participant as VideoParticipant
+
+        # Get the chat room
+        chat_room = Room.objects.get(id=self.room_id)
+
+        # Create a video call room
+        video_room = VideoRoom.objects.create(
+            name=f"Call in {chat_room.name}",
+            max_participants=20,
+            is_recording_enabled=False,
+            is_active=True,
+        )
+
+        # Add the current user as a participant
+        VideoParticipant.objects.create(
+            user=self.user, room=video_room, last_active=timezone.now()
+        )
+
+        # Create a system message
+        Message.objects.create(
+            room=chat_room, sender=self.user, content=f"Started a video call"
+        )
+
+        # Notify all participants in the chat room
+        asyncio.create_task(
+            self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "notification",
+                    "message": "video_call_started",
+                    "data": {
+                        "video_room_id": str(video_room.id),
+                        "message_room_id": str(self.room_id),
+                        "initiator_id": self.user.id,
+                        "initiator_username": self.user.username,
+                    },
+                },
+            )
+        )
+
+        return video_room.id
+    
+    # Removed duplicate notification method to resolve errors
 
 
 class EchoConsumer(WebsocketConsumer):
