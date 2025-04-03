@@ -38,4 +38,5 @@ typing_extensions==4.12.2
 uritemplate==4.1.1
 urllib3==2.3.0
 zope.interface==7.2
-pillow==11.1.0
+
+reflex==0.7.5

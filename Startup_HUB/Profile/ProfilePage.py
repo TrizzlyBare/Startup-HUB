@@ -5,13 +5,19 @@ import httpx
 class State(rx.State):
     """State for the profile page."""
     
+    # API endpoint
+    API_URL = "http://100.95.107.24:8000/api/auth"
+    
     # Basic Info
-    name: str = "Nanashi Mumei"
-    first_name: str = "Nanashi"
-    last_name: str = "Mumei"
-    job_title: str = "KFC Worker"
-    experience_level: str = "1-3 years"
-    category: str = "Technology"
+    name: str = ""
+    first_name: str = ""
+    last_name: str = ""
+    job_title: str = ""
+    experience_level: str = ""
+    category: str = ""
+    
+    # Debug information
+    auth_debug_result: str = ""
     
     # Profile username (different from route parameter)
     profile_username: str = ""
@@ -32,24 +38,70 @@ class State(rx.State):
     async def on_mount(self):
         """Load profile data when component mounts."""
         if hasattr(self, "router"):
+            # Initialize token from localStorage if needed
+            auth_state = await self.get_state(AuthState)
+            if not auth_state.token:
+                token_from_storage = await rx.call_script("localStorage.getItem('auth_token')")
+                if token_from_storage:
+                    auth_state.set_token(token_from_storage)
+                    print(f"Token initialized from localStorage: {token_from_storage}")
+            
+            # We can't use AuthState.is_authed directly in if statements
+            # Instead, load profile data and let the UI handle auth
             params = getattr(self.router.page, "params", {})
             username = params.get("profile_name", "")
+            
+            # Get the correct username case from auth debug if available
+            if username and auth_state.token:
+                try:
+                    auth_debug_data = await self.debug_auth_token(auth_state.token)
+                    user_data = auth_debug_data.get("user_from_token", {})
+                    if user_data and "username" in user_data:
+                        # Use the username from the auth debug data to ensure case consistency
+                        correct_username = user_data["username"]
+                        print(f"Using username from auth debug: {correct_username}")
+                        
+                        # If the username case doesn't match, redirect to the correct URL
+                        if correct_username.lower() != username.lower():
+                            print(f"Username case mismatch: {username} vs {correct_username}")
+                            return rx.redirect(f"/profile/{correct_username}")
+                        
+                        username = correct_username
+                        
+                        # Ensure token is synchronized with the server
+                        token_from_header = auth_debug_data.get("token_from_header")
+                        if token_from_header and token_from_header != auth_state.token:
+                            print(f"Token mismatch detected. Updating token from {auth_state.token} to {token_from_header}")
+                            auth_state.set_token(token_from_header)
+                            # Update localStorage with the correct token
+                            await rx.call_script(f"localStorage.setItem('auth_token', '{token_from_header}')")
+                except Exception as e:
+                    print(f"Error getting username from auth debug: {e}")
+            
             if username:
                 self.profile_username = username
                 await self.load_profile_data()
-            else:
-                return rx.redirect("/")
+            # else:
+            #     return rx.redirect("/")
     
     # About section
     about: str = ""
     
     # Skills (list for better management)
-    skills: list = []
-    new_skill: str = ""
+    skills: list[str] = []
     
     # Projects (list of projects)
-    projects: list = []
-    new_project: str = ""
+    projects: list[str] = []
+    
+    @rx.var
+    def formatted_skills(self) -> str:
+        """Get skills as a comma-separated string."""
+        return ",".join(self.skills) if self.skills else ""
+
+    @rx.var
+    def formatted_projects(self) -> str:
+        """Get projects as a comma-separated string."""
+        return ",".join(self.projects) if self.projects else ""
     
     # Online presence links
     linkedin_link: str = ""
@@ -68,6 +120,207 @@ class State(rx.State):
         """Toggle edit form visibility."""
         self.show_edit_form = not self.show_edit_form
 
+    async def debug_auth_token(self, token: str):
+        """Debug authentication token validity using the auth-debug endpoint."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.API_URL}/auth-debug/",
+                    headers={
+                        "Authorization": f"Token {token}",
+                        "Accept": "application/json"
+                    }
+                )
+                
+                print(f"Profile auth debug response: Status {response.status_code}")
+                debug_data = response.json() if response.status_code == 200 else {"error": response.text}
+                print(f"Profile auth debug data: {debug_data}")
+                
+                # Store debug result
+                self.auth_debug_result = f"Auth debug: {debug_data}"
+                return debug_data
+        except Exception as e:
+            print(f"Error in profile debug_auth_token: {e}")
+            self.auth_debug_result = f"Auth debug error: {str(e)}"
+            return {"error": str(e)}
+
+    def handle_auth_error(self):
+        """Handle authentication errors by redirecting to login."""
+        # Clear token from state
+        AuthState.token = ""
+        
+        # Clear token from localStorage and redirect
+        return rx.call_script("""
+            localStorage.removeItem('auth_token');
+            window.location.href = '/login';
+        """)
+
+    def check_auth(self):
+        """Check if user is authenticated using localStorage."""
+        return rx.call_script("""
+            const token = localStorage.getItem('auth_token');
+            if (!token) {
+                window.location.href = '/login';
+                return false;
+            }
+            return true;
+        """)
+
+    async def load_profile_data(self):
+        """Load profile data based on the username from the URL."""
+        if self.profile_username:
+            try:
+                # Get token from AuthState
+                auth_state = await self.get_state(AuthState)
+                auth_token = auth_state.token
+                
+                # If token is None, try to get it from localStorage
+                if not auth_token:
+                    auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                    if auth_token:
+                        # Update AuthState with the token from localStorage
+                        auth_state.set_token(auth_token)
+                
+                print(f"Retrieved auth token from AuthState: {auth_token}")
+                
+                # Debug the token to get the correct username case
+                try:
+                    auth_debug_data = await self.debug_auth_token(auth_token)
+                    user_data = auth_debug_data.get("user_from_token", {})
+                    if user_data and "username" in user_data:
+                        # Use the username from the auth debug data to ensure case consistency
+                        correct_username = user_data["username"]
+                        print(f"Using username from auth debug: {correct_username}")
+                        
+                        # If the username case doesn't match, update it
+                        if correct_username.lower() != self.profile_username.lower():
+                            print(f"Username case mismatch: {self.profile_username} vs {correct_username}")
+                            self.profile_username = correct_username
+                except Exception as e:
+                    print(f"Debug token error: {e}")
+                
+                # Use httpx to make the request directly from the server
+                try:
+                    async with httpx.AsyncClient() as client:
+                        # Get the headers
+                        headers = {
+                            "Content-Type": "application/json",
+                            "Authorization": f"Token {auth_token}"
+                        }
+                        
+                        # Make the request with the correct username case
+                        response = await client.get(
+                            f"{self.API_URL}/profiles/{self.profile_username}/",
+                            headers=headers,
+                            follow_redirects=True
+                        )
+                        
+                        print(f"Profile API Response: {response.status_code}")
+                        
+                        if response.status_code == 200:
+                            # Process the response data
+                            data = response.json()
+                            print(f"Received profile data: {data}")
+                            
+                            # Update basic info - handle null values properly
+                            self.first_name = data.get("first_name") or ""
+                            self.last_name = data.get("last_name") or ""
+                            self.name = f"{self.first_name} {self.last_name}".strip() or "No Name"
+                            
+                            # Handle field name differences
+                            self.job_title = data.get("job_title") or "No Job Title"
+                            self.experience_level = data.get("experience_level") or data.get("experience") or "Not Specified"
+                            self.category = data.get("category") or data.get("industry") or "Not Specified"
+                            self.about = data.get("about") or data.get("bio") or ""
+                            
+                            # Handle skills - ensure null data shows properly
+                            skills_data = data.get("skills") or []
+                            if isinstance(skills_data, list):
+                                self.skills = skills_data
+                            elif isinstance(skills_data, str):
+                                # Handle case where skills might be a comma-separated string
+                                self.skills = [s.strip() for s in skills_data.split(",") if s.strip()]
+                            else:
+                                self.skills = []
+                            
+                            # Handle projects - ensure null data shows properly
+                            projects_data = data.get("projects") or []
+                            if isinstance(projects_data, list):
+                                self.projects = projects_data
+                            elif isinstance(projects_data, str):
+                                # Handle case where projects might be a comma-separated string
+                                self.projects = [p.strip() for p in projects_data.split(",") if p.strip()]
+                            else:
+                                self.projects = []
+                                
+                            # Handle social links - ensure null data shows properly
+                            # Check for contact_links array first
+                            contact_links = data.get("contact_links") or []
+                            if contact_links:
+                                # Extract links from contact_links array
+                                for link in contact_links:
+                                    if "linkedin" in link.lower():
+                                        self.linkedin_link = link
+                                    elif "github" in link.lower():
+                                        self.github_link = link
+                                    elif "portfolio" in link.lower() or "website" in link.lower():
+                                        self.portfolio_link = link
+                            else:
+                                # Fall back to individual link fields
+                                self.linkedin_link = data.get("linkedin_link") or ""
+                                self.github_link = data.get("github_link") or ""
+                                self.portfolio_link = data.get("portfolio_link") or ""
+                        elif response.status_code == 404:
+                            # Profile doesn't exist yet, create it
+                            print(f"Profile for {self.profile_username} doesn't exist yet. Creating it...")
+                            
+                            # Get user data from auth debug
+                            auth_debug_data = await self.debug_auth_token(auth_token)
+                            user_data = auth_debug_data.get("user_from_token", {})
+                            
+                            # Create a new profile
+                            create_response = await client.post(
+                                f"{self.API_URL}/profiles/",
+                                headers=headers,
+                                json={
+                                    "username": self.profile_username,
+                                    "first_name": user_data.get("first_name", ""),
+                                    "last_name": user_data.get("last_name", ""),
+                                    "email": user_data.get("email", ""),
+                                    "bio": "",
+                                    "industry": "Not Specified",
+                                    "experience": "Not Specified",
+                                    "skills": [],
+                                    "contact_links": []
+                                }
+                            )
+                            
+                            print(f"Profile creation response: {create_response.status_code}")
+                            
+                            if create_response.status_code in [200, 201]:
+                                # Profile created successfully, load it
+                                print("Profile created successfully. Loading profile data...")
+                                return await self.load_profile_data()
+                            else:
+                                print(f"Error creating profile: {create_response.text}")
+                        elif response.status_code == 401:
+                            print(f"Authentication error: {response.status_code}")
+                            # Use a non-event-handler function to redirect for auth errors
+                            return self.handle_auth_error()
+                        else:
+                            print(f"Error fetching profile data: {response.status_code}")
+                except Exception as e:
+                    print(f"Error in httpx request: {e}")
+                    
+            except Exception as e:
+                print(f"Error in load_profile_data: {str(e)}")
+
+    def logout(self):
+        """Log out by clearing the authentication token and redirecting to login."""
+        # Use AuthState's logout method to properly clear the token
+        AuthState.clear_token()
+        return rx.redirect("/login")
+
     async def save_changes(self, form_data: dict):
         """Save profile changes to the API."""
         # Update profile data from form
@@ -81,39 +334,123 @@ class State(rx.State):
         self.github_link = form_data.get("github_link", self.github_link)
         self.portfolio_link = form_data.get("portfolio_link", self.portfolio_link)
         
-        # Compose full name
-        self.name = f"{self.first_name} {self.last_name}"
+        # Update skills from form data
+        skills_value = form_data.get("skills", "")
+        if skills_value:
+            self.skills = [s.strip() for s in skills_value.split(",") if s.strip()]
         
-        # Get username from router
-        username = self.router.page.params.get("profile_name", "")
-        if username:
-            try:
-                # Prepare data to send to API
-                profile_data = {
-                    "first_name": self.first_name,
-                    "last_name": self.last_name,
-                    "job_title": self.job_title,
-                    "about": self.about,
-                    "category": self.category,
-                    "experience_level": self.experience_level,
-                    "skills": self.skills,
-                    "projects": self.projects,
-                    "linkedin_link": self.linkedin_link,
-                    "github_link": self.github_link,
-                    "portfolio_link": self.portfolio_link
+        # Update projects from form data
+        projects_value = form_data.get("projects", "")
+        if projects_value:
+            self.projects = [p.strip() for p in projects_value.split(",") if p.strip()]
+        
+        # Compose full name
+        self.name = f"{self.first_name} {self.last_name}".strip() or "No Name"
+        
+        # Get token from AuthState
+        auth_state = await self.get_state(AuthState)
+        auth_token = auth_state.token
+        
+        # If token is not in AuthState, try to get it from localStorage
+        if not auth_token:
+            auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+            if auth_token:
+                # Update AuthState with the token from localStorage
+                auth_state.set_token(auth_token)
+            else:
+                # If no token found, redirect to login
+                return self.handle_auth_error()
+        
+        # Get the correct username case from auth debug
+        try:
+            auth_debug_data = await self.debug_auth_token(auth_token)
+            user_data = auth_debug_data.get("user_from_token", {})
+            if user_data and "username" in user_data:
+                # Use the username from the auth debug data to ensure case consistency
+                correct_username = user_data["username"]
+                print(f"Using username from auth debug for update: {correct_username}")
+                
+                # If the username case doesn't match, update it
+                if correct_username.lower() != self.profile_username.lower():
+                    print(f"Username case mismatch for update: {self.profile_username} vs {correct_username}")
+                    self.profile_username = correct_username
+        except Exception as e:
+            print(f"Debug token error during update: {e}")
+        
+        # Create profile data for API - map to correct field names
+        profile_data = {
+            "username": self.profile_username,  # Include username field
+            "first_name": self.first_name,
+            "last_name": self.last_name,
+            "bio": self.about,  # Map about to bio
+            "industry": self.category,  # Map category to industry
+            "experience": self.experience_level,  # Map experience_level to experience
+            "skills": ",".join(self.skills) if self.skills else "",  # Send skills as a comma-separated string
+            "contact_links": [
+                {"platform": "linkedin", "url": self.linkedin_link} if self.linkedin_link else None,
+                {"platform": "github", "url": self.github_link} if self.github_link else None,
+                {"platform": "portfolio", "url": self.portfolio_link} if self.portfolio_link else None
+            ]
+        }
+        
+        # Remove None values from contact_links
+        profile_data["contact_links"] = [link for link in profile_data["contact_links"] if link is not None]
+        
+        try:
+            # Make the API request directly with httpx
+            async with httpx.AsyncClient() as client:
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Token {auth_token}"
                 }
                 
-                # Make API call to update profile
-                async with httpx.AsyncClient() as client:
-                    response = await client.put(
-                        f"http://100.95.107.24:8000/api/auth/profile/{username}",
-                        json=profile_data
-                    )
-                    
-                    if response.status_code != 200:
-                        print(f"Error updating profile: {response.text}")
-            except Exception as e:
-                print(f"Error saving profile changes: {e}")
+                # Try updating the profile using PUT method
+                response = await client.put(
+                    f"{self.API_URL}/profiles/{self.profile_username}/",
+                    json=profile_data,
+                    headers=headers
+                )
+                
+                print(f"Profile update response: {response.status_code}")
+                print(f"Profile update response text: {response.text}")
+                
+                if response.status_code in [200, 201]:
+                    print("Profile updated successfully")
+                    # Close the form
+                    self.show_edit_form = False
+                    # Reload profile data to show updates
+                    await self.load_profile_data()
+                elif response.status_code == 401:
+                    print("Authentication error when saving profile")
+                    # Handle auth errors
+                    return self.handle_auth_error()
+                else:
+                    print(f"Error updating profile: {response.text}")
+                    # Try updating with a different endpoint
+                    try:
+                        # Try updating the profile with a different endpoint
+                        update_response = await client.put(
+                            f"{self.API_URL}/profile/{self.profile_username}/",
+                            json=profile_data,
+                            headers=headers
+                        )
+                        
+                        print(f"Profile update (alternative) response: {update_response.status_code}")
+                        print(f"Profile update (alternative) response text: {update_response.text}")
+                        
+                        if update_response.status_code in [200, 201]:
+                            print("Profile updated successfully with alternative endpoint")
+                            # Close the form
+                            self.show_edit_form = False
+                            # Reload profile data to show updates
+                            await self.load_profile_data()
+                        else:
+                            print(f"Error updating profile with alternative endpoint: {update_response.text}")
+                    except Exception as alt_error:
+                        print(f"Error with alternative update request: {alt_error}")
+        
+        except Exception as e:
+            print(f"Error saving profile changes: {e}")
         
         # Close the form modal
         self.show_edit_form = False
@@ -122,146 +459,10 @@ class State(rx.State):
         """Cancel editing."""
         self.show_edit_form = False
 
-    def set_first_name(self, value: str):
-        """Update first name field."""
-        self.first_name = value
-
-    def set_last_name(self, value: str):
-        """Update last name field."""
-        self.last_name = value
-
-    def set_about(self, value: str):
-        """Update about field."""
-        self.about = value
-
-    def set_category(self, value: str):
-        """Update industry category."""
-        self.category = value
-
-    def set_experience_level(self, value: str):
-        """Update experience level."""
-        self.experience_level = value
-
-    def set_linkedin_link(self, value: str):
-        """Update LinkedIn URL."""
-        self.linkedin_link = value
-
-    def set_github_link(self, value: str):
-        """Update GitHub URL."""
-        self.github_link = value
-
-    def set_portfolio_link(self, value: str):
-        """Update portfolio website URL."""
-        self.portfolio_link = value
-
-    def set_new_skill(self, value: str):
-        """Set new skill to be added."""
-        self.new_skill = value
-        
-    def set_new_project(self, value: str):
-        """Set new project to be added."""
-        self.new_project = value
-
-    def add_skill(self, key_event=None):
-        """Add a new skill to the skills list.
-        
-        Args:
-            key_event: The keyboard event, if triggered by a key press.
-        """
-        # Only proceed if it's not a key event or if the key is Enter
-        if key_event is None or key_event.key == "Enter":
-            if self.new_skill and self.new_skill not in self.skills:
-                self.skills.append(self.new_skill)
-                self.new_skill = ""
-
-    def remove_skill(self, skill: str):
-        """Remove a skill from the skills list."""
-        if skill in self.skills:
-            self.skills.remove(skill)
-            
-    def add_project(self, key_event=None):
-        """Add a new project to the projects list.
-        
-        Args:
-            key_event: The keyboard event, if triggered by a key press.
-        """
-        # Only proceed if it's not a key event or if the key is Enter
-        if key_event is None or key_event.key == "Enter":
-            if self.new_project and self.new_project not in self.projects:
-                self.projects.append(self.new_project)
-                self.new_project = ""
-
-    def remove_project(self, project: str):
-        """Remove a project from the projects list."""
-        if project in self.projects:
-            self.projects.remove(project)
-
     @rx.var
     def has_about(self) -> bool:
         """Check if about text exists."""
         return len(self.about) > 0
-
-    async def load_profile_data(self):
-        """Load profile data based on the username from the URL."""
-        if self.profile_username:
-            try:
-                # Make API call to fetch user profile data
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        f"http://100.95.107.24:8000/api/auth/profile/{self.profile_username}",
-                        headers={
-                            "Accept": "application/json",
-                            "Content-Type": "application/json"
-                        }
-                    )
-                    
-                    if response.status_code == 200:
-                        user_data = response.json()
-                        print(f"Received user data: {user_data}")  # Debug print
-                        
-                        # Update basic info
-                        self.first_name = user_data.get("first_name", "")
-                        self.last_name = user_data.get("last_name", "")
-                        self.name = f"{self.first_name} {self.last_name}"
-                        self.job_title = user_data.get("job_title", "")
-                        self.experience_level = user_data.get("experience_level", "")
-                        self.category = user_data.get("category", "")
-                        self.about = user_data.get("about", "")
-                        
-                        # Handle skills
-                        skills_data = user_data.get("skills", [])
-                        if isinstance(skills_data, list):
-                            self.skills = skills_data
-                        elif isinstance(skills_data, str):
-                            # Handle case where skills might be a comma-separated string
-                            self.skills = [s.strip() for s in skills_data.split(",") if s.strip()]
-                        
-                        # Handle projects
-                        projects_data = user_data.get("projects", [])
-                        if isinstance(projects_data, list):
-                            self.projects = projects_data
-                        elif isinstance(projects_data, str):
-                            # Handle case where projects might be a comma-separated string
-                            self.projects = [p.strip() for p in projects_data.split(",") if p.strip()]
-                            
-                        # Handle social links
-                        self.linkedin_link = user_data.get("linkedin_link", "")
-                        self.github_link = user_data.get("github_link", "")
-                        self.portfolio_link = user_data.get("portfolio_link", "")
-                        
-                        # Handle profile picture if available
-                        if "profile_picture" in user_data:
-                            AuthState.profile_picture = user_data["profile_picture"]
-                    else:
-                        print(f"Error fetching profile data: {response.status_code}")
-                        print(f"Response: {response.text}")
-                        # Use demo data as fallback
-                        self.name = f"Profile of {self.profile_username}"
-                        
-            except Exception as e:
-                print(f"Error in load_profile_data: {str(e)}")
-                # Use demo data as fallback
-                self.name = f"Profile of {self.profile_username}"
 
 def skill_badge(skill: str) -> rx.Component:
     """Create a badge for a skill."""
@@ -526,6 +727,7 @@ def edit_form() -> rx.Component:
                             placeholder="Your job title",
                             name="job_title",
                             value=State.job_title,
+                            on_change=State.set_job_title,
                             class_name="w-full p-2 border rounded-lg bg-white",
                         ),
                         
@@ -574,76 +776,22 @@ def edit_form() -> rx.Component:
                         
                         # Skills Section
                         rx.text("Skills", font_weight="medium", align="left", width="100%", margin_top="4"),
-                        rx.flex(
-                            rx.foreach(
-                                State.skills,
-                                lambda skill: rx.hstack(
-                                    rx.text(skill),
-                                    rx.icon(
-                                        "x",
-                                        cursor="pointer",
-                                        on_click=lambda s=skill: State.remove_skill(s),
-                                        color="gray",
-                                        size=16
-                                    ),
-                                    class_name="bg-blue-100 text-blue-700 px-3 py-1 rounded-full m-1",
-                                )
-                            ),
-                            wrap="wrap",
-                            margin_bottom="2",
-                        ),
-                        rx.hstack(
-                            rx.input(
-                                placeholder="Add more skills...",
-                                name="new_skill",
-                                value=State.new_skill,
-                                on_change=State.set_new_skill,
-                                on_key_down=State.add_skill,
-                                class_name="w-full p-2 border rounded-lg bg-white",
-                            ),
-                            rx.button(
-                                "Add",
-                                on_click=State.add_skill,
-                                class_name="bg-sky-600 text-white px-4 py-1 ml-2 rounded-lg",
-                            ),
-                            width="100%",
+                        rx.input(
+                            placeholder="Skills (comma-separated)",
+                            name="skills",
+                            value=State.formatted_skills,
+                            on_change=lambda value: State.set_skills(value.split(",")),
+                            class_name="w-full p-2 border rounded-lg bg-white",
                         ),
                         
                         # Projects Section
                         rx.text("Projects", font_weight="medium", align="left", width="100%", margin_top="4"),
-                        rx.flex(
-                            rx.foreach(
-                                State.projects,
-                                lambda project: rx.hstack(
-                                    rx.text(project),
-                                    rx.icon(
-                                        "x",
-                                        cursor="pointer",
-                                        on_click=lambda p=project: State.remove_project(p),
-                                        color="gray",
-                                        size=16
-                                    ),
-                                    class_name="bg-green-100 text-green-700 px-3 py-1 rounded-full m-1",
-                                )
-                            ),
-                            wrap="wrap",
-                            margin_bottom="2",
-                        ),
-                        rx.hstack(
-                            rx.input(
-                                placeholder="Add project...",
-                                name="new_project",
-                                value=State.new_project,
-                                on_change=State.set_new_project,
-                                on_key_down=State.add_project,
-                                class_name="w-full p-2 border rounded-lg bg-white",
-                            ),
-                            rx.button(
-                                "Add",
-                                on_click=State.add_project,
-                                class_name="bg-sky-600 text-white px-4 py-1 ml-2 rounded-lg",
-                            ),
-                            width="100%",
+                        rx.input(
+                            placeholder="Projects (comma-separated)",
+                            name="projects",
+                            value=State.formatted_projects,
+                            on_change=lambda value: State.set_projects(value.split(",")),
+                            class_name="w-full p-2 border rounded-lg bg-white",
                         ),
                         
                         # Online Presence
@@ -722,42 +870,65 @@ def profile_page() -> rx.Component:
     """Render the profile page."""
     return rx.box(
         rx.center(
-            rx.cond(
-                State.get_username != "",
-                # Profile loaded successfully
-                rx.vstack(
-                    rx.hstack(
-                        rx.heading(
-                            State.name,
-                            size="4",
-                            color="white",
-                            class_name="mb-4"
-                        ),
-                        rx.spacer(),
-                        width="100%",
-                    ),
-                    # Profile content
-                    profile_display(),
-                    # Edit form modal
-                    edit_form(),
-                    width="100%",
-                    padding="4",
-                ),
-                # Loading or error state
-                rx.vstack(
+            rx.vstack(
+                # Auth check on page load
+                rx.script("""
+                    // Check token on page load
+                    const token = localStorage.getItem('auth_token');
+                    if (!token) {
+                        console.log('No token found - redirecting to login');
+                        window.location.href = '/login';
+                    } else {
+                        console.log('Token found in localStorage:', token);
+                        // Update token display
+                        const displayElement = document.getElementById('token-display');
+                        if (displayElement) {
+                            displayElement.textContent = `Token from localStorage: ${token}`;
+                        }
+                    }
+                """),
+                
+                # Page content
+                rx.hstack(
                     rx.heading(
-                        "Loading profile...",
+                        State.name,
                         size="4",
                         color="white",
                         class_name="mb-4"
                     ),
-                    rx.spinner(
-                        color="white",
-                        size="3",
-                        thickness=4,
+                    rx.spacer(),
+                    # Add logout button
+                    rx.button(
+                        "Log Out",
+                        on_click=State.logout,
+                        class_name="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
                     ),
-                    padding="8",
+                    width="100%",
                 ),
+                
+                # Auth Debug Information (displayed at top for easy access)
+                rx.box(
+                    rx.heading("Auth Debug Info", size="6", margin_bottom="2", color="white"),
+                    rx.text(State.auth_debug_result, color="white"),
+                    # Replace direct DOM manipulation with on_mount event handler
+                    rx.html(
+                        "",
+                        id="token-display",
+                        tag="p", 
+                        color="white",
+                    ),
+                    width="100%",
+                    padding="4",
+                    class_name="bg-gray-800 rounded-lg mb-4"
+                ),
+                
+                # Profile content
+                profile_display(),
+                
+                # Edit form modal
+                edit_form(),
+                width="100%",
+                padding="4",
             ),
             width="100%",
             padding="4",
