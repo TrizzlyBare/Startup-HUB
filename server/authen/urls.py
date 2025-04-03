@@ -18,9 +18,6 @@ from .views import (
     PasswordChangeView,
     # Token Views
     GetTokenView,
-    # Past Projects
-    PastProjectView,
-    PastProjectDetailView,
     # Career Summary
     CareerSummaryView,
     # User Search
@@ -68,13 +65,6 @@ urlpatterns = [
     ),
     # User Search Endpoint
     path("users/search/", UserSearchView.as_view(), name="user-search"),
-    # Past Projects Endpoints
-    path("past-projects/", PastProjectView.as_view(), name="past-projects-list"),
-    path(
-        "past-projects/<int:pk>/",
-        PastProjectDetailView.as_view(),
-        name="past-projects-detail",
-    ),
     # Career Summary Endpoint
     path("career-summary/", CareerSummaryView.as_view(), name="career-summary"),
     # Password Management

@@ -1,19 +1,12 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import CustomUser, ContactLink, PastProject
+from .models import CustomUser, ContactLink
 
 
 class ContactLinkInline(admin.TabularInline):
     """Inline admin for contact links"""
 
     model = ContactLink
-    extra = 1
-
-
-class PastProjectInline(admin.TabularInline):
-    """Inline admin for past projects"""
-
-    model = PastProject
     extra = 1
 
 
@@ -41,9 +34,10 @@ class CustomUserAdmin(UserAdmin):
         "skills",
         "industry",
         "career_summary",
+        "past_projects",
     )
     ordering = ("username",)
-    inlines = [ContactLinkInline, PastProjectInline]
+    inlines = [ContactLinkInline]
 
     fieldsets = (
         (None, {"fields": ("username", "password")}),
@@ -53,7 +47,15 @@ class CustomUserAdmin(UserAdmin):
         ),
         (
             "Professional Info",
-            {"fields": ("industry", "experience", "skills", "career_summary")},
+            {
+                "fields": (
+                    "industry",
+                    "experience",
+                    "skills",
+                    "past_projects",
+                    "career_summary",
+                )
+            },
         ),
         (
             "Permissions",
@@ -95,13 +97,3 @@ class ContactLinkAdmin(admin.ModelAdmin):
     list_display = ("user", "title", "url")
     search_fields = ("user__username", "user__email", "title", "url")
     list_filter = ("title",)
-
-
-@admin.register(PastProject)
-class PastProjectAdmin(admin.ModelAdmin):
-    """Admin configuration for past projects"""
-
-    list_display = ("title", "user", "start_date", "end_date")
-    list_filter = ("user__username", "start_date", "end_date")
-    search_fields = ("title", "description", "technologies", "user__username")
-    ordering = ("-end_date", "-start_date")

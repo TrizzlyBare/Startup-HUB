@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
-from .models import CustomUser, ContactLink, PastProject
+from .models import CustomUser, ContactLink
 from cloudinary.utils import cloudinary_url
 
 
@@ -12,42 +12,13 @@ class ContactLinkSerializer(serializers.ModelSerializer):
         fields = ["id", "title", "url"]
 
 
-class PastProjectSerializer(serializers.ModelSerializer):
-    """Serializer for past projects"""
-
-    class Meta:
-        model = PastProject
-        fields = [
-            "id",
-            "title",
-            "description",
-            "start_date",
-            "end_date",
-            "status",
-            "technologies",
-            "project_link",
-            "role",
-        ]
-
-    def validate(self, data):
-        """
-        Validate project dates
-        """
-        start_date = data.get("start_date")
-        end_date = data.get("end_date")
-
-        if start_date and end_date and start_date > end_date:
-            raise serializers.ValidationError("End date must be after start date")
-
-        return data
-
-
 class BaseUserSerializer(serializers.ModelSerializer):
     """Base serializer with common user fields"""
 
     profile_picture_url = serializers.SerializerMethodField()
     contact_links = serializers.SerializerMethodField()
-    past_projects = PastProjectSerializer(many=True, read_only=True)
+    skills_list = serializers.SerializerMethodField()
+    past_projects_list = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomUser
@@ -63,9 +34,11 @@ class BaseUserSerializer(serializers.ModelSerializer):
             "industry",
             "experience",
             "skills",
+            "skills_list",
+            "past_projects",
+            "past_projects_list",
             "career_summary",
             "contact_links",
-            "past_projects",
         ]
 
     def get_contact_links(self, obj):
@@ -77,6 +50,26 @@ class BaseUserSerializer(serializers.ModelSerializer):
         if obj.profile_picture:
             return obj.profile_picture.url
         return None
+
+    def get_skills_list(self, obj):
+        """
+        Get skills as a list
+        """
+        if not obj.skills:
+            return []
+        return [skill.strip() for skill in obj.skills.split(",") if skill.strip()]
+
+    def get_past_projects_list(self, obj):
+        """
+        Get past projects as a list
+        """
+        if not obj.past_projects:
+            return []
+        return [
+            project.strip()
+            for project in obj.past_projects.split(",")
+            if project.strip()
+        ]
 
 
 class UserInfoSerializer(BaseUserSerializer):
@@ -97,10 +90,9 @@ class UserSerializer(BaseUserSerializer):
         write_only=True, required=False, style={"input_type": "password"}
     )
     contact_links = ContactLinkSerializer(many=True, required=False)
-    past_projects = PastProjectSerializer(many=True, required=False)
 
     class Meta(BaseUserSerializer.Meta):
-        fields = BaseUserSerializer.Meta.fields + ["password"]
+        fields = BaseUserSerializer.Meta.fields + ["password", "contact_links"]
         extra_kwargs = {
             "password": {"write_only": True},
             "profile_picture": {"write_only": True},
@@ -110,35 +102,37 @@ class UserSerializer(BaseUserSerializer):
             "email": {"required": True},
         }
 
-    def validate_username(self, value):
-        """Validate that the username is unique"""
-        # Check if this is an update or create operation
-        instance = getattr(self, "instance", None)
-
-        # If updating, allow the current username
-        if instance and instance.username == value:
-            return value
-
-        # Check for existing username
-        if CustomUser.objects.filter(username__iexact=value).exists():
-            raise serializers.ValidationError(
-                "This username is already in use. Please choose a different one."
-            )
+    def validate_skills(self, value):
+        """
+        Validate skills input
+        """
+        if value:
+            # Ensure it's a comma-separated string
+            if not isinstance(value, str):
+                raise serializers.ValidationError(
+                    "Skills must be a comma-separated string"
+                )
         return value
 
-    def validate_password(self, value):
-        """Validate the password using Django's built-in password validators"""
+    def validate_past_projects(self, value):
+        """
+        Validate past projects input
+        """
         if value:
-            validate_password(value)
+            # Ensure it's a comma-separated string
+            if not isinstance(value, str):
+                raise serializers.ValidationError(
+                    "Past projects must be a comma-separated string"
+                )
         return value
 
     def create(self, validated_data):
         """
-        Create a new user with optional past projects and contact links
+        Create a new user with optional skills, past projects, and contact links
         """
         # Extract nested data
         contact_links_data = validated_data.pop("contact_links", [])
-        past_projects_data = validated_data.pop("past_projects", [])
+        past_projects = validated_data.pop("past_projects", None)
         profile_picture = validated_data.pop("profile_picture", None)
 
         # Create user
@@ -157,23 +151,24 @@ class UserSerializer(BaseUserSerializer):
             user.profile_picture = profile_picture
             user.save()
 
+        # Add past projects
+        if past_projects:
+            user.past_projects = past_projects
+            user.save()
+
         # Add contact links
         for link_data in contact_links_data:
             ContactLink.objects.create(user=user, **link_data)
-
-        # Add past projects
-        for project_data in past_projects_data:
-            PastProject.objects.create(user=user, **project_data)
 
         return user
 
     def update(self, instance, validated_data):
         """
-        Update user with optional past projects and contact links
+        Update user with optional skills, past projects, and contact links
         """
         # Extract nested data
         contact_links_data = validated_data.pop("contact_links", None)
-        past_projects_data = validated_data.pop("past_projects", None)
+        past_projects = validated_data.pop("past_projects", None)
         password = validated_data.pop("password", None)
         profile_picture = validated_data.pop("profile_picture", None)
 
@@ -189,6 +184,10 @@ class UserSerializer(BaseUserSerializer):
         if profile_picture:
             instance.profile_picture = profile_picture
 
+        # Update past projects
+        if past_projects is not None:
+            instance.past_projects = past_projects
+
         # Save the instance
         instance.save()
 
@@ -198,13 +197,6 @@ class UserSerializer(BaseUserSerializer):
             instance.contact_links.all().delete()
             for link_data in contact_links_data:
                 ContactLink.objects.create(user=instance, **link_data)
-
-        # Update past projects if provided
-        if past_projects_data is not None:
-            # Remove existing past projects
-            instance.past_projects.all().delete()
-            for project_data in past_projects_data:
-                PastProject.objects.create(user=instance, **project_data)
 
         return instance
 

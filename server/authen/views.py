@@ -17,9 +17,8 @@ from .serializers import (
     UserSerializer,
     UserInfoSerializer,
     LoginSerializer,
-    PastProjectSerializer,
 )
-from .models import CustomUser, PastProject
+from .models import CustomUser
 from .authentication import BearerTokenAuthentication
 import logging
 
@@ -596,55 +595,6 @@ def get_client_ip(request):
     return ip
 
 
-class PastProjectViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing past projects
-    """
-
-    serializer_class = PastProjectSerializer
-    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ["title", "description", "technologies", "role"]
-    ordering_fields = ["start_date", "end_date", "title"]
-
-    def get_queryset(self):
-        """
-        Return past projects for the current user with optional filtering
-        """
-        queryset = PastProject.objects.filter(user=self.request.user)
-
-        # Filter by status if provided
-        status = self.request.query_params.get("status", None)
-        if status:
-            queryset = queryset.filter(status=status)
-
-        return queryset
-
-    def perform_create(self, serializer):
-        """
-        Create a new past project for the current user
-        """
-        serializer.save(user=self.request.user)
-
-    def perform_update(self, serializer):
-        """
-        Ensure the project belongs to the current user
-        """
-        instance = self.get_object()
-        if instance.user != self.request.user:
-            raise Http404("Project not found")
-        serializer.save()
-
-    def perform_destroy(self, instance):
-        """
-        Ensure the project belongs to the current user before deletion
-        """
-        if instance.user != self.request.user:
-            raise Http404("Project not found")
-        instance.delete()
-
-
 class CareerSummaryView(generics.RetrieveUpdateAPIView):
     """
     View to retrieve and update user's career summary
@@ -769,8 +719,8 @@ class PublicProfileView(generics.RetrieveAPIView):
                 "bio": serializer.data.get("bio"),
                 "industry": serializer.data.get("industry"),
                 "skills": serializer.data.get("skills"),
+                "past_projects": serializer.data.get("past_projects", ""),
                 "career_summary": serializer.data.get("career_summary"),
-                "past_projects": serializer.data.get("past_projects", []),
             }
 
             return Response(public_data)
@@ -778,68 +728,3 @@ class PublicProfileView(generics.RetrieveAPIView):
             return Response(
                 {"error": "User profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
-
-
-class PastProjectView(generics.ListCreateAPIView):
-    """
-    View to list and create past projects for the authenticated user
-    """
-
-    serializer_class = PastProjectSerializer
-    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ["title", "description", "technologies", "role"]
-    ordering_fields = ["start_date", "end_date", "title"]
-
-    def get_queryset(self):
-        """
-        Return past projects for the current user with optional filtering
-        """
-        queryset = PastProject.objects.filter(user=self.request.user)
-
-        # Filter by status if provided
-        status = self.request.query_params.get("status", None)
-        if status:
-            queryset = queryset.filter(status=status)
-
-        return queryset
-
-    def perform_create(self, serializer):
-        """
-        Create a new past project for the current user
-        """
-        serializer.save(user=self.request.user)
-
-
-class PastProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """
-    View to retrieve, update, and delete a specific past project
-    """
-
-    serializer_class = PastProjectSerializer
-    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        """
-        Return past projects for the current user
-        """
-        return PastProject.objects.filter(user=self.request.user)
-
-    def perform_update(self, serializer):
-        """
-        Ensure the project belongs to the current user
-        """
-        instance = self.get_object()
-        if instance.user != self.request.user:
-            raise Http404("Project not found")
-        serializer.save()
-
-    def perform_destroy(self, instance):
-        """
-        Ensure the project belongs to the current user before deletion
-        """
-        if instance.user != self.request.user:
-            raise Http404("Project not found")
-        instance.delete()

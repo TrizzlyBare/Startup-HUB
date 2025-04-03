@@ -62,6 +62,13 @@ class CustomUser(AbstractUser):
         "skills", blank=True, null=True, help_text="Comma-separated list of your skills"
     )
 
+    past_projects = models.TextField(
+        "past_projects",
+        blank=True,
+        null=True,
+        help_text="Comma-separated list of past projects",
+    )
+
     career_summary = models.TextField(
         "career_summary",
         blank=True,
@@ -87,47 +94,3 @@ class CustomUser(AbstractUser):
 
     def __str__(self):
         return self.username
-
-
-class PastProject(models.Model):
-    """
-    Model to store past projects for users
-    """
-
-    PROJECT_STATUS_CHOICES = [
-        ("completed", "Completed"),
-        ("in_progress", "In Progress"),
-        ("on_hold", "On Hold"),
-    ]
-
-    user = models.ForeignKey(
-        CustomUser, related_name="past_projects", on_delete=models.CASCADE
-    )
-    title = models.CharField(max_length=200, help_text="Project title or name")
-    description = models.TextField(help_text="Detailed description of the project")
-    start_date = models.DateField(null=True, blank=True, help_text="Project start date")
-    end_date = models.DateField(null=True, blank=True, help_text="Project end date")
-    status = models.CharField(
-        max_length=20,
-        choices=PROJECT_STATUS_CHOICES,
-        default="completed",
-        help_text="Current status of the project",
-    )
-    technologies = models.TextField(
-        blank=True,
-        null=True,
-        help_text="Technologies or tools used in the project (comma-separated)",
-    )
-    project_link = models.URLField(
-        blank=True, null=True, help_text="Link to project repository or live demo"
-    )
-    role = models.CharField(
-        max_length=100, blank=True, null=True, help_text="Your role in the project"
-    )
-
-    def __str__(self):
-        return f"{self.title} by {self.user.username}"
-
-    class Meta:
-        ordering = ["-end_date", "-start_date"]
-        verbose_name_plural = "Past Projects"
