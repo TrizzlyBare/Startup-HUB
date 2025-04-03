@@ -32,6 +32,39 @@ class ChatState(rx.State):
     is_camera_off: bool = False
     show_calling_popup: bool = False
     call_type: str = "audio"
+    
+    @rx.var
+    def route_username(self) -> str:
+        """Get username from route parameters."""
+        if hasattr(self, "router"):
+            params = getattr(self.router.page, "params", {})
+            chat_user = params.get("chat_user", "")
+            if chat_user:
+                # Update the current chat user based on the URL
+                self.current_chat_user_id = chat_user  # Use chat_user as ID
+                self.current_chat_user = chat_user     # Use chat_user directly
+            return chat_user
+        return ""
+    
+    @rx.var
+    def route_group_id(self) -> str:
+        """Get group_id from route parameters."""
+        if hasattr(self, "router"):
+            params = getattr(self.router.page, "params", {})
+            group_id = params.get("group_id", "")
+            if group_id:
+                # Update the current chat to a group chat
+                self.current_chat_user_id = f"group_{group_id}"
+                # In a real app, you would fetch the group name based on ID
+                self.current_chat_user = f"Group {group_id}"
+            return group_id
+        return ""
+    
+    async def on_mount(self):
+        """Called when the component is mounted."""
+        # Check for route parameters on mount
+        _ = self.route_username
+        _ = self.route_group_id
 
     @rx.event
     async def send_message(self):

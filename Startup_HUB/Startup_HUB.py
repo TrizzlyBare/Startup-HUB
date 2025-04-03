@@ -132,8 +132,51 @@ app = rx.App()
 
 app.add_page(custom_index, route="/")
 app.add_page(login_page, route="/login")
+
+# Keep static routes but add dynamic routes for each section
+# Match pages
 app.add_page(match_page, route="/match")
+app.add_page(match_page, route="/match/type/[match_type]") 
+app.add_page(match_page, route="/match/type/[match_type]/id/[match_id]")
+app.add_page(match_page, route="/match/from-profile/[user_profile]")
+
+# Chat pages
 app.add_page(chat_page, route="/chat")
+app.add_page(chat_page, route="/chat/user/[chat_user]")
+app.add_page(chat_page, route="/chat/group/[group_id]")
+
+# Search pages
 app.add_page(search_page, route="/search")
+app.add_page(search_page, route="/search/query/[url_query]")
+app.add_page(search_page, route="/search/type/[search_type]/query/[url_query]")
+
+# My Projects pages
 app.add_page(my_projects_page, route="/my-projects")
+app.add_page(my_projects_page, route="/my-projects/id/[project_id]")
+app.add_page(my_projects_page, route="/my-projects/type/[project_type]")
+
 app.add_page(profile_page, route="/profile/[profile_name]")
+
+# Define a dynamic route handler for specific sections
+def dynamic_route_handler() -> rx.Component:
+    """Handle dynamic routes."""
+    return rx.vstack(
+        rx.heading("Dynamic Route", size="1", class_name="text-sky-600 font-bold mb-4"),
+        rx.text("Current Path: ", rx.code(rx.State.router.page.path), class_name="text-lg mb-2"),
+        rx.text("URL Parameters: ", rx.code(str(rx.State.router.page.params)), class_name="text-lg mb-4"),
+        rx.button(
+            "Go Home", 
+            on_click=rx.redirect("/"),
+            class_name="bg-sky-600 text-white px-4 py-2 rounded-lg",
+        ),
+        spacing="4",
+        align="center",
+        padding="8",
+        class_name="bg-white shadow-lg rounded-lg max-w-3xl mx-auto my-8",
+    )
+
+# Add specific dynamic routes for sections that need them
+app.add_page(dynamic_route_handler, route="/projects/[id]") 
+app.add_page(dynamic_route_handler, route="/teams/[id]")
+app.add_page(dynamic_route_handler, route="/events/[id]")
+app.add_page(dynamic_route_handler, route="/resources/[resource_type]/[id]")

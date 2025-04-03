@@ -1,119 +1,120 @@
 import reflex as rx
+from typing import List, Dict, Any, TypedDict, Optional
 
 def matches_content() -> rx.Component:
     """Content for the Matches tab."""
+    from .Matcher_Page import MatchState
     return rx.vstack(
-        rx.grid(
-            rx.image(
-                src="../../Soukaku.jpg",
-                class_name="w-20 h-40 rounded-lg object-cover cursor-pointer hover:opacity-80 m-2 border-4 border-sky-400",
+        rx.foreach(
+            MatchState.matches,
+            lambda match: rx.hstack(
+                rx.avatar(
+                    src=rx.cond(
+                        match["matched_user_details"]["profile_picture_url"] is not None,
+                        match["matched_user_details"]["profile_picture_url"],
+                        "../../profile.jpg"
+                    ),
+                    size="5",
+                    class_name="rounded-full",
+                ),
+                rx.vstack(
+                    rx.text(
+                        f"{match['matched_user_details']['first_name']} {match['matched_user_details']['last_name']}",
+                        font_weight="bold",
+                        class_name="text-black"
+                    ),
+                    rx.text(
+                        rx.cond(
+                            match["matched_user_details"]["industry"] is not None,
+                            match["matched_user_details"]["industry"],
+                            "No industry specified"
+                        ),
+                        class_name="text-gray-600"
+                    ),
+                    align_items="start",
+                ),
+                spacing="4",
+                class_name="w-full p-2 hover:bg-gray-100 rounded-lg cursor-pointer",
             ),
-            rx.image(
-                src="../../blue_cat.jpg",
-                class_name="w-20 h-40 rounded-lg object-cover cursor-pointer hover:opacity-80 m-2 border-4 border-sky-400",
-            ),
-            rx.image(
-                src="../../Jane_Doe.jpg",
-                class_name="w-20 h-40 rounded-lg object-cover cursor-pointer hover:opacity-80 m-2 border-4 border-sky-400",
-            ),
-            columns="3",
-            spacing="4",
-            padding_x="4",
-            align_items="center",
         ),
         align_items="stretch",
+        padding_x="4",
+        spacing="3",
     )
 
 def liked_content() -> rx.Component:
     """Content for the Liked tab."""
+    from .Matcher_Page import MatchState
     return rx.vstack(
-        rx.vstack(
-            rx.hstack(
+        rx.foreach(
+            MatchState.likes,
+            lambda like: rx.hstack(
                 rx.avatar(
-                    src="../../profile.jpg",
+                    src=rx.cond(
+                        like["liked_user_details"]["profile_picture_url"] is not None,
+                        like["liked_user_details"]["profile_picture_url"],
+                        "../../profile.jpg"
+                    ),
                     size="5",
                     class_name="rounded-full",
                 ),
                 rx.vstack(
-                    rx.text("John Doe", font_weight="bold", class_name="text-black"),
-                    rx.text("Software Engineer", class_name="text-gray-600"),
+                    rx.text(
+                        f"{like['liked_user_details']['first_name']} {like['liked_user_details']['last_name']}",
+                        font_weight="bold",
+                        class_name="text-black"
+                    ),
+                    rx.text(
+                        rx.cond(
+                            like["liked_user_details"]["industry"] is not None,
+                            like["liked_user_details"]["industry"],
+                            "No industry specified"
+                        ),
+                        class_name="text-gray-600"
+                    ),
                     align_items="start",
                 ),
                 spacing="4",
                 class_name="w-full p-2 hover:bg-gray-100 rounded-lg cursor-pointer",
             ),
-            rx.hstack(
-                rx.avatar(
-                    src="../../Soukaku.jpg",
-                    size="5",
-                    class_name="rounded-full",
-                ),
-                rx.vstack(
-                    rx.text("Soukaku", font_weight="bold", class_name="text-black"),
-                    rx.text("Product Designer", class_name="text-gray-600"),
-                    align_items="start",
-                ),
-                spacing="4",
-                class_name="w-full p-2 hover:bg-gray-100 rounded-lg cursor-pointer",
-            ),
-            rx.hstack(
-                rx.avatar(
-                    src="../../blue_cat.jpg",
-                    size="5",
-                    class_name="rounded-full",
-                ),
-                rx.vstack(
-                    rx.text("Blue Cat", font_weight="bold", class_name="text-black"),
-                    rx.text("UX Researcher", class_name="text-gray-600"),
-                    align_items="start",
-                ),
-                spacing="4",
-                class_name="w-full p-2 hover:bg-gray-100 rounded-lg cursor-pointer",
-            ),
-            align_items="stretch",
-            padding_x="4",
-            spacing="3",
         ),
         align_items="stretch",
+        padding_x="4",
+        spacing="3",
     )
 
 def messages_content() -> rx.Component:
     """Content for the Messages tab."""
+    from .Matcher_Page import MatchState
     return rx.vstack(
-        rx.vstack(
-            rx.hstack(
+        rx.foreach(
+            MatchState.matches,
+            lambda match: rx.hstack(
                 rx.avatar(
-                    src="../../profile.jpg",
+                    src=rx.cond(
+                        match["matched_user_details"]["profile_picture_url"] is not None,
+                        match["matched_user_details"]["profile_picture_url"],
+                        "../../profile.jpg"
+                    ),
                     size="5",
                     class_name="rounded-full",
                 ),
                 rx.vstack(
-                    rx.text("John Doe", font_weight="bold", class_name= "text-black" ),
-                    rx.text("Hey, how are you?", class_name="text-gray-600"),
+                    rx.text(
+                        f"{match['matched_user_details']['first_name']} {match['matched_user_details']['last_name']}",
+                        font_weight="bold",
+                        class_name="text-black"
+                    ),
+                    rx.text("Click to start chatting", class_name="text-gray-600"),
                     align_items="start",
                 ),
                 spacing="4",
                 class_name="w-full p-2 hover:bg-gray-100 rounded-lg cursor-pointer",
             ),
-            rx.hstack(
-                rx.avatar(
-                    src="../../Soukaku.jpg",
-                    size="5",
-                    class_name="rounded-full",
-                ),
-                rx.vstack(
-                    rx.text("Soukaku", font_weight="bold" , class_name= "text-black"),
-                    rx.text("Let's connect!", class_name="text-gray-600"),
-                    align_items="start",
-                ),
-                spacing="4",
-                class_name="w-full p-2 hover:bg-gray-100 rounded-lg cursor-pointer",
-            ),
-            align_items="stretch",
-            padding_x="4",
-            spacing="3",
         ),
         align_items="stretch",
+        padding_x="4",
+        spacing="3",
     )
 
 def report_modal() -> rx.Component:

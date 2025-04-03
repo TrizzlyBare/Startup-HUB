@@ -165,7 +165,7 @@ def create_project_modal() -> rx.Component:
                 "Create New Project",
                 class_name="text-3xl font-bold mb-4 text-blue-600",
             ),
-            rx.dialog.description(
+            rx.box(
                 rx.form(
                     rx.vstack(
                         rx.input(
@@ -295,7 +295,7 @@ def edit_project_modal() -> rx.Component:
                 "Edit Project", 
                 class_name="text-3xl font-bold mb-4",
             ),
-            rx.dialog.description(
+            rx.box(
                 rx.form(
                     rx.vstack(
                         rx.input(

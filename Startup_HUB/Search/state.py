@@ -37,6 +37,30 @@ class MyProjectsState(rx.State):
     error_message: Optional[str] = None
     is_loading: bool = False
     auth_token: str = ""  # Add token state variable
+    selected_project_id: Optional[str] = None
+    selected_category: Optional[str] = None
+
+    @rx.var
+    def route_project_id(self) -> str:
+        """Get project ID from route parameters."""
+        if hasattr(self, "router"):
+            params = getattr(self.router.page, "params", {})
+            project_id = params.get("project_id", "")
+            if project_id:
+                self.selected_project_id = project_id
+            return project_id
+        return ""
+    
+    @rx.var
+    def route_category(self) -> str:
+        """Get category from route parameters."""
+        if hasattr(self, "router"):
+            params = getattr(self.router.page, "params", {})
+            project_type = params.get("project_type", "")
+            if project_type:
+                self.selected_category = project_type
+            return project_type
+        return ""
 
     @rx.var
     def has_projects(self) -> bool:
@@ -77,7 +101,8 @@ class MyProjectsState(rx.State):
         
         # If token is not in AuthState, try to get it from localStorage
         if not auth_token:
-            auth_token = await rx.get_client_storage("auth_token")
+            # Replace rx.get_client_storage with rx.call_script
+            auth_token = rx.call_script("localStorage.getItem('auth_token')")
             if auth_token:
                 auth_state.set_token(auth_token)
                 print(f"Token initialized from client storage: {auth_token}")
@@ -98,7 +123,8 @@ class MyProjectsState(rx.State):
             
             # If token is not in AuthState, try to get it from localStorage
             if not auth_token:
-                auth_token = await rx.get_client_storage("auth_token")
+                # Replace rx.get_client_storage with rx.call_script
+                auth_token = rx.call_script("localStorage.getItem('auth_token')")
                 if auth_token:
                     auth_state.set_token(auth_token)
             
@@ -184,7 +210,8 @@ class MyProjectsState(rx.State):
         
         # If token is not in AuthState, try to get it from localStorage
         if not auth_token:
-            auth_token = await rx.get_client_storage("auth_token")
+            # Replace rx.get_client_storage with rx.call_script
+            auth_token = rx.call_script("localStorage.getItem('auth_token')")
             if auth_token:
                 auth_state.set_token(auth_token)
                 print(f"Token refreshed from client storage: {auth_token}")

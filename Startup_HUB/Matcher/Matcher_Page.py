@@ -8,6 +8,41 @@ class ContactLink(TypedDict):
     url: str
     type: str
 
+class UserDetails(TypedDict):
+    id: int
+    username: str
+    first_name: str
+    last_name: str
+    profile_picture_url: Optional[str]
+    industry: Optional[str]
+    bio: Optional[str]
+    experience: Optional[str]
+    skills: Optional[List[str]]
+    contact_links: Optional[List[ContactLink]]
+
+class MatchData(TypedDict):
+    id: int
+    user: int
+    matched_user: int
+    matched_user_details: UserDetails
+    user_details: UserDetails
+    created_at: str
+    is_mutual: bool
+
+class LikeData(TypedDict):
+    id: int
+    user: int
+    liked_user: int
+    liked_user_details: UserDetails
+    created_at: str
+
+class DislikeData(TypedDict):
+    id: int
+    user: int
+    disliked_user: int
+    disliked_user_details: UserDetails
+    created_at: str
+
 class Profile(TypedDict):
     id: int
     username: str
@@ -31,9 +66,28 @@ class MatchState(rx.State):
     API_BASE_URL = "http://100.95.107.24:8000/api/matches"
     active_tab: str = "Matches"
     
+    # Profile data when coming from profile
+    viewed_profile: Optional[str] = None
+    profile_data: Optional[Profile] = None
+    
+    # New state variables for matches, likes, and dislikes with proper typing
+    matches: List[MatchData] = []
+    likes: List[LikeData] = []
+    dislikes: List[DislikeData] = []
+    
+    @rx.var
+    def profile_based_header(self) -> str:
+        """Get personalized header when coming from profile page."""
+        if self.viewed_profile:
+            return f"Matches for {self.viewed_profile.replace('_', ' ').title()}"
+        return "Potential Matches"
+    
     async def on_mount(self):
         """Load potential matches when the page mounts."""
         await self.load_potential_matches()
+        await self.load_matches()
+        await self.load_likes()
+        await self.load_dislikes()
     
     async def load_potential_matches(self):
         """Load potential matches from the API."""
@@ -47,7 +101,7 @@ class MatchState(rx.State):
             
             # If token is None, try to get it from localStorage
             if not auth_token:
-                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                auth_token = rx.call_script("localStorage.getItem('auth_token')")
                 if auth_token:
                     # Update AuthState with the token from localStorage
                     auth_state.set_token(auth_token)
@@ -57,19 +111,42 @@ class MatchState(rx.State):
                 self.loading = False
                 return
             
+            # Determine if we should use profile-specific endpoint
+            api_endpoint = f"{self.API_BASE_URL}/potential-matches/"
+            headers = {
+                "Authorization": f"Token {auth_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # If we have profile data, use it for more targeted matches
+            params = {}
+            if self.viewed_profile and self.profile_data:
+                # Add skills or interests as query parameters if available
+                skills = self.profile_data.get("skills", [])
+                if isinstance(skills, list) and skills:
+                    params["skills"] = ",".join(skills[:3])  # Use up to 3 skills
+                
+                industry = self.profile_data.get("industry")
+                if industry:
+                    params["industry"] = industry
+            
             # Make API request to get potential matches
             async with httpx.AsyncClient() as client:
                 response = await client.get(
-                    f"{self.API_BASE_URL}/potential-matches/",
-                    headers={
-                        "Authorization": f"Token {auth_token}",
-                        "Content-Type": "application/json"
-                    }
+                    api_endpoint,
+                    headers=headers,
+                    params=params
                 )
                 
                 if response.status_code == 200:
                     self.profiles = response.json()
                     self.current_profile_index = 0 if self.profiles else -1
+                    
+                    # Update message if we have a profile
+                    if self.viewed_profile and self.profiles:
+                        self.error_message = f"Found {len(self.profiles)} potential matches for {self.viewed_profile.replace('_', ' ').title()}"
+                    elif self.viewed_profile:
+                        self.error_message = f"No matches found for {self.viewed_profile.replace('_', ' ').title()}"
                 elif response.status_code == 401:
                     self.error_message = "Authentication failed. Please log in again."
                     return rx.redirect("/login")
@@ -79,6 +156,108 @@ class MatchState(rx.State):
             self.error_message = f"Error: {str(e)}"
         
         self.loading = False
+    
+    async def load_matches(self):
+        """Load matches from the API."""
+        try:
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+            
+            if not auth_token:
+                self.error_message = "Authentication required. Please log in."
+                return
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.API_BASE_URL}/matches/",
+                    headers={
+                        "Authorization": f"Token {auth_token}",
+                        "Content-Type": "application/json"
+                    }
+                )
+                
+                if response.status_code == 200:
+                    self.matches = response.json()
+                elif response.status_code == 401:
+                    self.error_message = "Authentication failed. Please log in again."
+                    return rx.redirect("/login")
+                else:
+                    self.error_message = f"Error loading matches: {response.text}"
+        except Exception as e:
+            self.error_message = f"Error: {str(e)}"
+    
+    async def load_likes(self):
+        """Load likes from the API."""
+        try:
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+            
+            if not auth_token:
+                self.error_message = "Authentication required. Please log in."
+                return
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.API_BASE_URL}/likes/",
+                    headers={
+                        "Authorization": f"Token {auth_token}",
+                        "Content-Type": "application/json"
+                    }
+                )
+                
+                if response.status_code == 200:
+                    self.likes = response.json()
+                elif response.status_code == 401:
+                    self.error_message = "Authentication failed. Please log in again."
+                    return rx.redirect("/login")
+                else:
+                    self.error_message = f"Error loading likes: {response.text}"
+        except Exception as e:
+            self.error_message = f"Error: {str(e)}"
+    
+    async def load_dislikes(self):
+        """Load dislikes from the API."""
+        try:
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+            
+            if not auth_token:
+                self.error_message = "Authentication required. Please log in."
+                return
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.API_BASE_URL}/dislikes/",
+                    headers={
+                        "Authorization": f"Token {auth_token}",
+                        "Content-Type": "application/json"
+                    }
+                )
+                
+                if response.status_code == 200:
+                    self.dislikes = response.json()
+                elif response.status_code == 401:
+                    self.error_message = "Authentication failed. Please log in again."
+                    return rx.redirect("/login")
+                else:
+                    self.error_message = f"Error loading dislikes: {response.text}"
+        except Exception as e:
+            self.error_message = f"Error: {str(e)}"
     
     def next_profile(self):
         """Show the next profile."""
@@ -347,6 +526,45 @@ def match_page() -> rx.Component:
         rx.box(
             rx.center(
                 rx.vstack(
+                    # Personalized header
+                    rx.heading(
+                        MatchState.profile_based_header,
+                        size="2",
+                        class_name="text-white mb-4 font-bold",
+                    ),
+                    
+                    # Show profile skills when coming from a profile
+                    rx.cond(
+                        MatchState.profile_data is not None,
+                        rx.box(
+                            rx.text(
+                                "Finding matches based on skills:",
+                                class_name="text-blue-300 mb-2"
+                            ),
+                            rx.hstack(
+                                rx.cond(
+                                    MatchState.profile_data.get("skills") is not None,
+                                    rx.foreach(
+                                        MatchState.profile_data["skills"],
+                                        lambda skill: rx.box(
+                                            skill,
+                                            class_name="bg-sky-800 text-white px-3 py-1 rounded-full m-1",
+                                        ),
+                                    ),
+                                    rx.text("No skills specified", class_name="text-white"),
+                                ),
+                                wrap="wrap",
+                                justify="center",
+                                width="100%",
+                                max_width="600px",
+                                margin_bottom="4",
+                            ),
+                            width="100%",
+                            text_align="center",
+                        ),
+                        rx.fragment(),
+                    ),
+                    
                     # Error message display
                     rx.cond(
                         MatchState.error_message,
@@ -354,10 +572,11 @@ def match_page() -> rx.Component:
                             rx.text(
                                 MatchState.error_message,
                                 color="white",
-                                class_name="bg-red-600 p-3 rounded-lg mb-4"
+                                class_name="bg-blue-800 p-3 rounded-lg mb-4",
                             ),
                             width="100%",
                             max_width="600px",
+                            text_align="center",
                         ),
                         rx.fragment()
                     ),

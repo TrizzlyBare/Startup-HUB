@@ -63,6 +63,50 @@ class SearchState(rx.State):
     active_tab: str = "Matches"
     show_details_modal: bool = False
     selected_group: StartupGroup | None = None
+    filter_category: str = ""
+    
+    @rx.var
+    def route_query(self) -> str:
+        """Get the search query from route parameters."""
+        if hasattr(self, "router"):
+            params = getattr(self.router.page, "params", {})
+            query = params.get("url_query", "")
+            if query and query != self.search_query:
+                self.search_query = query
+                # Trigger search when query parameter is found
+                self.is_loading = True
+                self.search_startups()
+            return query
+        return ""
+    
+    @rx.var
+    def route_category(self) -> str:
+        """Get the category from route parameters."""
+        if hasattr(self, "router"):
+            params = getattr(self.router.page, "params", {})
+            search_type = params.get("search_type", "")
+            if search_type and search_type != self.filter_category:
+                self.filter_category = search_type
+                # Apply category filtering
+                self.filter_by_category(search_type)
+            return search_type
+        return ""
+    
+    def on_mount(self):
+        """Called when the component mounts."""
+        # Check for route parameters
+        self.route_query
+        self.route_category
+    
+    def filter_by_category(self, category: str):
+        """Filter search results by category."""
+        # In a real app, this would filter based on the category
+        # For now, just set the category and pretend to filter
+        self.filter_category = category
+        # Here you would actually filter the search_results
+        self.is_loading = True
+        # Simulate filtering (in a real app, you'd implement actual filtering)
+        self.is_loading = False
 
     @rx.var
     def selected_group_team_size(self) -> str:

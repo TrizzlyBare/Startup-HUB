@@ -15,6 +15,7 @@ class State(rx.State):
     job_title: str = ""
     experience_level: str = ""
     category: str = ""
+    past_projects: list[str] = []
     
     # Debug information
     auth_debug_result: str = ""
@@ -102,6 +103,11 @@ class State(rx.State):
     def formatted_projects(self) -> str:
         """Get projects as a comma-separated string."""
         return ",".join(self.projects) if self.projects else ""
+    
+    @rx.var
+    def formatted_past_projects(self) -> str:
+        """Get past projects as a comma-separated string."""
+        return ",".join(self.past_projects) if self.past_projects else ""
     
     # Online presence links
     linkedin_link: str = ""
@@ -210,7 +216,7 @@ class State(rx.State):
                         
                         # Make the request with the correct username case
                         response = await client.get(
-                            f"{self.API_URL}/profiles/{self.profile_username}/",
+                            f"{self.API_URL}/profile/{self.profile_username}/",
                             headers=headers,
                             follow_redirects=True
                         )
@@ -228,23 +234,13 @@ class State(rx.State):
                             self.name = f"{self.first_name} {self.last_name}".strip() or "No Name"
                             
                             # Handle field name differences
-                            self.job_title = data.get("job_title") or "No Job Title"
+                            self.job_title = data.get("job_title") or data.get("career_summary") or "No Job Title"
                             self.experience_level = data.get("experience_level") or data.get("experience") or "Not Specified"
                             self.category = data.get("category") or data.get("industry") or "Not Specified"
-                            self.about = data.get("about") or data.get("bio") or ""
-                            
-                            # Handle skills - ensure null data shows properly
-                            skills_data = data.get("skills") or []
-                            if isinstance(skills_data, list):
-                                self.skills = skills_data
-                            elif isinstance(skills_data, str):
-                                # Handle case where skills might be a comma-separated string
-                                self.skills = [s.strip() for s in skills_data.split(",") if s.strip()]
-                            else:
-                                self.skills = []
+                            self.about = data.get("bio") or data.get("about") or ""  # Prioritize bio field
                             
                             # Handle projects - ensure null data shows properly
-                            projects_data = data.get("projects") or []
+                            projects_data = data.get("projects") or data.get("past_projects") or ""
                             if isinstance(projects_data, list):
                                 self.projects = projects_data
                             elif isinstance(projects_data, str):
@@ -252,7 +248,17 @@ class State(rx.State):
                                 self.projects = [p.strip() for p in projects_data.split(",") if p.strip()]
                             else:
                                 self.projects = []
-                                
+                            
+                            # Handle past projects - ensure null data shows properly
+                            past_projects_data = data.get("past_projects") or ""
+                            if isinstance(past_projects_data, list):
+                                self.past_projects = past_projects_data
+                            elif isinstance(past_projects_data, str):
+                                # Handle case where past projects might be a comma-separated string
+                                self.past_projects = [p.strip() for p in past_projects_data.split(",") if p.strip()]
+                            else:
+                                self.past_projects = []
+                            
                             # Handle social links - ensure null data shows properly
                             # Check for contact_links array first
                             contact_links = data.get("contact_links") or []
@@ -279,19 +285,21 @@ class State(rx.State):
                             user_data = auth_debug_data.get("user_from_token", {})
                             
                             # Create a new profile
-                            create_response = await client.post(
-                                f"{self.API_URL}/profiles/",
+                            create_response = await client.put(
+                                f"{self.API_URL}/profile/",
                                 headers=headers,
                                 json={
                                     "username": self.profile_username,
                                     "first_name": user_data.get("first_name", ""),
                                     "last_name": user_data.get("last_name", ""),
                                     "email": user_data.get("email", ""),
-                                    "bio": "",
+                                    "bio": user_data.get("bio", ""),
                                     "industry": "Not Specified",
                                     "experience": "Not Specified",
-                                    "skills": [],
-                                    "contact_links": []
+                                    "skills": user_data.get("skills", ""),
+                                    "contact_links": [],
+                                    "careers_summary": user_data.get("careers_summary", ""),
+                                    "past_projects": user_data.get("past_projects", ""),
                                 }
                             )
                             
@@ -319,7 +327,7 @@ class State(rx.State):
         """Log out by clearing the authentication token and redirecting to login."""
         # Use AuthState's logout method to properly clear the token
         AuthState.clear_token()
-        return rx.redirect("/login")
+        return rx.redirect("/")
 
     async def save_changes(self, form_data: dict):
         """Save profile changes to the API."""
@@ -343,6 +351,11 @@ class State(rx.State):
         projects_value = form_data.get("projects", "")
         if projects_value:
             self.projects = [p.strip() for p in projects_value.split(",") if p.strip()]
+        
+        # Update past projects from form data
+        past_projects_value = form_data.get("past_projects", "")
+        if past_projects_value:
+            self.past_projects = [p.strip() for p in past_projects_value.split(",") if p.strip()]
         
         # Compose full name
         self.name = f"{self.first_name} {self.last_name}".strip() or "No Name"
@@ -385,12 +398,14 @@ class State(rx.State):
             "bio": self.about,  # Map about to bio
             "industry": self.category,  # Map category to industry
             "experience": self.experience_level,  # Map experience_level to experience
-            "skills": ",".join(self.skills) if self.skills else "",  # Send skills as a comma-separated string
+            "skills": ",".join(self.skills) if self.skills else "",  # Send skills as comma-separated string
             "contact_links": [
                 {"platform": "linkedin", "url": self.linkedin_link} if self.linkedin_link else None,
                 {"platform": "github", "url": self.github_link} if self.github_link else None,
                 {"platform": "portfolio", "url": self.portfolio_link} if self.portfolio_link else None
-            ]
+            ],
+            "career_summary": self.job_title,  # Use job title as career summary
+            "past_projects": ",".join(self.past_projects) if self.past_projects else ""  # Send past projects as comma-separated string
         }
         
         # Remove None values from contact_links
@@ -406,7 +421,7 @@ class State(rx.State):
                 
                 # Try updating the profile using PUT method
                 response = await client.put(
-                    f"{self.API_URL}/profiles/{self.profile_username}/",
+                    f"{self.API_URL}/profile/{self.profile_username}/",
                     json=profile_data,
                     headers=headers
                 )
@@ -791,6 +806,16 @@ def edit_form() -> rx.Component:
                             name="projects",
                             value=State.formatted_projects,
                             on_change=lambda value: State.set_projects(value.split(",")),
+                            class_name="w-full p-2 border rounded-lg bg-white",
+                        ),
+                        
+                        # Past Projects Section
+                        rx.text("Past Projects", font_weight="medium", align="left", width="100%", margin_top="4"),
+                        rx.input(
+                            placeholder="Past Projects (comma-separated)",
+                            name="past_projects",
+                            value=State.formatted_past_projects,
+                            on_change=lambda value: State.set_past_projects(value.split(",")),
                             class_name="w-full p-2 border rounded-lg bg-white",
                         ),
                         
