@@ -171,9 +171,9 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 # Cloudinary settings
 CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": "dh22uuija",
-    "API_KEY": "349497593716885",
-    "API_SECRET": "dgib6KclQIU08uYnT4Vdr4EPeT8",
+    "CLOUD_NAME": "dnggowads",
+    "API_KEY": "437578293728877",
+    "API_SECRET": "5u4gxfznYm3mgzTEWDxDejF",
 }
 
 # Use Cloudinary for media storage

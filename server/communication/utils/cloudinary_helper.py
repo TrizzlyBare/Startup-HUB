@@ -11,9 +11,9 @@ class CloudinaryHelper:
         Configure Cloudinary with settings
         """
         cloudinary.config(
-            cloud_name=settings.CLOUDINARY_STORAGE["dh22uuija"],
-            api_key=settings.CLOUDINARY_STORAGE["349497593716885"],
-            api_secret=settings.CLOUDINARY_STORAGE["dgib6KclQIU08uYnT4Vdr4EPeT8"],
+            cloud_name=settings.CLOUDINARY_STORAGE["dnggowads"],
+            api_key=settings.CLOUDINARY_STORAGE["437578293728877"],
+            api_secret=settings.CLOUDINARY_STORAGE["5u4gxfznYm3mgzTEWDxDejF-BBY"],
         )
 
     @staticmethod
