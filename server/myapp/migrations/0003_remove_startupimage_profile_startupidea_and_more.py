@@ -9,44 +9,126 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('myapp', '0002_startupprofile_age_startupprofile_bio_and_more'),
+        ("myapp", "0002_startupprofile_age_startupprofile_bio_and_more"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='startupimage',
-            name='profile',
+            model_name="startupimage",
+            name="profile",
         ),
         migrations.CreateModel(
-            name='StartupIdea',
+            name="StartupIdea",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=100)),
-                ('stage', models.CharField(choices=[('IDEA', 'Idea Stage'), ('MVP', 'MVP'), ('EARLY', 'Early Stage'), ('GROWTH', 'Growth Stage'), ('SCALING', 'Scaling')], default='IDEA', max_length=20)),
-                ('pitch', models.TextField(help_text='Elevator pitch for your startup idea', max_length=500)),
-                ('description', models.TextField(help_text='Detailed description of your startup')),
-                ('looking_for', models.JSONField(default=list, help_text="Roles/skills you're looking for in potential co-founders")),
-                ('skills', models.JSONField(default=list, help_text='List of skills and expertise needed for this idea')),
-                ('pitch_deck', cloudinary.models.CloudinaryField(blank=True, max_length=255, null=True, verbose_name='pitch_deck')),
-                ('user_role', models.CharField(choices=[('FOUNDER', 'Founder'), ('CO_FOUNDER', 'Co-Founder'), ('DEVELOPER', 'Developer'), ('DESIGNER', 'Designer'), ('MARKETER', 'Marketing Specialist'), ('BUSINESS_DEV', 'Business Developer'), ('PRODUCT_MANAGER', 'Product Manager'), ('FINANCIAL_EXPERT', 'Financial Expert'), ('OTHER', 'Other')], default='FOUNDER', help_text='Your role in this startup idea', max_length=20)),
-                ('website', models.URLField(blank=True)),
-                ('funding_stage', models.CharField(blank=True, max_length=100)),
-                ('investment_needed', models.DecimalField(blank=True, decimal_places=2, max_digits=10, null=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='startup_ideas', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(max_length=100)),
+                (
+                    "stage",
+                    models.CharField(
+                        choices=[
+                            ("IDEA", "Idea Stage"),
+                            ("MVP", "MVP"),
+                            ("EARLY", "Early Stage"),
+                            ("GROWTH", "Growth Stage"),
+                            ("SCALING", "Scaling"),
+                        ],
+                        default="IDEA",
+                        max_length=20,
+                    ),
+                ),
+                (
+                    "pitch",
+                    models.TextField(
+                        help_text="Elevator pitch for your startup idea", max_length=500
+                    ),
+                ),
+                (
+                    "description",
+                    models.TextField(help_text="Detailed description of your startup"),
+                ),
+                (
+                    "looking_for",
+                    models.JSONField(
+                        default=list,
+                        help_text="Roles/skills you're looking for in potential co-founders",
+                    ),
+                ),
+                (
+                    "skills",
+                    models.JSONField(
+                        default=list,
+                        help_text="List of skills and expertise needed for this idea",
+                    ),
+                ),
+                (
+                    "pitch_deck",
+                    cloudinary.models.CloudinaryField(
+                        blank=True, max_length=255, null=True, verbose_name="pitch_deck"
+                    ),
+                ),
+                (
+                    "user_role",
+                    models.CharField(
+                        choices=[
+                            ("FOUNDER", "Founder"),
+                            ("CO_FOUNDER", "Co-Founder"),
+                            ("DEVELOPER", "Developer"),
+                            ("DESIGNER", "Designer"),
+                            ("MARKETER", "Marketing Specialist"),
+                            ("BUSINESS_DEV", "Business Developer"),
+                            ("PRODUCT_MANAGER", "Product Manager"),
+                            ("FINANCIAL_EXPERT", "Financial Expert"),
+                            ("OTHER", "Other"),
+                        ],
+                        default="FOUNDER",
+                        help_text="Your role in this startup idea",
+                        max_length=20,
+                    ),
+                ),
+                ("website", models.URLField(blank=True)),
+                ("funding_stage", models.CharField(blank=True, max_length=100)),
+                (
+                    "investment_needed",
+                    models.DecimalField(
+                        blank=True, decimal_places=2, max_digits=10, null=True
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="startup_ideas",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'ordering': ['-created_at'],
+                "ordering": ["-created_at"],
             },
         ),
         migrations.AddField(
-            model_name='startupimage',
-            name='startup_idea',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='images', to='myapp.startupidea'),
+            model_name="startupimage",
+            name="startup_idea",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="images",
+                to="myapp.startupidea",
+            ),
         ),
         migrations.DeleteModel(
-            name='StartupProfile',
+            name="StartupProfile",
         ),
     ]

@@ -111,16 +111,8 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
         """Search for startup ideas by various criteria"""
         stage = request.query_params.get("stage", "")
         user_role = request.query_params.get("user_role", "")
-        looking_for = (
-            request.query_params.get("looking_for", "").split(",")
-            if request.query_params.get("looking_for")
-            else []
-        )
-        skills = (
-            request.query_params.get("skills", "").split(",")
-            if request.query_params.get("skills")
-            else []
-        )
+        looking_for = request.query_params.get("looking_for", "")
+        skills = request.query_params.get("skills", "")
 
         queryset = self.get_queryset()
 
@@ -130,47 +122,50 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
         if user_role:
             queryset = queryset.filter(user_role=user_role)
 
+        # For text fields, use contains lookup for partial matches
         if looking_for:
-            # Find ideas looking for any of the specified roles
-            queryset = queryset.filter(looking_for__overlap=looking_for)
+            queryset = queryset.filter(looking_for__icontains=looking_for)
 
         if skills:
-            # Find ideas with any of the specified skills
-            queryset = queryset.filter(skills__overlap=skills)
+            queryset = queryset.filter(skills__icontains=skills)
 
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
     @action(detail=False, methods=["get"])
     def match_suggestions(self, request):
-        """Get potential matches based on user's skills and roles interested in"""
+        """Get potential matches based on user's skills and industry"""
         # Get the user's skills from their profile
         user = request.user
-        user_skills = []
-        if hasattr(user, "skills") and user.skills:
-            # Convert comma-separated skills to a list if needed
-            if isinstance(user.skills, str):
-                user_skills = [skill.strip() for skill in user.skills.split(",")]
-            else:
-                user_skills = user.skills
 
-        # Since contains might not be supported, we'll use a different approach
-        # First, get all ideas that aren't from the current user
-        ideas = StartupIdea.objects.exclude(user=user)
+        # Get all ideas that aren't from the current user
+        all_ideas = StartupIdea.objects.exclude(user=user)
+        matching_ideas = []
 
-        # Then filter them manually in Python
-        matches = []
-        for idea in ideas:
-            # Check if any of the user's skills are in the looking_for list
-            if user_skills and any(skill in idea.looking_for for skill in user_skills):
-                matches.append(idea)
-            # Or if their industry is in the looking_for list
-            elif (
-                hasattr(user, "industry")
-                and user.industry
-                and user.industry in idea.looking_for
-            ):
-                matches.append(idea)
+        # If user has skills defined, find ideas looking for those skills
+        if user.skills:
+            user_skills = [skill.strip().lower() for skill in user.skills.split(",")]
+
+            for idea in all_ideas:
+                # Check if any of the user's skills are mentioned in the idea's looking_for
+                if any(skill in idea.looking_for.lower() for skill in user_skills):
+                    matching_ideas.append(idea.id)
+                    continue
+
+        # If user has industry defined, find ideas looking for that industry
+        if user.industry:
+            industry = user.industry.lower()
+
+            for idea in all_ideas:
+                # Only check ideas not already matched by skills
+                if (
+                    idea.id not in matching_ideas
+                    and industry in idea.looking_for.lower()
+                ):
+                    matching_ideas.append(idea.id)
+
+        # Get the matched ideas as a queryset
+        matches = StartupIdea.objects.filter(id__in=matching_ideas)
 
         serializer = self.get_serializer(matches, many=True)
         return Response(serializer.data)

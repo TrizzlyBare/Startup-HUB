@@ -6,7 +6,14 @@ from django.utils.html import format_html
 class StartupImageInline(admin.TabularInline):
     model = StartupImage
     extra = 1
-    readonly_fields = ["created_at"]
+    readonly_fields = ["created_at", "image_preview"]
+
+    def image_preview(self, obj):
+        if obj.image:
+            return format_html('<img src="{}" width="150" />', obj.image.url)
+        return "No image"
+
+    image_preview.short_description = "Preview"
 
 
 @admin.register(StartupIdea)
@@ -20,7 +27,15 @@ class StartupIdeaAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = ("stage", "user_role", "created_at")
-    search_fields = ("name", "pitch", "description", "user__username", "user__email")
+    search_fields = (
+        "name",
+        "pitch",
+        "description",
+        "user__username",
+        "user__email",
+        "skills",
+        "looking_for",
+    )
     readonly_fields = ("created_at", "updated_at")
     inlines = [StartupImageInline]
 
@@ -56,14 +71,14 @@ class StartupIdeaAdmin(admin.ModelAdmin):
 
 @admin.register(StartupImage)
 class StartupImageAdmin(admin.ModelAdmin):
-    list_display = ("startup_idea", "caption", "created_at")
+    list_display = ("startup_idea", "caption", "image_preview", "created_at")
     list_filter = ("created_at",)
     search_fields = ("startup_idea__name", "caption")
     readonly_fields = ("created_at", "image_preview")
 
     def image_preview(self, obj):
         if obj.image:
-            return format_html('<img src="{}" width="200" />', obj.image.url)
+            return format_html('<img src="{}" width="100" />', obj.image.url)
         return "No image"
 
     image_preview.short_description = "Image Preview"

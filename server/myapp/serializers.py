@@ -28,6 +28,8 @@ class StartupIdeaSerializer(serializers.ModelSerializer):
     user_role_display = serializers.CharField(
         source="get_user_role_display", read_only=True
     )
+    looking_for_list = serializers.SerializerMethodField()
+    skills_list = serializers.SerializerMethodField()
 
     class Meta:
         model = StartupIdea
@@ -42,7 +44,9 @@ class StartupIdeaSerializer(serializers.ModelSerializer):
             "pitch",
             "description",
             "skills",
+            "skills_list",
             "looking_for",
+            "looking_for_list",
             "pitch_deck",
             "pitch_deck_url",
             "images",
@@ -57,6 +61,8 @@ class StartupIdeaSerializer(serializers.ModelSerializer):
             "username",
             "user_profile_picture",
             "user_role_display",
+            "skills_list",
+            "looking_for_list",
             "created_at",
             "updated_at",
         ]
@@ -71,3 +77,20 @@ class StartupIdeaSerializer(serializers.ModelSerializer):
         if obj.user.profile_picture:
             return obj.user.profile_picture.url
         return None
+
+    def get_looking_for_list(self, obj):
+        return obj.looking_for_list
+
+    def get_skills_list(self, obj):
+        return obj.skills_list
+
+    # Convert lists to comma-separated strings when saving
+    def validate_looking_for(self, value):
+        if isinstance(value, list):
+            return ", ".join(value)
+        return value
+
+    def validate_skills(self, value):
+        if isinstance(value, list):
+            return ", ".join(value)
+        return value

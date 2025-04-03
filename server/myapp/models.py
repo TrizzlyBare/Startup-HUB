@@ -34,13 +34,20 @@ class StartupIdea(models.Model):
         max_length=500, help_text="Elevator pitch for your startup idea"
     )
     description = models.TextField(help_text="Detailed description of your startup")
-    looking_for = models.JSONField(
-        default=list,
-        help_text="Roles/skills you're looking for in potential co-founders",
+
+    # Using string representation for better SQLite compatibility
+    looking_for = models.TextField(
+        default="",
+        blank=True,
+        help_text="Comma-separated list of roles/skills you're looking for",
     )
-    skills = models.JSONField(
-        default=list, help_text="List of skills and expertise needed for this idea"
+
+    skills = models.TextField(
+        default="",
+        blank=True,
+        help_text="Comma-separated list of skills and expertise needed for this idea",
     )
+
     pitch_deck = CloudinaryField(
         "pitch_deck",
         folder="startup_hub/pitch_decks",
@@ -48,6 +55,7 @@ class StartupIdea(models.Model):
         null=True,
         resource_type="auto",
     )
+
     # User's role in this startup idea
     user_role = models.CharField(
         max_length=20,
@@ -55,6 +63,7 @@ class StartupIdea(models.Model):
         default="FOUNDER",
         help_text="Your role in this startup idea",
     )
+
     website = models.URLField(blank=True)
     funding_stage = models.CharField(max_length=100, blank=True)
     investment_needed = models.DecimalField(
@@ -66,6 +75,19 @@ class StartupIdea(models.Model):
     def __str__(self):
         return f"{self.user.username}'s Idea - {self.name}"
 
+    # Helper property methods to convert comma-separated strings to lists
+    @property
+    def looking_for_list(self):
+        if not self.looking_for:
+            return []
+        return [item.strip() for item in self.looking_for.split(",")]
+
+    @property
+    def skills_list(self):
+        if not self.skills:
+            return []
+        return [item.strip() for item in self.skills.split(",")]
+
     class Meta:
         ordering = ["-created_at"]
 
@@ -75,7 +97,7 @@ class StartupImage(models.Model):
         StartupIdea,
         on_delete=models.CASCADE,
         related_name="images",
-        null=True,  # Make it nullable to allow migration
+        null=True,  # Make it nullable for migration
         blank=True,  # Allow blank in forms
     )
     image = CloudinaryField(
