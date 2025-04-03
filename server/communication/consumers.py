@@ -3,6 +3,7 @@ import base64
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.core.files.base import ContentFile
+from django.utils import timezone
 from .utils import MediaProcessor
 
 
@@ -347,4 +348,9 @@ class CommunicationConsumer(AsyncJsonWebsocketConsumer):
                 "candidate": event["candidate"],
                 "sender_id": event["sender_id"],
             }
+        )
+
+    async def call_invitation(self, event):
+        await self.send_json(
+            {"type": "call_invitation", "invitation": event["invitation"]}
         )

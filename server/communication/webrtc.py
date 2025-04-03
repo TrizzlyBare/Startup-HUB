@@ -43,3 +43,27 @@ class WebRTCSignalingConsumer(AsyncJsonWebsocketConsumer):
                     "sender_id": content["sender_id"],
                 },
             )
+
+    # WebSocket Event Handlers
+    async def webrtc_offer(self, event):
+        await self.send_json(
+            {"type": "offer", "offer": event["offer"], "sender_id": event["sender_id"]}
+        )
+
+    async def webrtc_answer(self, event):
+        await self.send_json(
+            {
+                "type": "answer",
+                "answer": event["answer"],
+                "sender_id": event["sender_id"],
+            }
+        )
+
+    async def webrtc_ice_candidate(self, event):
+        await self.send_json(
+            {
+                "type": "ice_candidate",
+                "candidate": event["candidate"],
+                "sender_id": event["sender_id"],
+            }
+        )

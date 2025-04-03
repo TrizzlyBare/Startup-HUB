@@ -5,11 +5,19 @@ from django.shortcuts import get_object_or_404
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
-from .models import Room, Message, Participant, CallLog
-from .serializers import RoomSerializer, MessageSerializer, CallLogSerializer
+from .models import Room, Message, Participant, CallLog, CallInvitation
+from .serializers import (
+    RoomSerializer,
+    MessageSerializer,
+    CallLogSerializer,
+    CallInvitationSerializer,
+)
 
 from .models import MediaFile
 from .serializers import MediaFileSerializer
+
+from django.utils import timezone
+from datetime import timedelta
 
 
 class RoomViewSet(viewsets.ModelViewSet):
@@ -102,6 +110,40 @@ class RoomViewSet(viewsets.ModelViewSet):
         )
 
         return Response(CallLogSerializer(call_log).data)
+
+    @action(detail=True, methods=["POST"])
+    def create_call_invitation(self, request, pk=None):
+        room = self.get_object()
+        call_type = request.data.get("call_type", "video")
+        invitee_id = request.data.get("invitee_id")
+
+        if not invitee_id:
+            return Response(
+                {"error": "Invitee ID is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create invitation with 60 second expiry
+        expires_at = timezone.now() + timedelta(seconds=60)
+
+        invitation = CallInvitation.objects.create(
+            inviter=request.user,
+            invitee_id=invitee_id,
+            room=room,
+            call_type=call_type,
+            expires_at=expires_at,
+        )
+
+        # Notify via WebSocket
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"user_{invitee_id}",
+            {
+                "type": "call_invitation",
+                "invitation": CallInvitationSerializer(invitation).data,
+            },
+        )
+
+        return Response(CallInvitationSerializer(invitation).data)
 
 
 class MessageViewSet(viewsets.ModelViewSet):

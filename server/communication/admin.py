@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Room, Participant, Message, CallLog
+from .models import Room, Participant, Message, CallLog, CallInvitation
 
 
 @admin.register(Room)
@@ -27,3 +27,10 @@ class MessageAdmin(admin.ModelAdmin):
 class CallLogAdmin(admin.ModelAdmin):
     list_display = ("caller", "receiver", "call_type", "start_time", "status")
     list_filter = ("call_type", "status", "start_time")
+
+
+@admin.register(CallInvitation)
+class CallInvitationAdmin(admin.ModelAdmin):
+    list_display = ("inviter", "invitee", "room", "call_type", "created_at", "status")
+    list_filter = ("call_type", "status", "created_at")
+    search_fields = ("inviter__username", "invitee__username")

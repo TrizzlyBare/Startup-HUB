@@ -156,3 +156,39 @@ class MediaFile(models.Model):
             )
 
         super().delete(*args, **kwargs)
+
+
+# Add this model class to models.py
+
+
+class CallInvitation(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    inviter = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sent_call_invitations",
+    )
+    invitee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="received_call_invitations",
+    )
+    room = models.ForeignKey(Room, on_delete=models.CASCADE)
+    call_type = models.CharField(
+        max_length=10, choices=[("audio", "Audio Call"), ("video", "Video Call")]
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ("pending", "Pending"),
+            ("accepted", "Accepted"),
+            ("declined", "Declined"),
+            ("expired", "Expired"),
+        ],
+        default="pending",
+    )
+
+    def __str__(self):
+        return f"Call invite from {self.inviter.username} to {self.invitee.username}"

@@ -138,3 +138,21 @@ class MediaFileSerializer(serializers.ModelSerializer):
             return super().create(validated_data)
 
         raise serializers.ValidationError("Upload failed")
+
+
+class CallInvitationSerializer(serializers.ModelSerializer):
+    inviter = UserSerializer(read_only=True)
+    invitee = UserSerializer(read_only=True)
+
+    class Meta:
+        model = CallInvitation
+        fields = [
+            "id",
+            "inviter",
+            "invitee",
+            "room",
+            "call_type",
+            "created_at",
+            "expires_at",
+            "status",
+        ]
