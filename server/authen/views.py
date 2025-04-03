@@ -11,6 +11,7 @@ from django.utils.encoding import force_bytes
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from django.conf import settings
+from django.http import Http404
 from .serializers import UserSerializer, UserInfoSerializer, LoginSerializer
 from .models import CustomUser
 
@@ -137,6 +138,23 @@ class AuthViewSet(viewsets.ViewSet):
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=False, methods=["delete"], permission_classes=[IsAuthenticated])
+    def delete_account(self, request):
+        """Delete user account"""
+        user = request.user
+
+        # Delete auth token first
+        if hasattr(user, "auth_token"):
+            user.auth_token.delete()
+
+        # Delete the user account
+        user.delete()
+
+        return Response(
+            {"message": "Your account has been permanently deleted"},
+            status=status.HTTP_204_NO_CONTENT,
+        )
+
 
 # Additional standalone generic views for better browser interaction
 class RegisterView(generics.CreateAPIView):
@@ -174,7 +192,7 @@ class RegisterView(generics.CreateAPIView):
 class LoginView(generics.GenericAPIView):
     """Login user and return token"""
 
-    serializer_class = LoginSerializer  # Add this line to fix the error
+    serializer_class = LoginSerializer
     permission_classes = [AllowAny]
     http_method_names = ["post", "get"]  # Allow both POST and GET for form rendering
 
@@ -234,8 +252,8 @@ class LogoutView(generics.GenericAPIView):
             )
 
 
-class ProfileView(generics.RetrieveUpdateAPIView):
-    """View and update user profile"""
+class ProfileView(generics.RetrieveUpdateDestroyAPIView):
+    """View, update and delete user profile"""
 
     serializer_class = UserInfoSerializer
     authentication_classes = [TokenAuthentication, SessionAuthentication]
@@ -260,6 +278,21 @@ class ProfileView(generics.RetrieveUpdateAPIView):
                 {"message": "Profile updated successfully", "user": serializer.data}
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def destroy(self, request, *args, **kwargs):
+        user = self.get_object()
+
+        # Delete auth token first if it exists
+        if hasattr(user, "auth_token"):
+            user.auth_token.delete()
+
+        # Delete the user account
+        user.delete()
+
+        return Response(
+            {"message": "Your account has been permanently deleted"},
+            status=status.HTTP_204_NO_CONTENT,
+        )
 
 
 class PasswordChangeView(generics.GenericAPIView):
@@ -299,6 +332,7 @@ class PasswordChangeView(generics.GenericAPIView):
 
 
 class ProfileDetailView(generics.RetrieveAPIView):
+    """View other user profiles by username"""
 
     serializer_class = UserInfoSerializer
     authentication_classes = [TokenAuthentication, SessionAuthentication]
@@ -313,19 +347,11 @@ class ProfileDetailView(generics.RetrieveAPIView):
             try:
                 return CustomUser.objects.get(username=username)
             except CustomUser.DoesNotExist:
-                return Response(
-                    {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
-                )
+                raise Http404("User not found")
 
         return self.request.user
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
-
-        if instance is None:
-            return Response(
-                {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
-            )
-
         serializer = self.get_serializer(instance)
         return Response(serializer.data)

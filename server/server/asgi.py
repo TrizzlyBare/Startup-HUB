@@ -30,3 +30,6 @@ application = ProtocolTypeRouter(
         ),
     }
 )
+
+
+ASGI_APPLICATION = "server.asgi.application"

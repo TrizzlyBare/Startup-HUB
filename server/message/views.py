@@ -30,7 +30,6 @@ class RoomViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def group_chats(self, request):
-        """Return only group chat rooms"""
         user = request.user
         rooms = Room.objects.filter(
             participants__user=user, is_group_chat=True

@@ -10,7 +10,7 @@ from .views import (
     LogoutView,
     ProfileView,
     PasswordChangeView,
-    ProfileDetailView,  # Add the new view
+    ProfileDetailView,
 )
 
 # Create a schema view for API documentation
@@ -39,7 +39,9 @@ urlpatterns = [
     path("register/", RegisterView.as_view(), name="register"),
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
-    path("profile/", ProfileView.as_view(), name="profile"),
+    path(
+        "profile/", ProfileView.as_view(), name="profile"
+    ),  # This route handles viewing, updating, and deleting profile
     # New profile detail endpoint with optional username parameter
     path("profiles/", ProfileDetailView.as_view(), name="profile-detail"),
     path(
