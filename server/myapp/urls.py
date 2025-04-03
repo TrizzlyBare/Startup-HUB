@@ -1,10 +1,10 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import StartupProfileViewSet
+from .views import StartupIdeaViewSet
 
 router = DefaultRouter()
-router.register(r'startup-profiles', StartupProfileViewSet, basename='startup-profile')
+router.register(r"startup-ideas", StartupIdeaViewSet, basename="startup-idea")
 
 urlpatterns = [
-    path('', include(router.urls)),
+    path("", include(router.urls)),
 ]

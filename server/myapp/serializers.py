@@ -1,8 +1,8 @@
 from rest_framework import serializers
+from .models import StartupIdea, StartupImage
 from django.contrib.auth import get_user_model
-from .models import StartupProfile, StartupImage
 
-# Get the custom user model
+# Get the CustomUser model
 CustomUser = get_user_model()
 
 
@@ -20,62 +20,54 @@ class StartupImageSerializer(serializers.ModelSerializer):
         return None
 
 
-class UserProfileImageSerializer(serializers.ModelSerializer):
-    profile_picture_url = serializers.SerializerMethodField()
-
-    class Meta:
-        model = CustomUser
-        fields = ["id", "profile_picture", "profile_picture_url"]
-        extra_kwargs = {"profile_picture": {"write_only": True}}
-
-    def get_profile_picture_url(self, obj):
-        if obj.profile_picture:
-            return obj.profile_picture.url
-        return None
-
-
-class StartupProfileSerializer(serializers.ModelSerializer):
+class StartupIdeaSerializer(serializers.ModelSerializer):
     images = StartupImageSerializer(many=True, read_only=True)
     pitch_deck_url = serializers.SerializerMethodField()
     username = serializers.CharField(source="user.username", read_only=True)
-    email = serializers.CharField(source="user.email", read_only=True)
-    user_profile = UserProfileImageSerializer(source="user", read_only=True)
+    user_profile_picture = serializers.SerializerMethodField(read_only=True)
+    user_role_display = serializers.CharField(
+        source="get_user_role_display", read_only=True
+    )
 
     class Meta:
-        model = StartupProfile
+        model = StartupIdea
         fields = [
             "id",
             "username",
-            "email",
-            "user_profile",
-            "bio",
-            "age",
-            "location",
-            "interests",
-            "profile_images",
-            "startup_name",
-            "startup_stage",
+            "user_profile_picture",
+            "name",
+            "stage",
+            "user_role",
+            "user_role_display",
             "pitch",
             "description",
-            "role",
             "skills",
             "looking_for",
             "pitch_deck",
             "pitch_deck_url",
-            "startup_images",
             "images",
             "website",
-            "linkedin",
-            "github",
             "funding_stage",
             "investment_needed",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "username",
+            "user_profile_picture",
+            "user_role_display",
+            "created_at",
+            "updated_at",
+        ]
         extra_kwargs = {"pitch_deck": {"write_only": True}}
 
     def get_pitch_deck_url(self, obj):
         if obj.pitch_deck:
             return obj.pitch_deck.url
+        return None
+
+    def get_user_profile_picture(self, obj):
+        if obj.user.profile_picture:
+            return obj.user.profile_picture.url
         return None
