@@ -6,12 +6,12 @@ class State(rx.State):
     """State for the profile page."""
     
     # Basic Info
-    name: str = "Nanashi Mumei"
-    first_name: str = "Nanashi"
-    last_name: str = "Mumei"
-    job_title: str = "KFC Worker"
-    experience_level: str = "1-3 years"
-    category: str = "Technology"
+    name: str = ""
+    first_name: str = ""
+    last_name: str = ""
+    job_title: str = ""
+    experience_level: str = ""
+    category: str = ""
     
     # Profile username (different from route parameter)
     profile_username: str = ""
@@ -31,6 +31,10 @@ class State(rx.State):
 
     async def on_mount(self):
         """Load profile data when component mounts."""
+        # Check if user is authenticated
+        if not AuthState.check_auth():
+            return rx.redirect("/login")
+            
         if hasattr(self, "router"):
             params = getattr(self.router.page, "params", {})
             username = params.get("profile_name", "")
@@ -70,6 +74,8 @@ class State(rx.State):
 
     async def save_changes(self, form_data: dict):
         """Save profile changes to the API."""
+        print("Starting profile update...")  # Debug log
+        
         # Update profile data from form
         self.first_name = form_data.get("first_name", self.first_name)
         self.last_name = form_data.get("last_name", self.last_name)
@@ -84,36 +90,74 @@ class State(rx.State):
         # Compose full name
         self.name = f"{self.first_name} {self.last_name}"
         
-        # Get username from router
-        username = self.router.page.params.get("profile_name", "")
-        if username:
+        # Get username from profile_username
+        username = self.profile_username
+        print(f"Using username for update: {username}")  # Debug log
+        
+        if not username:
+            print("No username found for update")
+            self.show_edit_form = False
+            return
+            
+        try:
+            # Prepare data to send to API
+            profile_data = {
+                "first_name": self.first_name,
+                "last_name": self.last_name,
+                "job_title": self.job_title,
+                "bio": self.about,
+                "industry": self.category,
+                "experience": self.experience_level,
+                "skills": ",".join(self.skills),
+                "contact_links": [
+                    {"title": "LinkedIn", "url": self.linkedin_link} if self.linkedin_link else None,
+                    {"title": "GitHub", "url": self.github_link} if self.github_link else None,
+                    {"title": "Portfolio", "url": self.portfolio_link} if self.portfolio_link else None,
+                ]
+            }
+            
+            # Remove None values from contact_links
+            profile_data["contact_links"] = [link for link in profile_data["contact_links"] if link is not None]
+            
+            print(f"Profile data to be sent: {profile_data}")  # Debug log
+            
+            # Get the authentication token from AuthState using the proper method
+            token = AuthState.get_token()
+            print(f"Token value: {token}")
+            
+            if not token:
+                print("No authentication token found")
+                self.show_edit_form = False
+                return
+            
+            # Make API call to update profile using PATCH
             try:
-                # Prepare data to send to API
-                profile_data = {
-                    "first_name": self.first_name,
-                    "last_name": self.last_name,
-                    "job_title": self.job_title,
-                    "about": self.about,
-                    "category": self.category,
-                    "experience_level": self.experience_level,
-                    "skills": self.skills,
-                    "projects": self.projects,
-                    "linkedin_link": self.linkedin_link,
-                    "github_link": self.github_link,
-                    "portfolio_link": self.portfolio_link
-                }
-                
-                # Make API call to update profile
                 async with httpx.AsyncClient() as client:
-                    response = await client.put(
-                        f"http://127.0.0.1:8000/api/auth/profile/{username}",
-                        json=profile_data
+                    print(f"Sending PATCH request to update profile")  # Debug log
+                    response = await client.patch(
+                        f"http://100.95.107.24:8000/api/auth/profile/",
+                        json=profile_data,
+                        headers={
+                            "Authorization": f"Token {token}",
+                            "Accept": "application/json",
+                            "Content-Type": "application/json"
+                        }
                     )
                     
-                    if response.status_code != 200:
+                    print(f"Response status code: {response.status_code}")  # Debug log
+                    print(f"Response body: {response.text}")  # Debug log
+                    
+                    if response.status_code == 200:
+                        print("Profile updated successfully")
+                        # Reload profile data to show changes
+                        print("Reloading profile data...")  # Debug log
+                        await self.load_profile_data()
+                    else:
                         print(f"Error updating profile: {response.text}")
             except Exception as e:
-                print(f"Error saving profile changes: {e}")
+                print(f"Error making API request: {e}")
+        except Exception as e:
+            print(f"Error saving profile changes: {e}")
         
         # Close the form modal
         self.show_edit_form = False
@@ -154,6 +198,10 @@ class State(rx.State):
         """Update portfolio website URL."""
         self.portfolio_link = value
 
+    def set_job_title(self, value: str):
+        """Update job title field."""
+        self.job_title = value
+
     def set_new_skill(self, value: str):
         """Set new skill to be added."""
         self.new_skill = value
@@ -186,7 +234,7 @@ class State(rx.State):
             key_event: The keyboard event, if triggered by a key press.
         """
         # Only proceed if it's not a key event or if the key is Enter
-        if key_event is None or key_event.key == "Enter":
+        if key_event is None or (hasattr(key_event, 'key') and key_event.key == "Enter"):
             if self.new_project and self.new_project not in self.projects:
                 self.projects.append(self.new_project)
                 self.new_project = ""
@@ -203,17 +251,35 @@ class State(rx.State):
 
     async def load_profile_data(self):
         """Load profile data based on the username from the URL."""
-        if self.profile_username:
+        if not self.profile_username:
+            return
+            
+        try:
+            print(f"Loading profile data for username: {self.profile_username}")  # Debug log
+            
+            # Get the authentication token from AuthState using the proper method
+            token = AuthState.get_token()
+            print(f"Token value in load_profile_data: {token}")
+            
+            if not token:
+                print("No authentication token found")
+                return
+                
+            # Make API call to fetch user profile data
             try:
-                # Make API call to fetch user profile data
                 async with httpx.AsyncClient() as client:
+                    print(f"Sending GET request for user: {self.profile_username}")  # Debug log
                     response = await client.get(
-                        f"http://127.0.0.1:8000/api/auth/profile/{self.profile_username}",
+                        f"http://100.95.107.24:8000/api/auth/profiles/{self.profile_username}/",
                         headers={
+                            "Authorization": f"Token {token}",
                             "Accept": "application/json",
                             "Content-Type": "application/json"
                         }
                     )
+                    
+                    print(f"Response status code: {response.status_code}")  # Debug log
+                    print(f"Response body: {response.text}")  # Debug log
                     
                     if response.status_code == 200:
                         user_data = response.json()
@@ -224,44 +290,45 @@ class State(rx.State):
                         self.last_name = user_data.get("last_name", "")
                         self.name = f"{self.first_name} {self.last_name}"
                         self.job_title = user_data.get("job_title", "")
-                        self.experience_level = user_data.get("experience_level", "")
-                        self.category = user_data.get("category", "")
-                        self.about = user_data.get("about", "")
+                        self.about = user_data.get("bio", "")
+                        self.category = user_data.get("industry", "")
+                        self.experience_level = user_data.get("experience", "")
                         
                         # Handle skills
-                        skills_data = user_data.get("skills", [])
-                        if isinstance(skills_data, list):
-                            self.skills = skills_data
-                        elif isinstance(skills_data, str):
-                            # Handle case where skills might be a comma-separated string
+                        skills_data = user_data.get("skills", "")
+                        if isinstance(skills_data, str):
                             self.skills = [s.strip() for s in skills_data.split(",") if s.strip()]
-                        
-                        # Handle projects
-                        projects_data = user_data.get("projects", [])
-                        if isinstance(projects_data, list):
-                            self.projects = projects_data
-                        elif isinstance(projects_data, str):
-                            # Handle case where projects might be a comma-separated string
-                            self.projects = [p.strip() for p in projects_data.split(",") if p.strip()]
+                        elif isinstance(skills_data, list):
+                            self.skills = skills_data
                             
-                        # Handle social links
-                        self.linkedin_link = user_data.get("linkedin_link", "")
-                        self.github_link = user_data.get("github_link", "")
-                        self.portfolio_link = user_data.get("portfolio_link", "")
+                        # Handle contact links
+                        contact_links = user_data.get("contact_links", [])
+                        for link in contact_links:
+                            title = link.get("title", "").lower()
+                            url = link.get("url", "")
+                            if title == "linkedin":
+                                self.linkedin_link = url
+                            elif title == "github":
+                                self.github_link = url
+                            elif title == "portfolio":
+                                self.portfolio_link = url
                         
                         # Handle profile picture if available
-                        if "profile_picture" in user_data:
-                            AuthState.profile_picture = user_data["profile_picture"]
+                        if "profile_picture_url" in user_data:
+                            AuthState.profile_picture = user_data["profile_picture_url"]
                     else:
                         print(f"Error fetching profile data: {response.status_code}")
                         print(f"Response: {response.text}")
                         # Use demo data as fallback
                         self.name = f"Profile of {self.profile_username}"
-                        
             except Exception as e:
-                print(f"Error in load_profile_data: {str(e)}")
+                print(f"Error making API request: {e}")
                 # Use demo data as fallback
                 self.name = f"Profile of {self.profile_username}"
+        except Exception as e:
+            print(f"Error in load_profile_data: {str(e)}")
+            # Use demo data as fallback
+            self.name = f"Profile of {self.profile_username}"
 
 def skill_badge(skill: str) -> rx.Component:
     """Create a badge for a skill."""
@@ -526,6 +593,7 @@ def edit_form() -> rx.Component:
                             placeholder="Your job title",
                             name="job_title",
                             value=State.job_title,
+                            on_change=State.set_job_title,
                             class_name="w-full p-2 border rounded-lg bg-white",
                         ),
                         
@@ -684,11 +752,10 @@ def edit_form() -> rx.Component:
                         
                         # Buttons
                         rx.hstack(
-                            rx.dialog.close(
-                                rx.button(
-                                    "Cancel",
-                                    class_name="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg",
-                                ),
+                            rx.button(
+                                "Cancel",
+                                on_click=State.cancel_edit,
+                                class_name="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg",
                             ),
                             rx.dialog.close(
                                 rx.button(

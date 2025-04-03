@@ -23,9 +23,12 @@ class AuthState(BaseState):
     # Profile picture field
     profile_picture: Optional[str] = None
     _upload_data: Optional[bytes] = None
+    
+    # Authentication token
+    _auth_token: Optional[str] = None
 
     # API endpoints
-    API_BASE_URL = "http://127.0.0.1:8000/api/auth"
+    API_BASE_URL = "http://100.95.107.24:8000/api/auth"
     
     def clear_messages(self):
         """Clear error and success messages."""
@@ -42,6 +45,28 @@ class AuthState(BaseState):
         self.profile_picture = None
         self._upload_data = None
         self.clear_messages()
+    
+    def set_token(self, token: str):
+        """Set the authentication token."""
+        self._auth_token = token
+        # Also store the token in local storage using BaseState methods
+        super().set_token(token)
+    
+    def get_token(self) -> Optional[str]:
+        """Get the authentication token."""
+        # If _auth_token is None, try to get it from local storage
+        if self._auth_token is None:
+            stored_token = self.get_token_from_storage()
+            if stored_token:
+                self._auth_token = stored_token
+        # Return the actual token string, not the EventSpec object
+        return self._auth_token if isinstance(self._auth_token, str) else None
+    
+    def clear_token(self):
+        """Clear the authentication token."""
+        self._auth_token = None
+        # Also clear the token from local storage
+        super().clear_token()
 
     async def handle_login(self):
         """Handle login form submission."""
@@ -68,6 +93,11 @@ class AuthState(BaseState):
                     if not username:
                         # If username not in response, use email prefix as fallback
                         username = self.email.split('@')[0]
+                    
+                    # Store the authentication token
+                    token = data.get("token")
+                    if token:
+                        self.set_token(token)
                     
                     self.success = "Login successful!"
                     return rx.redirect(f"/profile/{username}")
@@ -124,6 +154,11 @@ class AuthState(BaseState):
                     # Use the username we sent in the registration form
                     username = self.username
                     
+                    # Store the authentication token
+                    token = data.get("token")
+                    if token:
+                        self.set_token(token)
+                    
                     self.success = "Registration successful!"
                     self.clear_form()
                     return rx.redirect(f"/profile/{username}")
@@ -144,6 +179,35 @@ class AuthState(BaseState):
             self.error = str(e)
         finally:
             self.is_loading = False
+
+    async def handle_logout(self):
+        """Handle user logout."""
+        try:
+            # Get the authentication token
+            token = self.get_token()
+            if token:
+                # Make API call to logout
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{self.API_BASE_URL}/logout/",
+                        headers={
+                            "Authorization": f"Token {token}",
+                            "Accept": "application/json",
+                            "Content-Type": "application/json"
+                        }
+                    )
+                    
+                    if response.status_code == 200:
+                        # Clear the token
+                        self.clear_token()
+                        return rx.redirect("/login")
+                    else:
+                        print(f"Error during logout: {response.text}")
+        except Exception as e:
+            print(f"Error during logout: {e}")
+            # Still clear the token and redirect even if the API call fails
+            self.clear_token()
+            return rx.redirect("/login")
 
     async def handle_forgot_password(self):
         """Handle forgot password request."""

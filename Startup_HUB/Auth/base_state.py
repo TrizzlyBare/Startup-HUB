@@ -49,7 +49,9 @@ class BaseState(rx.State):
 
     def get_token_from_storage(self) -> Optional[str]:
         """Get token from client storage."""
-        return self.get_client_storage("auth_token")
+        token = self.get_client_storage("auth_token")
+        # Ensure we return a string token or None
+        return token if isinstance(token, str) else None
 
     def clear_token_storage(self):
         """Clear the token from client storage."""
