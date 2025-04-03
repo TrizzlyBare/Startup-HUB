@@ -11,3 +11,4 @@ __init__.py
 .venv
 server/db.sqlite3
 .env
+db.sqlite3
