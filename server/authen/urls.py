@@ -42,6 +42,7 @@ urlpatterns = [
     # Auth endpoints (auth required)
     path("logout/", LogoutView.as_view(), name="logout"),
     path("profile/", ProfileView.as_view(), name="profile"),
+    path("profile/<str:username>/", ProfileView.as_view(), name="profile-username"),
     path("change-password/", PasswordChangeView.as_view(), name="change-password"),
     # Profile detail endpoints
     path("profiles/", ProfileDetailView.as_view(), name="profile-detail"),

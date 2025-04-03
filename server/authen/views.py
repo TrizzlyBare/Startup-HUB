@@ -135,12 +135,12 @@ class AuthViewSet(viewsets.ViewSet):
 
     @action(
         detail=False,
-        methods=["patch"],  # Changed from 'put' to 'patch'
+        methods=["put"],  # Changed from 'patch' to 'put'
         parser_classes=[MultiPartParser, FormParser, JSONParser],
     )
     def update_profile(self, request):
-        """Update user profile information using PATCH method"""
-        serializer = UserInfoSerializer(request.user, data=request.data, partial=True)
+        """Update user profile information using PUT method"""
+        serializer = UserInfoSerializer(request.user, data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(
@@ -287,9 +287,17 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
     authentication_classes = [TokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    http_method_names = ["get", "patch", "delete"]  # Changed 'put' to 'patch'
+    http_method_names = ["get", "put", "delete"]  # Changed 'patch' to 'put'
+    lookup_field = "username"  # Use username to locate the user
+    queryset = CustomUser.objects.all()
 
     def get_object(self):
+        username = self.kwargs.get("username")
+        if username:
+            try:
+                return CustomUser.objects.get(username=username)
+            except CustomUser.DoesNotExist:
+                raise Http404("User not found")
         return self.request.user
 
     def retrieve(self, request, *args, **kwargs):
@@ -297,10 +305,10 @@ class ProfileView(generics.RetrieveUpdateDestroyAPIView):
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
-    def patch(self, request, *args, **kwargs):
-        """Update user profile with partial data using PATCH"""
+    def put(self, request, *args, **kwargs):
+        """Update user profile with full data using PUT"""
         instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer = self.get_serializer(instance, data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(
