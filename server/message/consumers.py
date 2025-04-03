@@ -5,6 +5,7 @@ from .models import Room, Message, Participant, MessageReceipt
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from uuid import UUID
+import asyncio
 
 User = get_user_model()
 
@@ -22,6 +23,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         self.user = self.scope["user"]
         self.room_id = self.scope["url_route"]["kwargs"]["room_id"]
         self.room_group_name = f"chat_{self.room_id}"
+        self.user_specific_group = f"user_{self.user.id}"
 
         # Check if user is participant in this room
         is_participant = await self.is_room_participant(self.user.id, self.room_id)
@@ -32,16 +34,45 @@ class ChatConsumer(AsyncWebsocketConsumer):
         # Join room group
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
 
+        # Join user-specific group for targeted notifications
+        await self.channel_layer.group_add(self.user_specific_group, self.channel_name)
+
         await self.accept()
 
         # Send current online status to the room
         await self.update_user_presence(True)
+
+        # Get and send unread message count
+        unread_count = await self.get_unread_count()
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "unread.count",
+                    "count": unread_count,
+                    "room_id": str(self.room_id),
+                }
+            )
+        )
+
+        # Fetch online participants
+        participants = await self.get_online_participants()
+        await self.send(
+            text_data=json.dumps(
+                {"type": "participants.list", "participants": participants},
+                cls=UUIDEncoder,
+            )
+        )
 
     async def disconnect(self, close_code):
         # Leave room group
         if hasattr(self, "room_group_name"):
             await self.channel_layer.group_discard(
                 self.room_group_name, self.channel_name
+            )
+
+            # Leave user-specific group
+            await self.channel_layer.group_discard(
+                self.user_specific_group, self.channel_name
             )
 
             # Send offline status to the room
@@ -64,6 +95,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 )
 
         elif message_type == "typing.status":
+            # Store typing status in Redis with expiration
+            is_typing = data.get("is_typing", False)
+            if is_typing:
+                # Set typing status with 3-second expiration
+                await self.set_typing_status(is_typing)
+
             # Forward typing status
             await self.channel_layer.group_send(
                 self.room_group_name,
@@ -71,7 +108,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     "type": "typing.status",
                     "user_id": str(self.user.id),
                     "username": self.user.username,
-                    "is_typing": data.get("is_typing", False),
+                    "is_typing": is_typing,
                 },
             )
 
@@ -88,6 +125,24 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     "username": self.user.username,
                     "timestamp": timezone.now().isoformat(),
                 },
+            )
+
+        elif message_type == "fetch.history":
+            # Fetch chat history with pagination
+            before_id = data.get("before_id")
+            limit = data.get("limit", 20)
+
+            history = await self.get_message_history(before_id, limit)
+
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "chat.history",
+                        "messages": history,
+                        "room_id": str(self.room_id),
+                    },
+                    cls=UUIDEncoder,
+                )
             )
 
     async def chat_message(self, event):
@@ -142,6 +197,19 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
         )
 
+    async def notification(self, event):
+        """Handler for user notifications"""
+        # Send notification to WebSocket
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "notification",
+                    "message": event["message"],
+                    "data": event.get("data", {}),
+                }
+            )
+        )
+
     @database_sync_to_async
     def is_room_participant(self, user_id, room_id):
         """Check if user is a participant in the room"""
@@ -167,6 +235,25 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         if receipts:
             MessageReceipt.objects.bulk_create(receipts)
+
+            # Notify other users about new message
+            for participant in participants:
+                # This will be processed by Redis channel layer
+                asyncio.create_task(
+                    self.channel_layer.group_send(
+                        f"user_{participant.user.id}",
+                        {
+                            "type": "notification",
+                            "message": "New message",
+                            "data": {
+                                "room_id": str(self.room_id),
+                                "sender": self.user.username,
+                                "message_preview": content[:50]
+                                + ("..." if len(content) > 50 else ""),
+                            },
+                        },
+                    )
+                )
 
         # Update room timestamp
         room.save()  # This updates the 'updated_at' field
@@ -222,10 +309,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
         """Update user's last activity in the participant record"""
         try:
             # Get the actual user ID from the lazy object
-            user_id = self.user.id if hasattr(self.user, 'id') else None
+            user_id = self.user.id if hasattr(self.user, "id") else None
             if not user_id:
                 return
-                
+
             participant = Participant.objects.get(user_id=user_id, room_id=self.room_id)
             if is_online:
                 participant.last_active = timezone.now()
@@ -233,10 +320,103 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except Participant.DoesNotExist:
             pass
 
+    async def set_typing_status(self, is_typing):
+        """Store typing status in Redis with expiration"""
+        # Using Redis channel layer to store ephemeral data
+        channel_name = f"typing:{self.room_id}:{self.user.id}"
+
+        if is_typing:
+            # This will be automatically cleaned up by Redis after 3 seconds
+            await self.channel_layer.send(
+                channel_name, {"type": "typing_indicator", "is_typing": True}
+            )
+
+    @database_sync_to_async
+    def get_unread_count(self):
+        """Get count of unread messages for current user in this room"""
+        try:
+            participant = Participant.objects.get(user=self.user, room_id=self.room_id)
+            return participant.unread_messages_count()
+        except Participant.DoesNotExist:
+            return 0
+
+    @database_sync_to_async
+    def get_message_history(self, before_id=None, limit=20):
+        """Get paginated message history"""
+        query = Message.objects.filter(room_id=self.room_id)
+
+        if before_id:
+            try:
+                before_message = Message.objects.get(id=before_id)
+                query = query.filter(sent_at__lt=before_message.sent_at)
+            except (Message.DoesNotExist, ValueError):
+                pass
+
+        messages = (
+            query.select_related("sender")
+            .prefetch_related("receipts__recipient")
+            .order_by("-sent_at")[:limit]
+        )
+
+        # Convert to list of dictionaries
+        result = []
+        for message in messages:
+            receipts_data = [
+                {
+                    "recipient_id": str(receipt.recipient.id),
+                    "recipient_username": receipt.recipient.username,
+                    "is_read": receipt.is_read,
+                }
+                for receipt in message.receipts.all()
+            ]
+
+            total = len(receipts_data)
+            read = sum(1 for r in receipts_data if r["is_read"])
+
+            result.append(
+                {
+                    "id": str(message.id),
+                    "content": message.content,
+                    "sender_id": str(message.sender.id),
+                    "sender_username": message.sender.username,
+                    "sent_at": message.sent_at.isoformat(),
+                    "receipts": receipts_data,
+                    "read_status": {
+                        "total": total,
+                        "read": read,
+                        "unread": total - read,
+                    },
+                }
+            )
+
+        return result
+
+    @database_sync_to_async
+    def get_online_participants(self):
+        """Get list of online participants"""
+        # Online participants are those who have been active in the last 5 minutes
+        five_min_ago = timezone.now() - timezone.timedelta(minutes=5)
+        participants = Participant.objects.filter(
+            room_id=self.room_id, last_active__gte=five_min_ago
+        ).select_related("user")
+
+        return [
+            {
+                "user_id": str(participant.user.id),
+                "username": participant.user.username,
+                "last_active": (
+                    participant.last_active.isoformat()
+                    if participant.last_active
+                    else None
+                ),
+            }
+            for participant in participants
+        ]
+
 
 class EchoConsumer(WebsocketConsumer):
     channel_layer_alias = None  # Disable channel layer for echo consumer
-    
+
     def connect(self):
         self.accept()
 

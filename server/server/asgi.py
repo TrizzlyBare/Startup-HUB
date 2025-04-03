@@ -19,8 +19,12 @@ django.setup()
 # Now import routing modules
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
+from channels.security.websocket import AllowedHostsOriginValidator
 import message.routing
 import webcall.routing
+
+# Import custom token auth middleware
+from message.channels_middleware import TokenAuthMiddlewareStack
 
 # Initialize Django ASGI application
 django_asgi_app = get_asgi_application()
@@ -28,10 +32,12 @@ django_asgi_app = get_asgi_application()
 application = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
-        "websocket": AuthMiddlewareStack(
-            URLRouter(
-                message.routing.websocket_urlpatterns
-                + webcall.routing.websocket_urlpatterns
+        "websocket": AllowedHostsOriginValidator(
+            TokenAuthMiddlewareStack(
+                URLRouter(
+                    message.routing.websocket_urlpatterns
+                    + webcall.routing.websocket_urlpatterns
+                )
             )
         ),
     }
