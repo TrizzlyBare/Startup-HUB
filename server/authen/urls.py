@@ -10,6 +10,7 @@ from .views import (
     LogoutView,
     ProfileView,
     PasswordChangeView,
+    ProfileDetailView,  # Add the new view
 )
 
 # Create a schema view for API documentation
@@ -39,6 +40,13 @@ urlpatterns = [
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("profile/", ProfileView.as_view(), name="profile"),
+    # New profile detail endpoint with optional username parameter
+    path("profiles/", ProfileDetailView.as_view(), name="profile-detail"),
+    path(
+        "profiles/<str:username>/",
+        ProfileDetailView.as_view(),
+        name="profile-detail-username",
+    ),
     path("change-password/", PasswordChangeView.as_view(), name="change-password"),
     # API documentation
     path(

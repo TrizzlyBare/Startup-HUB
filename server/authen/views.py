@@ -296,3 +296,36 @@ class PasswordChangeView(generics.GenericAPIView):
             {"message": "Password changed successfully", "token": token.key},
             status=status.HTTP_200_OK,
         )
+
+
+class ProfileDetailView(generics.RetrieveAPIView):
+
+    serializer_class = UserInfoSerializer
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+    queryset = CustomUser.objects.all()
+    lookup_field = "username"
+
+    def get_object(self):
+        username = self.kwargs.get("username")
+
+        if username:
+            try:
+                return CustomUser.objects.get(username=username)
+            except CustomUser.DoesNotExist:
+                return Response(
+                    {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
+                )
+
+        return self.request.user
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        if instance is None:
+            return Response(
+                {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
