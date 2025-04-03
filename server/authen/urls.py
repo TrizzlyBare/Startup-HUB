@@ -11,6 +11,7 @@ from .views import (
     ProfileView,
     PasswordChangeView,
     ProfileDetailView,
+    GetTokenView,
 )
 
 # Create a schema view for API documentation
@@ -51,6 +52,8 @@ urlpatterns = [
     ),
     # Token validation endpoint (useful for frontend)
     path("validate-token/", ProfileView.as_view(), name="validate-token"),
+    # Token retrieval endpoint
+    path("token/", GetTokenView.as_view(), name="get-token"),
     # API documentation
     path(
         "swagger/",

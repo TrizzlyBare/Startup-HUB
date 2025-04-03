@@ -166,6 +166,21 @@ class AuthViewSet(viewsets.ViewSet):
             status=status.HTTP_204_NO_CONTENT,
         )
 
+    @action(detail=False, methods=["get"])
+    def token(self, request):
+        """Get or create the user's authentication token"""
+        token, created = Token.objects.get_or_create(user=request.user)
+
+        return Response(
+            {
+                "token": token.key,
+                "created": created,
+                "user_id": request.user.id,
+                "username": request.user.username,
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 # Additional standalone generic views for better browser interaction
 class RegisterView(generics.CreateAPIView):
@@ -370,3 +385,26 @@ class ProfileDetailView(generics.RetrieveAPIView):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
+
+
+class GetTokenView(generics.GenericAPIView):
+    """Retrieve current user's token"""
+
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        """
+        Get or create an auth token for the authenticated user
+        """
+        token, created = Token.objects.get_or_create(user=request.user)
+
+        return Response(
+            {
+                "token": token.key,
+                "created": created,
+                "user_id": request.user.id,
+                "username": request.user.username,
+            },
+            status=status.HTTP_200_OK,
+        )
