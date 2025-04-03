@@ -22,21 +22,21 @@ class BearerTokenAuthentication(BaseTokenAuthentication):
                 return self.authenticate_credentials(token_param)
             return None
 
-        # Try to authenticate with various formats
-        auth_parts = auth.split()
+        # Handle various formats more flexibly
+        auth = auth.strip()  # Remove any whitespace
 
-        if len(auth_parts) == 0:
-            return None
+        # Case 1: Just the token with no prefix
+        if " " not in auth:
+            return self.authenticate_credentials(auth)
 
-        if len(auth_parts) == 1:
-            # Handle case where only the token is provided without a prefix
-            token = auth_parts[0]
-            return self.authenticate_credentials(token)
+        # Case 2: Standard prefixed tokens
+        parts = auth.split(" ", 1)  # Split only on first space
+        prefix, token = parts
 
-        if auth_parts[0] not in ["Bearer", "Token"]:
-            return None
+        if prefix not in ["Bearer", "Token"]:
+            # Try using the whole string as token (in case it contains spaces)
+            return self.authenticate_credentials(auth)
 
-        token = auth_parts[1]
         return self.authenticate_credentials(token)
 
     def authenticate_credentials(self, key):

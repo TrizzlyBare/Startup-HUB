@@ -26,6 +26,8 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
 
+APPEND_SLASH = False  # Disable appending slashes to URLs
+
 # Application definition
 INSTALLED_APPS = [
     "daphne",

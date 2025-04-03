@@ -15,6 +15,8 @@ from django.http import Http404
 from .serializers import UserSerializer, UserInfoSerializer, LoginSerializer
 from .models import CustomUser
 from .authentication import BearerTokenAuthentication
+import logging
+from rest_framework.decorators import api_view, permission_classes
 
 
 class AuthViewSet(viewsets.ViewSet):
@@ -436,16 +438,34 @@ class GetTokenView(generics.GenericAPIView):
         )
 
 
+# Get a logger for authentication debugging
+logger = logging.getLogger("auth_debug")
+
+
 class AuthDebugView(generics.GenericAPIView):
-    """Debug view to help diagnose authentication issues"""
+    """Debug view to help diagnose authentication issues with detailed logging"""
 
     authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
     permission_classes = [AllowAny]  # Allow unauthenticated access for debugging
 
     def get(self, request, *args, **kwargs):
-        """Return debug information about the request's authentication"""
+        """Return debug information about the request's authentication and log it"""
+        debug_info = self._get_debug_info(request)
+
+        # Log the debugging information
+        logger.info(
+            f"AUTH DEBUG [{request.META.get('REMOTE_ADDR', 'unknown')}]: {debug_info}"
+        )
+
+        return Response(debug_info)
+
+    def _get_debug_info(self, request):
+        """Collect debugging information about the request's authentication"""
         auth_header = request.META.get("HTTP_AUTHORIZATION", "None")
         token_param = request.GET.get("token", "None")
+
+        # List all headers for debugging
+        all_headers = {k: v for k, v in request.META.items() if k.startswith("HTTP_")}
 
         # Check if there's a token in the authorization header
         token_from_header = None
@@ -463,32 +483,109 @@ class AuthDebugView(generics.GenericAPIView):
             try:
                 token = Token.objects.get(key=token_from_header)
                 token_valid = True
-                user_from_token = token.user.username
+                user_from_token = {
+                    "username": token.user.username,
+                    "id": token.user.id,
+                    "email": token.user.email,
+                    "is_active": token.user.is_active,
+                }
             except Token.DoesNotExist:
                 pass
         elif token_param != "None":
             try:
                 token = Token.objects.get(key=token_param)
                 token_valid = True
-                user_from_token = token.user.username
+                user_from_token = {
+                    "username": token.user.username,
+                    "id": token.user.id,
+                    "email": token.user.email,
+                    "is_active": token.user.is_active,
+                }
             except Token.DoesNotExist:
                 pass
 
         # Is the user authenticated in this request?
         is_authenticated = request.user.is_authenticated
 
-        return Response(
-            {
-                "is_authenticated": is_authenticated,
-                "user": request.user.username if is_authenticated else None,
-                "auth_header": auth_header,
-                "token_from_query_param": token_param,
-                "token_from_header": token_from_header,
-                "token_valid": token_valid,
-                "user_from_token": user_from_token,
-                "auth_classes": [
-                    str(auth_class.__class__.__name__)
-                    for auth_class in self.authentication_classes
-                ],
-            }
-        )
+        # Check if using session authentication
+        using_session = False
+        if is_authenticated and not token_valid:
+            using_session = True
+
+        return {
+            "is_authenticated": is_authenticated,
+            "user": request.user.username if is_authenticated else None,
+            "auth_header": auth_header,
+            "token_from_query_param": token_param,
+            "token_from_header": token_from_header,
+            "token_valid": token_valid,
+            "user_from_token": user_from_token,
+            "using_session": using_session,
+            "method": request.method,
+            "path": request.path,
+            "auth_classes": [
+                str(auth_class.__class__.__name__)
+                for auth_class in self.authentication_classes
+            ],
+            "request_headers": all_headers,
+        }
+
+
+logger = logging.getLogger("django")
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def token_debug(request):
+    """
+    Special debugging endpoint to diagnose token issues.
+    This endpoint doesn't require authentication and shows detailed
+    information about the request headers.
+    """
+    auth_header = request.META.get("HTTP_AUTHORIZATION", "None")
+
+    # Log the request for server-side debugging
+    client_ip = get_client_ip(request)
+    logger.info(f"TOKEN DEBUG REQUEST [{client_ip}]: {request.method} {request.path}")
+    logger.info(f"TOKEN DEBUG AUTH HEADER: {auth_header}")
+
+    # If there's an auth header, log detailed info about its format
+    if auth_header != "None":
+        logger.info(f"TOKEN DEBUG AUTH HEADER LENGTH: {len(auth_header)}")
+        logger.info(f"TOKEN DEBUG AUTH HEADER PARTS: {auth_header.split()}")
+
+        # Check for common formatting issues
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]  # Skip "Bearer "
+            logger.info(f"TOKEN DEBUG: Bearer prefix found, token length: {len(token)}")
+        elif auth_header.startswith("Token "):
+            token = auth_header[6:]  # Skip "Token "
+            logger.info(f"TOKEN DEBUG: Token prefix found, token length: {len(token)}")
+        elif " " not in auth_header:
+            logger.info(
+                f"TOKEN DEBUG: No prefix found, treating entire header as token"
+            )
+
+    # Build the response with detailed diagnostic information
+    response_data = {
+        "auth_header": auth_header,
+        "auth_header_type": type(auth_header).__name__,
+        "auth_header_length": len(auth_header) if auth_header != "None" else 0,
+        "auth_parts": auth_header.split() if auth_header != "None" else [],
+        "raw_headers": {k: v for k, v in request.META.items() if k.startswith("HTTP_")},
+        "is_authenticated": request.user.is_authenticated,
+        "user": str(request.user) if request.user.is_authenticated else "AnonymousUser",
+        "message": "Use this information to debug token transmission issues",
+    }
+
+    return Response(response_data)
+
+
+def get_client_ip(request):
+    """Get the client's IP address from the request"""
+    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(",")[0]
+    else:
+        ip = request.META.get("REMOTE_ADDR")
+    return ip
