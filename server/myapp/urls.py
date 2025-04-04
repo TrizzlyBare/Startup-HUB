@@ -18,6 +18,7 @@ urlpatterns = [
 # DELETE /startup-ideas/{id}/ - Delete a startup idea
 
 # Custom actions:
+# GET /startup-ideas/all-projects/ - Get all accessible projects with pagination and filtering
 # GET /startup-ideas/my-ideas/ - Get ideas owned by a user (takes username as query parameter)
 # GET /startup-ideas/user-ideas/ - Get ideas owned by current user or specified username (via query param)
 # GET /startup-ideas/my-memberships/ - Get ideas where current user is a member (but not owner)
