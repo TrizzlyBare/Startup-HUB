@@ -16,7 +16,28 @@ from .serializers import (
     UserBasicSerializer,
 )
 
+
+from django.shortcuts import get_object_or_404
+from rest_framework import viewsets, status, permissions, filters
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.pagination import PageNumberPagination
+from django.db.models import Q, Count
+from django.contrib.auth import get_user_model
+
+from .models import StartupIdea
+from .serializers import StartupIdeaSerializer
+
 User = get_user_model()
+
+
+class StandardResultsSetPagination(PageNumberPagination):
+    """Standard pagination for API results"""
+
+    page_size = 10
+    page_size_query_param = "page_size"
+    max_page_size = 100
 
 
 # Custom permission class to restrict access
@@ -51,6 +72,10 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
     serializer_class = StartupIdeaSerializer
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # Added JSONParser
+    pagination_class = StandardResultsSetPagination
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ["created_at", "updated_at", "name", "stage"]
+    ordering = ["-created_at"]  # Default ordering
 
     def get_permissions(self):
         """
@@ -511,3 +536,58 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
             {"message": "You have successfully left this startup idea"},
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["get"], url_path="all-projects")
+    def all_projects(self, request):
+        """
+        Get all projects with pagination, filtering and sorting.
+
+        Permissions:
+        - Admin users can see all projects
+        - Regular users can only see:
+          - Their own projects
+          - Projects they're a member of
+          - Public projects (if implemented)
+
+        Query Parameters:
+        - page: Page number (default: 1)
+        - page_size: Number of results per page (default: 10, max: 100)
+        - ordering: Sort by field (e.g., 'created_at', '-created_at', 'name')
+        - stage: Filter by stage (e.g., 'IDEA', 'MVP', 'EARLY', 'GROWTH', 'SCALING')
+        - looking_for: Filter by skills/roles needed (substring match)
+        - search: Search in name, pitch and description
+        """
+        queryset = self.get_queryset()
+
+        # Apply filters based on query params
+        stage = request.query_params.get("stage")
+        if stage:
+            queryset = queryset.filter(stage=stage)
+
+        looking_for = request.query_params.get("looking_for")
+        if looking_for:
+            queryset = queryset.filter(looking_for__icontains=looking_for)
+
+        search = request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(pitch__icontains=search)
+                | Q(description__icontains=search)
+            ).distinct()
+
+        # Add member count annotation if requested
+        if "with_member_count" in request.query_params:
+            queryset = queryset.annotate(member_count_calc=Count("members"))
+
+        # Apply ordering (ordering filters are handled by DRF's OrderingFilter)
+
+        # Apply pagination
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        # If pagination is disabled
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
