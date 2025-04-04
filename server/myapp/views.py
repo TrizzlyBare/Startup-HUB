@@ -56,35 +56,42 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
             )
         instance.delete()
 
-    @action(detail=False, methods=["get"], url_path="my-ideas/(?P<username>[^/.]+)")
-    def my_ideas_by_username(self, request, username=None):
+    @action(detail=False, methods=["get"], url_path="my-ideas")
+    def my_ideas(self, request):
         """
-        Get all startup ideas for a specific user by username.
-        URL pattern: /api/startup-profile/startup-ideas/my-ideas/{username}/
+        Get startup ideas by username from query parameter.
+        URL pattern: /api/startup-profile/startup-ideas/my-ideas/?username=value
+        If no username is provided, returns the current user's ideas.
         """
-        try:
-            user = User.objects.get(username=username)
-            ideas = StartupIdea.objects.filter(user=user)
+        username = request.query_params.get("username")
 
-            # Optionally filter by query parameters if any
-            stage = request.query_params.get("stage", None)
-            if stage:
-                ideas = ideas.filter(stage=stage)
+        if username:
+            try:
+                user = User.objects.get(username=username)
+                ideas = StartupIdea.objects.filter(user=user)
+            except User.DoesNotExist:
+                return Response(
+                    {"error": f"User '{username}' not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        else:
+            # If no username provided, default to current user's ideas
+            ideas = StartupIdea.objects.filter(user=request.user)
 
-            funding_stage = request.query_params.get("funding_stage", None)
-            if funding_stage:
-                ideas = ideas.filter(funding_stage=funding_stage)
+        # Apply additional filters
+        stage = request.query_params.get("stage", None)
+        if stage:
+            ideas = ideas.filter(stage=stage)
 
-            # Order by creation date (newest first)
-            ideas = ideas.order_by("-created_at")
+        funding_stage = request.query_params.get("funding_stage", None)
+        if funding_stage:
+            ideas = ideas.filter(funding_stage=funding_stage)
 
-            serializer = self.get_serializer(ideas, many=True)
-            return Response({"count": ideas.count(), "results": serializer.data})
-        except User.DoesNotExist:
-            return Response(
-                {"error": f"User '{username}' not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        # Order by creation date (newest first)
+        ideas = ideas.order_by("-created_at")
+
+        serializer = self.get_serializer(ideas, many=True)
+        return Response({"count": ideas.count(), "results": serializer.data})
 
     @action(detail=True, methods=["post"])
     def upload_image(self, request, pk=None):
@@ -137,14 +144,6 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
         idea.save()
 
         return Response(StartupIdeaSerializer(idea).data, status=status.HTTP_200_OK)
-
-    @action(detail=False, methods=["get"])
-    def my_ideas(self, request):
-        """
-        Get current user's ideas (deprecated - use user-ideas instead)
-        """
-        # Just call the new method
-        return self.user_ideas(request)
 
     @action(detail=False, methods=["get"], url_path="user-ideas")
     def user_ideas(self, request):
