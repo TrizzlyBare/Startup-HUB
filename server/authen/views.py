@@ -24,6 +24,18 @@ from .authentication import BearerTokenAuthentication
 import logging
 from rest_framework.views import APIView
 
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from .serializers import (
+    ContactLinkSerializer,
+    UserSerializer,
+    UserInfoSerializer,
+    LoginSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetConfirmSerializer,
+)
+
 
 class AuthViewSet(viewsets.ViewSet):
     """ViewSet for authentication-related actions"""
@@ -914,3 +926,116 @@ class UserContactLinksAPIView(APIView):
                 {"error": f"User '{username}' not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+
+class PasswordResetRequestView(generics.GenericAPIView):
+    """View for requesting a password reset via email"""
+
+    serializer_class = PasswordResetRequestSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data["email"]
+            try:
+                user = CustomUser.objects.get(email=email)
+
+                # Generate token and encoded uid
+                uid = urlsafe_base64_encode(force_bytes(user.pk))
+                token = default_token_generator.make_token(user)
+
+                # Build reset URL
+                reset_url = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}/"
+
+                # Create email content
+                email_subject = "Reset your password"
+                email_body = f"""
+                Hi {user.username},
+                
+                You requested a password reset for your account. Please follow this link to reset your password:
+                
+                {reset_url}
+                
+                If you didn't request this, you can safely ignore this email.
+                
+                Thanks,
+                Your Application Team
+                """
+
+                # Send email
+                send_mail(
+                    email_subject,
+                    email_body,
+                    settings.DEFAULT_FROM_EMAIL,
+                    [user.email],
+                    fail_silently=False,
+                )
+
+                return Response(
+                    {"message": "Password reset email has been sent."},
+                    status=status.HTTP_200_OK,
+                )
+            except CustomUser.DoesNotExist:
+                # Don't reveal that the user doesn't exist for security reasons
+                return Response(
+                    {
+                        "message": "Password reset email has been sent if the account exists."
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordResetConfirmView(generics.GenericAPIView):
+    """View for confirming a password reset with a token"""
+
+    serializer_class = PasswordResetConfirmSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            uid = serializer.validated_data["uid"]
+            token = serializer.validated_data["token"]
+            new_password = serializer.validated_data["new_password"]
+
+            try:
+                # Decode the user ID
+                user_id = force_str(urlsafe_base64_decode(uid))
+                user = CustomUser.objects.get(pk=user_id)
+
+                # Check if token is valid
+                if default_token_generator.check_token(user, token):
+                    # Set new password
+                    user.set_password(new_password)
+                    user.save()
+
+                    # Invalidate existing auth tokens for security
+                    if hasattr(user, "auth_token"):
+                        user.auth_token.delete()
+
+                    # Create a new token
+                    token, _ = Token.objects.get_or_create(user=user)
+
+                    return Response(
+                        {
+                            "message": "Password has been reset successfully.",
+                            "token": token.key,
+                            "token_type": "Bearer",
+                            "auth_header": f"Bearer {token.key}",
+                        },
+                        status=status.HTTP_200_OK,
+                    )
+                else:
+                    return Response(
+                        {"error": "Invalid or expired token"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            except (TypeError, ValueError, OverflowError, CustomUser.DoesNotExist):
+                return Response(
+                    {"error": "Invalid reset link"}, status=status.HTTP_400_BAD_REQUEST
+                )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

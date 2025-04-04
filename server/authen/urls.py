@@ -18,6 +18,8 @@ from .views import (
     PublicProfileView,
     # Password Management
     PasswordChangeView,
+    PasswordResetRequestView,
+    PasswordResetConfirmView,
     # Token Views
     GetTokenView,
     # Career Summary
@@ -75,6 +77,16 @@ urlpatterns = [
     path("career-summary/", CareerSummaryView.as_view(), name="career-summary"),
     # Password Management
     path("change-password/", PasswordChangeView.as_view(), name="change-password"),
+    path(
+        "password-reset/request/",
+        PasswordResetRequestView.as_view(),
+        name="password-reset-request",
+    ),
+    path(
+        "password-reset/confirm/",
+        PasswordResetConfirmView.as_view(),
+        name="password-reset-confirm",
+    ),
     # Token Endpoints
     path("token/", GetTokenView.as_view(), name="get-token"),
     path("token-debug/", token_debug, name="token-debug"),

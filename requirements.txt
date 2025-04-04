@@ -41,3 +41,4 @@ zope.interface==7.2
 pillow==11.1.0
 channels-redis==4.1.0
 redis>=4.5.0
+python-dotenv

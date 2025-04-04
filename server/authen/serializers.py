@@ -270,3 +270,26 @@ class LoginSerializer(serializers.Serializer):
 
     email = serializers.EmailField(required=True)
     password = serializers.CharField(required=True, style={"input_type": "password"})
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """Serializer for requesting a password reset"""
+
+    email = serializers.EmailField(required=True)
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """Serializer for confirming a password reset"""
+
+    token = serializers.CharField(required=True)
+    uid = serializers.CharField(required=True)
+    new_password = serializers.CharField(
+        required=True, style={"input_type": "password"}
+    )
+
+    def validate_new_password(self, value):
+        """
+        Validate the new password using Django's password validators
+        """
+        validate_password(value)
+        return value
