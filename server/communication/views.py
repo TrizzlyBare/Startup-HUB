@@ -28,75 +28,55 @@ class RoomViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return Room.objects.filter(communication_participants__user=self.request.user)
 
-    @action(detail=True, methods=["GET"])
-    def messages(self, request, pk=None):
+    def retrieve(self, request, *args, **kwargs):
         """
-        Retrieve messages for a specific room
+        Override retrieve to make sure the object exists and user has access
         """
-        room = self.get_object()
-        messages = Message.objects.filter(room=room).order_by("-sent_at")
-        serializer = MessageSerializer(messages, many=True)
+        # Get the room
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
-    @action(detail=False, methods=["POST"])
-    def create_direct_message(self, request):
-        recipient_id = request.data.get("recipient_id")
-
-        # Check for existing direct message room
-        existing_room = (
-            Room.objects.filter(
-                room_type="direct", communication_participants__user=request.user
-            )
-            .filter(communication_participants__user_id=recipient_id)
-            .first()
-        )
-
-        if existing_room:
-            serializer = self.get_serializer(existing_room)
-            return Response(serializer.data)
-
-        # Create new room
-        room = Room.objects.create(
-            name=f"Chat between {request.user.username} and {recipient_id}",
-            room_type="direct",
-        )
-
-        # Add participants
-        Participant.objects.create(user=request.user, room=room)
-        Participant.objects.create(user_id=recipient_id, room=room)
-
-        serializer = self.get_serializer(room)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=["POST"])
+    @action(detail=True, methods=["POST"], url_path="send_message")
     def send_message(self, request, pk=None):
-        room = self.get_object()
-        message_type = request.data.get("message_type", "text")
+        """
+        Send a message to a room
+        """
+        try:
+            room = self.get_object()
+            message_type = request.data.get("message_type", "text")
 
-        # Handle different message types
-        message_data = {
-            "room": room,
-            "sender": request.user,
-            "content": request.data.get("content"),
-            "message_type": message_type,
-        }
+            # Handle different message types
+            message_data = {
+                "room": room,
+                "sender": request.user,
+                "content": request.data.get("content", ""),
+                "message_type": message_type,
+            }
 
-        # Handle media uploads
-        if message_type == "image" and request.FILES.get("image"):
-            message_data["image"] = request.FILES["image"]
-        elif message_type == "video" and request.FILES.get("video"):
-            message_data["video"] = request.FILES["video"]
+            # Handle media uploads
+            if message_type == "image" and request.FILES.get("image"):
+                message_data["image"] = request.FILES["image"]
+            elif message_type == "video" and request.FILES.get("video"):
+                message_data["video"] = request.FILES["video"]
 
-        message = Message.objects.create(**message_data)
+            message = Message.objects.create(**message_data)
 
-        # Notify via WebSocket
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"room_{room.id}",
-            {"type": "chat_message", "message": MessageSerializer(message).data},
-        )
+            # Notify via WebSocket
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"room_{room.id}",
+                {"type": "chat_message", "message": MessageSerializer(message).data},
+            )
 
-        return Response(MessageSerializer(message).data)
+            return Response(
+                MessageSerializer(message).data, status=status.HTTP_201_CREATED
+            )
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to send message: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     @action(detail=True, methods=["POST"])
     def start_call(self, request, pk=None):
