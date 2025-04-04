@@ -172,3 +172,76 @@ class PotentialMatchesView(generics.ListAPIView):
 
         # Return shuffled results for variety
         return potential_matches.order_by("?")
+
+
+# Add this to your matches/views.py file
+
+from rest_framework import generics, filters
+from rest_framework.authentication import TokenAuthentication, SessionAuthentication
+from rest_framework.permissions import IsAuthenticated
+from authen.models import CustomUser
+from rest_framework.pagination import PageNumberPagination
+from django.db.models import Q
+from .serializers import PotentialMatchSerializer
+
+
+class UserPagination(PageNumberPagination):
+    """Pagination for user listings"""
+
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class AllUsersView(generics.ListAPIView):
+    """
+    API endpoint that returns all users in the database
+    with filtering options
+    """
+
+    serializer_class = PotentialMatchSerializer
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+    pagination_class = UserPagination
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["username", "first_name", "last_name", "bio", "industry", "skills"]
+    ordering_fields = ["username", "first_name", "last_name", "date_joined"]
+    ordering = ["username"]
+
+    def get_queryset(self):
+        """
+        Return all users except the current user,
+        with optional filtering
+        """
+        # Start with all users except current user
+        queryset = CustomUser.objects.exclude(pk=self.request.user.pk)
+
+        # Filter by industry if provided
+        industry = self.request.query_params.get("industry")
+        if industry:
+            queryset = queryset.filter(industry__icontains=industry)
+
+        # Filter by skills if provided
+        skills = self.request.query_params.get("skills")
+        if skills:
+            skill_list = [skill.strip() for skill in skills.split(",")]
+            for skill in skill_list:
+                queryset = queryset.filter(skills__icontains=skill)
+
+        # Filter by experience level
+        experience = self.request.query_params.get("experience")
+        if experience:
+            queryset = queryset.filter(experience__icontains=experience)
+
+        # Filter by active status
+        is_active = self.request.query_params.get("is_active")
+        if is_active is not None:
+            is_active_bool = is_active.lower() == "true"
+            queryset = queryset.filter(is_active=is_active_bool)
+
+        # Return randomly ordered results if requested
+        random_order = self.request.query_params.get("random")
+        if random_order and random_order.lower() == "true":
+            return queryset.order_by("?")
+
+        return queryset
