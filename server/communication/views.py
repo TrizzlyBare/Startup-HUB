@@ -32,7 +32,6 @@ class RoomViewSet(viewsets.ModelViewSet):
         """
         Override retrieve to make sure the object exists and user has access
         """
-        # Get the room
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
@@ -136,6 +135,67 @@ class RoomViewSet(viewsets.ModelViewSet):
         )
 
         return Response(CallInvitationSerializer(invitation).data)
+    
+    @action(detail=True, methods=["POST"], url_path="add_participant")
+    def add_participant(self, request, pk=None):
+        """
+        Add a participant to a room
+        """
+        try:
+            room = self.get_object()
+            user_id = request.data.get("user_id")
+            
+            if not user_id:
+                return Response(
+                    {"error": "user_id is required"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            # Check if user is already in the room
+            if Participant.objects.filter(room=room, user_id=user_id).exists():
+                return Response(
+                    {"message": "User is already a participant in this room"},
+                    status=status.HTTP_200_OK
+                )
+                
+            # Check if room has reached max participants
+            if room.max_participants > 0 and room.communication_participants.count() >= room.max_participants:
+                return Response(
+                    {"error": "Room has reached maximum number of participants"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            # Add participant
+            is_admin = request.data.get("is_admin", False)
+            participant = Participant.objects.create(
+                user_id=user_id,
+                room=room,
+                is_admin=is_admin
+            )
+            
+            # Notify other participants via WebSocket if needed
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"room_{room.id}",
+                {
+                    "type": "participant_added",
+                    "participant": {
+                        "user_id": str(participant.user.id),
+                        "username": participant.user.username,
+                        "is_admin": participant.is_admin
+                    }
+                },
+            )
+            
+            return Response(
+                {"message": "Participant added successfully"},
+                status=status.HTTP_201_CREATED
+            )
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to add participant: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 class MessageViewSet(viewsets.ModelViewSet):

@@ -323,6 +323,11 @@ class CommunicationConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
+    async def participant_added(self, event):
+        await self.send_json(
+            {"type": "participant_added", "participant": event["participant"]}
+        )
+
     async def webrtc_offer(self, event):
         await self.send_json(
             {

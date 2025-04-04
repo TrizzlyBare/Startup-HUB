@@ -14,6 +14,8 @@ room_detail = RoomViewSet.as_view(
 
 room_send_message = RoomViewSet.as_view({"post": "send_message"})
 
+room_add_participant = RoomViewSet.as_view({"post": "add_participant"})
+
 room_message_list = MessageViewSet.as_view(
     {
         "get": "list",
@@ -26,6 +28,11 @@ urlpatterns = [
     # Add explicit paths that match what the client is expecting
     path("rooms/<uuid:pk>/", room_detail, name="room-detail"),
     path("rooms/<uuid:pk>/send_message/", room_send_message, name="room-send-message"),
+    path(
+        "rooms/<uuid:pk>/add_participant/",
+        room_add_participant,
+        name="room-add-participant",
+    ),
     # Our previous fix for room messages
     path("rooms/<uuid:room_id>/messages/", room_message_list, name="room-messages"),
 ]
