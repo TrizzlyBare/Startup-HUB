@@ -5,6 +5,8 @@ from django.shortcuts import get_object_or_404
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import logging
+from django.db import transaction
+from rest_framework.pagination import PageNumberPagination
 
 from .models import Room, Message, Participant, CallLog, CallInvitation
 from .serializers import (
@@ -26,6 +28,16 @@ from datetime import timedelta
 logger = logging.getLogger(__name__)
 
 
+class MessagePagination(PageNumberPagination):
+    """
+    Custom pagination class for messages
+    """
+
+    page_size = 50
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
 class RoomViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     queryset = Room.objects.all()
@@ -45,12 +57,19 @@ class RoomViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["GET"])
     def messages(self, request, pk=None):
         """
-        Retrieve messages for a specific room
+        Retrieve messages for a specific room with pagination
         """
         room = self.get_object()
+
+        # Get messages ordered by sent_at in descending order
         messages = Message.objects.filter(room=room).order_by("-sent_at")
-        serializer = MessageSerializer(messages, many=True)
-        return Response(serializer.data)
+
+        # Use the same pagination as MessageViewSet
+        paginator = MessagePagination()
+        paginated_messages = paginator.paginate_queryset(messages, request)
+
+        serializer = MessageSerializer(paginated_messages, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     @action(detail=False, methods=["POST"])
     def create_direct_message(self, request):
@@ -134,7 +153,6 @@ class RoomViewSet(viewsets.ModelViewSet):
             logger.info(f"add_participant called with data: {request.data}")
 
             # Get room directly from pk in URL rather than using get_object()
-            # This bypasses the queryset filtering which might be causing the issue
             try:
                 room = Room.objects.get(pk=pk)
                 logger.info(f"Found room with id: {room.id}")
@@ -147,6 +165,7 @@ class RoomViewSet(viewsets.ModelViewSet):
 
             # Get username from request data
             username = request.data.get("username")
+            user_id = None
 
             if username:
                 # If username is provided, lookup user by username
@@ -189,7 +208,7 @@ class RoomViewSet(viewsets.ModelViewSet):
                         status=status.HTTP_404_NOT_FOUND,
                     )
 
-            # Check if user is already in the room
+            # Check if user is already in the room - do this before starting transaction
             if Participant.objects.filter(room=room, user_id=user_id).exists():
                 logger.info(
                     f"User {user_id} is already a participant in room {room.id}"
@@ -199,7 +218,7 @@ class RoomViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_200_OK,
                 )
 
-            # Check if room has reached max participants
+            # Check if room has reached max participants - do this before starting transaction
             if (
                 room.max_participants > 0
                 and room.communication_participants.count() >= room.max_participants
@@ -212,35 +231,40 @@ class RoomViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Add participant
-            is_admin = request.data.get("is_admin", False)
-            logger.info(
-                f"Creating participant with user_id={user_id}, room_id={room.id}, is_admin={is_admin}"
-            )
-
-            participant = Participant.objects.create(
-                user_id=user_id, room=room, is_admin=is_admin
-            )
-
-            logger.info(f"Participant created successfully: {participant.id}")
-
-            # Notify other participants via WebSocket if needed
-            try:
-                channel_layer = get_channel_layer()
-                async_to_sync(channel_layer.group_send)(
-                    f"room_{room.id}",
-                    {
-                        "type": "participant_added",
-                        "participant": {
-                            "user_id": str(participant.user.id),
-                            "username": participant.user.username,
-                            "is_admin": participant.is_admin,
-                        },
-                    },
+            # Use transaction to ensure atomicity for just the database update
+            participant = None
+            with transaction.atomic():
+                # Add participant
+                is_admin = request.data.get("is_admin", False)
+                logger.info(
+                    f"Creating participant with user_id={user_id}, room_id={room.id}, is_admin={is_admin}"
                 )
-            except Exception as e:
-                logger.error(f"Error sending WebSocket notification: {str(e)}")
-                # Continue with the response even if notification fails
+
+                participant = Participant.objects.create(
+                    user_id=user_id, room=room, is_admin=is_admin
+                )
+
+            # Successfully created participant, now notify via WebSocket
+            if participant:
+                logger.info(f"Participant created successfully: {participant.id}")
+
+                # Notify other participants via WebSocket - OUTSIDE the transaction
+                try:
+                    channel_layer = get_channel_layer()
+                    async_to_sync(channel_layer.group_send)(
+                        f"room_{room.id}",
+                        {
+                            "type": "participant_added",
+                            "participant": {
+                                "user_id": str(participant.user.id),
+                                "username": participant.user.username,
+                                "is_admin": participant.is_admin,
+                            },
+                        },
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending WebSocket notification: {str(e)}")
+                    # Continue with the response even if notification fails
 
             return Response(
                 {"message": "Participant added successfully"},
@@ -322,6 +346,7 @@ class MessageViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     queryset = Message.objects.all()
     serializer_class = MessageSerializer
+    pagination_class = MessagePagination
 
     def get_queryset(self):
         """

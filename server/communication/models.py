@@ -4,15 +4,7 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 import cloudinary
-import cloudinary.api
-import cloudinary.uploader
-
-
-cloudinary.config(
-    cloud_name="dnggowads",
-    api_key="437578293728877",
-    api_secret="5u4gxfznYm3mgzTEWDxDejF-BBY",
-)
+from django.core.validators import MaxValueValidator, MinValueValidator
 
 
 class Room(models.Model):
@@ -29,7 +21,7 @@ class Room(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True)
     max_participants = models.IntegerField(default=10)
-    profile_image = models.ImageField(upload_to="room_profiles/", null=True, blank=True)
+    profile_image = CloudinaryField("image", null=True, blank=True)
 
     def __str__(self):
         return self.name
@@ -50,6 +42,14 @@ class Participant(models.Model):
 
     def __str__(self):
         return f"{self.user.username} in {self.room.name}"
+
+    def is_online(self):
+        """
+        Check if participant is currently online (active in the last 5 minutes)
+        """
+        if not self.last_active:
+            return False
+        return timezone.now() - self.last_active < timezone.timedelta(minutes=5)
 
 
 class Message(models.Model):
@@ -82,6 +82,9 @@ class Message(models.Model):
 
     sent_at = models.DateTimeField(auto_now_add=True)
     is_read = models.BooleanField(default=False)
+    read_by = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, related_name="read_messages", blank=True
+    )
 
     # Call-related fields
     call_duration = models.IntegerField(null=True, blank=True)
@@ -94,6 +97,7 @@ class Message(models.Model):
     call_status = models.CharField(
         max_length=20,
         choices=[
+            ("initiated", "Initiated"),
             ("missed", "Missed"),
             ("answered", "Answered"),
             ("rejected", "Rejected"),
@@ -104,6 +108,15 @@ class Message(models.Model):
 
     def __str__(self):
         return f"Message in {self.room.name} by {self.sender.username}"
+
+    def mark_as_read(self, user):
+        """Mark message as read by a specific user"""
+        if user != self.sender and user not in self.read_by.all():
+            self.read_by.add(user)
+            if self.read_by.count() == self.room.communication_participants.count() - 1:
+                # Everyone except sender has read the message
+                self.is_read = True
+                self.save(update_fields=["is_read"])
 
 
 class CallLog(models.Model):
@@ -126,6 +139,7 @@ class CallLog(models.Model):
     status = models.CharField(
         max_length=20,
         choices=[
+            ("initiated", "Initiated"),
             ("missed", "Missed"),
             ("answered", "Answered"),
             ("rejected", "Rejected"),
@@ -135,9 +149,21 @@ class CallLog(models.Model):
     def __str__(self):
         return f"Call from {self.caller.username} to {self.receiver.username}"
 
+    def calculate_duration(self):
+        """Calculate call duration if start and end times are available"""
+        if self.start_time and self.end_time:
+            duration = (self.end_time - self.start_time).total_seconds()
+            self.duration = int(duration)
+            self.save(update_fields=["duration"])
+
 
 class MediaFile(models.Model):
-    MEDIA_TYPES = (("image", "Image"), ("video", "Video"), ("document", "Document"))
+    MEDIA_TYPES = (
+        ("image", "Image"),
+        ("video", "Video"),
+        ("document", "Document"),
+        ("audio", "Audio"),
+    )
 
     name = models.CharField(max_length=255)
     file = CloudinaryField("auto", blank=True, null=True)
@@ -149,6 +175,10 @@ class MediaFile(models.Model):
         on_delete=models.CASCADE,
         related_name="communication_media_files",
     )
+    size = models.PositiveIntegerField(
+        null=True, blank=True, validators=[MaxValueValidator(settings.MAX_UPLOAD_SIZE)]
+    )
+    file_extension = models.CharField(max_length=10, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         # Extract public_id when saving
@@ -167,8 +197,18 @@ class MediaFile(models.Model):
 
         super().delete(*args, **kwargs)
 
+    def validate_file_extension(self):
+        """Validate file extension against allowed types"""
+        if self.file_extension:
+            allowed_extensions = settings.ALLOWED_UPLOAD_EXTENSIONS.get(
+                self.media_type, []
+            )
+            if self.file_extension.lower() not in allowed_extensions:
+                from django.core.exceptions import ValidationError
 
-# Add this model class to models.py
+                raise ValidationError(
+                    f"File extension '{self.file_extension}' not allowed for {self.media_type}"
+                )
 
 
 class CallInvitation(models.Model):
@@ -202,3 +242,13 @@ class CallInvitation(models.Model):
 
     def __str__(self):
         return f"Call invite from {self.inviter.username} to {self.invitee.username}"
+
+    def is_expired(self):
+        """Check if invitation has expired"""
+        return timezone.now() > self.expires_at
+
+    def auto_expire(self):
+        """Mark invitation as expired if it's past the expiration time"""
+        if self.is_expired() and self.status == "pending":
+            self.status = "expired"
+            self.save(update_fields=["status"])

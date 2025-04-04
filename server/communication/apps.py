@@ -1,4 +1,5 @@
 from django.apps import AppConfig
+import os
 
 
 class CommunicationConfig(AppConfig):
@@ -6,6 +7,9 @@ class CommunicationConfig(AppConfig):
     name = "communication"
 
     def ready(self):
-        from .utils.cloudinary_helper import CloudinaryHelper
+        # Only configure Cloudinary in the main process, not in management commands
 
-        CloudinaryHelper.configure()
+        if os.environ.get("RUN_MAIN", None) != "true":
+            from .utils.cloudinary_helper import CloudinaryHelper
+
+            CloudinaryHelper.configure()
