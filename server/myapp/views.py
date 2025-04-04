@@ -27,7 +27,7 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
 
     serializer_class = StartupIdeaSerializer
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]  # Added JSONParser
 
     def get_queryset(self):
         """Return all startup ideas"""
@@ -55,6 +55,36 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
                 "You don't have permission to delete this startup idea"
             )
         instance.delete()
+
+    @action(detail=False, methods=["get"], url_path="my-ideas/(?P<username>[^/.]+)")
+    def my_ideas_by_username(self, request, username=None):
+        """
+        Get all startup ideas for a specific user by username.
+        URL pattern: /api/startup-profile/startup-ideas/my-ideas/{username}/
+        """
+        try:
+            user = User.objects.get(username=username)
+            ideas = StartupIdea.objects.filter(user=user)
+
+            # Optionally filter by query parameters if any
+            stage = request.query_params.get("stage", None)
+            if stage:
+                ideas = ideas.filter(stage=stage)
+
+            funding_stage = request.query_params.get("funding_stage", None)
+            if funding_stage:
+                ideas = ideas.filter(funding_stage=funding_stage)
+
+            # Order by creation date (newest first)
+            ideas = ideas.order_by("-created_at")
+
+            serializer = self.get_serializer(ideas, many=True)
+            return Response({"count": ideas.count(), "results": serializer.data})
+        except User.DoesNotExist:
+            return Response(
+                {"error": f"User '{username}' not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
     @action(detail=True, methods=["post"])
     def upload_image(self, request, pk=None):
@@ -396,11 +426,3 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
             {"message": "You have successfully left this startup idea"},
             status=status.HTTP_200_OK,
         )
-
-    @action(detail=False, methods=["GET"], url_path="my-ideas/(?P<username>[\w.@+-]+)")
-    def user_ideas_by_username(self, request, username):
-        """Get all startup ideas for a specific user by username in the URL path"""
-        user = get_object_or_404(User, username=username)
-        ideas = StartupIdea.objects.filter(user=user)
-        serializer = self.get_serializer(ideas, many=True)
-        return Response(serializer.data)
