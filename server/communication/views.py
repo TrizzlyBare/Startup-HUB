@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+import logging
 
 from .models import Room, Message, Participant, CallLog, CallInvitation
 from .serializers import (
@@ -11,6 +12,7 @@ from .serializers import (
     MessageSerializer,
     CallLogSerializer,
     CallInvitationSerializer,
+    ParticipantSerializer,
 )
 
 from .models import MediaFile
@@ -18,6 +20,10 @@ from .serializers import MediaFileSerializer
 
 from django.utils import timezone
 from datetime import timedelta
+
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class RoomViewSet(viewsets.ModelViewSet):
@@ -34,6 +40,46 @@ class RoomViewSet(viewsets.ModelViewSet):
         """
         instance = self.get_object()
         serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["GET"])
+    def messages(self, request, pk=None):
+        """
+        Retrieve messages for a specific room
+        """
+        room = self.get_object()
+        messages = Message.objects.filter(room=room).order_by("-sent_at")
+        serializer = MessageSerializer(messages, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["POST"])
+    def create_direct_message(self, request):
+        recipient_id = request.data.get("recipient_id")
+
+        # Check for existing direct message room
+        existing_room = (
+            Room.objects.filter(
+                room_type="direct", communication_participants__user=request.user
+            )
+            .filter(communication_participants__user_id=recipient_id)
+            .first()
+        )
+
+        if existing_room:
+            serializer = self.get_serializer(existing_room)
+            return Response(serializer.data)
+
+        # Create new room
+        room = Room.objects.create(
+            name=f"Chat between {request.user.username} and {recipient_id}",
+            room_type="direct",
+        )
+
+        # Add participants
+        Participant.objects.create(user=request.user, room=room)
+        Participant.objects.create(user_id=recipient_id, room=room)
+
+        serializer = self.get_serializer(room)
         return Response(serializer.data)
 
     @action(detail=True, methods=["POST"], url_path="send_message")
@@ -72,9 +118,113 @@ class RoomViewSet(viewsets.ModelViewSet):
                 MessageSerializer(message).data, status=status.HTTP_201_CREATED
             )
         except Exception as e:
+            logger.error(f"Error in send_message: {str(e)}")
             return Response(
                 {"error": f"Failed to send message: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    @action(detail=True, methods=["POST"], url_path="add_participant")
+    def add_participant(self, request, pk=None):
+        """
+        Add a participant to a room
+        """
+        try:
+            # Log incoming request data for debugging
+            logger.info(f"add_participant called with data: {request.data}")
+
+            room = self.get_object()
+            user_id = request.data.get("user_id")
+
+            logger.info(f"Room: {room.id}, user_id from request: {user_id}")
+
+            if not user_id:
+                logger.warning("user_id is required but was not provided")
+                return Response(
+                    {"error": "user_id is required"}, status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Check if the user_id is valid (integer or UUID depending on your User model)
+            try:
+                from django.contrib.auth import get_user_model
+
+                User = get_user_model()
+                user = User.objects.get(id=user_id)
+                logger.info(f"Found user: {user.username}")
+            except User.DoesNotExist:
+                logger.warning(f"User with id {user_id} does not exist")
+                return Response(
+                    {"error": f"User with id {user_id} does not exist"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            except Exception as e:
+                logger.error(f"Error validating user_id: {str(e)}")
+                return Response(
+                    {"error": f"Invalid user_id format: {str(e)}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if user is already in the room
+            if Participant.objects.filter(room=room, user_id=user_id).exists():
+                logger.info(
+                    f"User {user_id} is already a participant in room {room.id}"
+                )
+                return Response(
+                    {"message": "User is already a participant in this room"},
+                    status=status.HTTP_200_OK,
+                )
+
+            # Check if room has reached max participants
+            if (
+                room.max_participants > 0
+                and room.communication_participants.count() >= room.max_participants
+            ):
+                logger.warning(
+                    f"Room {room.id} has reached maximum number of participants ({room.max_participants})"
+                )
+                return Response(
+                    {"error": "Room has reached maximum number of participants"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Add participant
+            is_admin = request.data.get("is_admin", False)
+            logger.info(
+                f"Creating participant with user_id={user_id}, room_id={room.id}, is_admin={is_admin}"
+            )
+
+            participant = Participant.objects.create(
+                user_id=user_id, room=room, is_admin=is_admin
+            )
+
+            logger.info(f"Participant created successfully: {participant.id}")
+
+            # Notify other participants via WebSocket if needed
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"room_{room.id}",
+                {
+                    "type": "participant_added",
+                    "participant": {
+                        "user_id": str(participant.user.id),
+                        "username": participant.user.username,
+                        "is_admin": participant.is_admin,
+                    },
+                },
+            )
+
+            return Response(
+                {"message": "Participant added successfully"},
+                status=status.HTTP_201_CREATED,
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error in add_participant: {str(e)}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+            return Response(
+                {"error": f"Failed to add participant: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
     @action(detail=True, methods=["POST"])
@@ -83,7 +233,9 @@ class RoomViewSet(viewsets.ModelViewSet):
         call_type = request.data.get("call_type", "video")
 
         # Find the other participant in the room
-        other_participant = room.participants.exclude(user=request.user).first()
+        other_participant = room.communication_participants.exclude(
+            user=request.user
+        ).first()
 
         # Create call log
         call_log = CallLog.objects.create(
@@ -135,67 +287,6 @@ class RoomViewSet(viewsets.ModelViewSet):
         )
 
         return Response(CallInvitationSerializer(invitation).data)
-    
-    @action(detail=True, methods=["POST"], url_path="add_participant")
-    def add_participant(self, request, pk=None):
-        """
-        Add a participant to a room
-        """
-        try:
-            room = self.get_object()
-            user_id = request.data.get("user_id")
-            
-            if not user_id:
-                return Response(
-                    {"error": "user_id is required"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-                
-            # Check if user is already in the room
-            if Participant.objects.filter(room=room, user_id=user_id).exists():
-                return Response(
-                    {"message": "User is already a participant in this room"},
-                    status=status.HTTP_200_OK
-                )
-                
-            # Check if room has reached max participants
-            if room.max_participants > 0 and room.communication_participants.count() >= room.max_participants:
-                return Response(
-                    {"error": "Room has reached maximum number of participants"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-                
-            # Add participant
-            is_admin = request.data.get("is_admin", False)
-            participant = Participant.objects.create(
-                user_id=user_id,
-                room=room,
-                is_admin=is_admin
-            )
-            
-            # Notify other participants via WebSocket if needed
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f"room_{room.id}",
-                {
-                    "type": "participant_added",
-                    "participant": {
-                        "user_id": str(participant.user.id),
-                        "username": participant.user.username,
-                        "is_admin": participant.is_admin
-                    }
-                },
-            )
-            
-            return Response(
-                {"message": "Participant added successfully"},
-                status=status.HTTP_201_CREATED
-            )
-        except Exception as e:
-            return Response(
-                {"error": f"Failed to add participant: {str(e)}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
 
 
 class MessageViewSet(viewsets.ModelViewSet):
@@ -219,15 +310,11 @@ class MessageViewSet(viewsets.ModelViewSet):
         # Return empty queryset if no room_id specified
         return Message.objects.none()
 
-    def create(self, request, *args, **kwargs):
+    def perform_create(self, serializer):
         """
-        Create a new message, ensuring room_id from URL is used if present
+        Override perform_create to ensure the sender is set to the current user
         """
-        room_id = self.kwargs.get("room_id")
-        if room_id and "room" not in request.data:
-            request.data["room"] = room_id
-
-        return super().create(request, *args, **kwargs)
+        serializer.save(sender=self.request.user)
 
 
 class MediaFileViewSet(viewsets.ModelViewSet):
