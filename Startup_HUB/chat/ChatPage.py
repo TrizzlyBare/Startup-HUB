@@ -1,6 +1,5 @@
 import reflex as rx
 from ..Auth.AuthPage import AuthState
-from ..webrtc.webrtc_components import calling_popup, call_popup, video_call_popup, incoming_call_popup
 from ..webrtc.webrtc_state import WebRTCState
 from ..webrtc.call_utils import (
     start_audio_call,
@@ -8,6 +7,12 @@ from ..webrtc.call_utils import (
     end_call as end_webrtc_call,
     toggle_audio,
     toggle_video
+)
+from ..webrtc.webrtc_components import (
+    calling_popup as webrtc_calling_popup,
+    call_popup as webrtc_call_popup,
+    video_call_popup as webrtc_video_call_popup,
+    incoming_call_popup
 )
 import httpx
 from typing import List, Dict, Any, Optional
@@ -730,32 +735,29 @@ class ChatRoomState(ChatState):
     async def setup_room_chat(self):
         """Set up room chat from URL parameters"""
         try:
-            # Access the router directly through rx.State
-            if not hasattr(rx.State, "router"):
-                print("Router not accessible")
-                yield
-                return
+            # Get the room_id parameter directly from the router's page params
+            room_id = None
+            if hasattr(self, "router") and hasattr(self.router, "page"):
+                page = self.router.page
+                if hasattr(page, "params"):
+                    params = page.params
+                    if isinstance(params, dict):
+                        room_id = params.get("room_id")
+                    else:
+                        # Handle case where params is not a dict
+                        for key, value in params:
+                            if key == "room_id":
+                                room_id = value
+                                break
             
-            # Get the page params object
-            params = rx.State.router.page.params
-            print(f"Room route params: {dict(params)}")
-            
-            # Try to extract room_id more safely
-            room_id = ""
-            try:
-                if "room_id" in params:
-                    room_id = params["room_id"]
-            except Exception as e:
-                print(f"Error accessing room_id from params: {e}")
-            
-            print(f"Room ID extracted: {room_id}")
+            print(f"Room chat setup - room_id: {room_id}")
             
             if not room_id:
                 print("No room_id found in URL parameters")
                 self.error_message = "No room ID found in URL"
                 yield
                 return
-                
+            
             # Update the current room ID and type
             self.current_room_id = str(room_id)
             self.current_room_type = "group"
@@ -782,25 +784,22 @@ class ChatRoomState(ChatState):
     async def setup_direct_chat(self):
         """Set up direct chat from URL parameters"""
         try:
-            # Access the router directly through rx.State
-            if not hasattr(rx.State, "router"):
-                print("Router not accessible")
-                yield
-                return
-                
-            # Get the page params object
-            params = rx.State.router.page.params
-            print(f"Direct chat route params: {dict(params)}")
+            # Get the chat_user parameter directly from the router's page params
+            chat_user = None
+            if hasattr(self, "router") and hasattr(self.router, "page"):
+                page = self.router.page
+                if hasattr(page, "params"):
+                    params = page.params
+                    if isinstance(params, dict):
+                        chat_user = params.get("chat_user")
+                    else:
+                        # Handle case where params is not a dict
+                        for key, value in params:
+                            if key == "chat_user":
+                                chat_user = value
+                                break
             
-            # Try to extract chat_user more safely
-            chat_user = ""
-            try:
-                if "chat_user" in params:
-                    chat_user = params["chat_user"]
-            except Exception as e:
-                print(f"Error accessing chat_user from params: {e}")
-            
-            print(f"Chat user extracted: {chat_user}")
+            print(f"Direct chat setup - chat_user: {chat_user}")
             
             if not chat_user:
                 print("No chat_user found in URL parameters")
@@ -1047,118 +1046,16 @@ def chatroom_page():
         height="100vh",
     )
 
-# Define route handlers
 @rx.page(route="/chat/room/[room_id]")
 def chat_room_route():
     """Route for /chat/room/{room_id}"""
-    # Create a custom header that uses ChatRoomState
-    def custom_header() -> rx.Component:
-        return rx.hstack(
-            rx.avatar(name=ChatRoomState.current_chat_user, size="2", border="2px solid white"),
-            rx.text(ChatRoomState.current_chat_user, font_weight="bold", color="white", font_size="16px"),
-            rx.spacer(),
-            rx.hstack(
-                rx.button(
-                    rx.icon("phone", color="white", font_size="18px"),
-                    on_click=ChatRoomState.start_call,
-                    variant="ghost",
-                    _hover={
-                        "bg": "rgba(255, 255, 255, 0.1)",
-                        "transform": "scale(1.2)",
-                    },
-                    transition="all 0.2s ease-in-out",
-                ),
-                rx.button(
-                    rx.icon("video", color="white", font_size="18px"),
-                    on_click=lambda: ChatRoomState.start_call(True),
-                    variant="ghost",
-                    _hover={
-                        "bg": "rgba(255, 255, 255, 0.1)",
-                        "transform": "scale(1.2)",
-                    },
-                    transition="all 0.2s ease-in-out",
-                ),
-                rx.button(
-                    rx.icon("info", color="white", font_size="18px"),
-                    variant="ghost",
-                    _hover={
-                        "bg": "rgba(255, 255, 255, 0.1)",
-                        "transform": "scale(1.2)",
-                    },
-                    transition="all 0.2s ease-in-out",
-                ),
-                spacing="4",
-            ),
-            width="100%",
-            padding="10px 15px",
-            bg="#80d0ea",
-            border_radius="0",
-            height="60px",
-        )
-    
-    # Create a custom message input that uses ChatRoomState
-    def custom_message_input() -> rx.Component:
-        return rx.hstack(
-            rx.hstack(
-                rx.input(
-                    value=ChatRoomState.message,
-                    placeholder="Type a message...",
-                    on_change=ChatRoomState.set_message,
-                    # Fix key handling - pass the entire event
-                    on_key_down=ChatRoomState.handle_key_down,
-                    _placeholder={"color": "#AAAAAA"},
-                    border_radius="20px",
-                    border="none",
-                    width="100%",
-                    bg="white",
-                    padding="10px 15px",
-                    height="40px",
-                    _focus={
-                        "outline": "none",
-                        "box_shadow": "0 0 0 2px rgba(128, 208, 234, 0.3)",
-                    },
-                    _hover={
-                        "bg": "#f8f8f8",
-                    },
-                ),
-                bg="white",
-                border_radius="20px",
-                padding_left="10px",
-                width="100%",
-                box_shadow="0 2px 4px rgba(0, 0, 0, 0.05)",
-            ),
-            rx.button(
-                rx.icon("arrow-right"),
-                on_click=ChatRoomState.send_message,
-                border_radius="50%",
-                bg="#80d0ea",
-                color="white",
-                width="40px",
-                height="40px",
-                padding="0",
-                margin_left="10px",
-                _hover={
-                    "bg": "#6bc0d9",
-                    "transform": "scale(1.05)",
-                },
-                transition="all 0.2s ease-in-out",
-            ),
-            padding="15px",
-            bg="#2d2d2d",
-            border_top="1px solid #444",
-            width="100%",
-            height="70px",
-            align_items="center",
-        )
-    
-    # Load the chat interface with proper styling and layout
     return rx.box(
         rx.hstack(
             sidebar(),
             rx.vstack(
-                custom_header(),  # Use custom header with ChatRoomState
+                user_header(),
                 chat(),
-                custom_message_input(),  # Use custom message input with ChatRoomState
+                message_input(),
                 height="100vh",
                 width="100%",
                 spacing="0",
@@ -1170,9 +1067,9 @@ def chat_room_route():
             overflow="hidden",
         ),
         # WebRTC call components
-        calling_popup(),
-        call_popup(),
-        video_call_popup(),
+        webrtc_calling_popup(),
+        webrtc_call_popup(),
+        webrtc_video_call_popup(),
         incoming_call_popup(),
         on_mount=ChatRoomState.setup_room_chat,
     )
@@ -1180,114 +1077,13 @@ def chat_room_route():
 @rx.page(route="/chat/user/[chat_user]")
 def direct_chat_route():
     """Route for /chat/user/{chat_user}"""
-    # Create a custom header that uses ChatRoomState
-    def custom_header() -> rx.Component:
-        return rx.hstack(
-            rx.avatar(name=ChatRoomState.current_chat_user, size="2", border="2px solid white"),
-            rx.text(ChatRoomState.current_chat_user, font_weight="bold", color="white", font_size="16px"),
-            rx.spacer(),
-            rx.hstack(
-                rx.button(
-                    rx.icon("phone", color="white", font_size="18px"),
-                    on_click=ChatRoomState.start_call,
-                    variant="ghost",
-                    _hover={
-                        "bg": "rgba(255, 255, 255, 0.1)",
-                        "transform": "scale(1.2)",
-                    },
-                    transition="all 0.2s ease-in-out",
-                ),
-                rx.button(
-                    rx.icon("video", color="white", font_size="18px"),
-                    on_click=lambda: ChatRoomState.start_call(True),
-                    variant="ghost",
-                    _hover={
-                        "bg": "rgba(255, 255, 255, 0.1)",
-                        "transform": "scale(1.2)",
-                    },
-                    transition="all 0.2s ease-in-out",
-                ),
-                rx.button(
-                    rx.icon("info", color="white", font_size="18px"),
-                    variant="ghost",
-                    _hover={
-                        "bg": "rgba(255, 255, 255, 0.1)",
-                        "transform": "scale(1.2)",
-                    },
-                    transition="all 0.2s ease-in-out",
-                ),
-                spacing="4",
-            ),
-            width="100%",
-            padding="10px 15px",
-            bg="#80d0ea",
-            border_radius="0",
-            height="60px",
-        )
-    
-    # Create a custom message input that uses ChatRoomState
-    def custom_message_input() -> rx.Component:
-        return rx.hstack(
-            rx.hstack(
-                rx.input(
-                    value=ChatRoomState.message,
-                    placeholder="Type a message...",
-                    on_change=ChatRoomState.set_message,
-                    # Fix key handling - pass the entire event
-                    on_key_down=ChatRoomState.handle_key_down,
-                    _placeholder={"color": "#AAAAAA"},
-                    border_radius="20px",
-                    border="none",
-                    width="100%",
-                    bg="white",
-                    padding="10px 15px",
-                    height="40px",
-                    _focus={
-                        "outline": "none",
-                        "box_shadow": "0 0 0 2px rgba(128, 208, 234, 0.3)",
-                    },
-                    _hover={
-                        "bg": "#f8f8f8",
-                    },
-                ),
-                bg="white",
-                border_radius="20px",
-                padding_left="10px",
-                width="100%",
-                box_shadow="0 2px 4px rgba(0, 0, 0, 0.05)",
-            ),
-            rx.button(
-                rx.icon("arrow-right"),
-                on_click=ChatRoomState.send_message,
-                border_radius="50%",
-                bg="#80d0ea",
-                color="white",
-                width="40px",
-                height="40px",
-                padding="0",
-                margin_left="10px",
-                _hover={
-                    "bg": "#6bc0d9",
-                    "transform": "scale(1.05)",
-                },
-                transition="all 0.2s ease-in-out",
-            ),
-            padding="15px",
-            bg="#2d2d2d",
-            border_top="1px solid #444",
-            width="100%",
-            height="70px",
-            align_items="center",
-        )
-    
-    # Load the chat interface with proper styling and layout
     return rx.box(
         rx.hstack(
             sidebar(),
             rx.vstack(
-                custom_header(),  # Use custom header with ChatRoomState
+                user_header(),
                 chat(),
-                custom_message_input(),  # Use custom message input with ChatRoomState
+                message_input(),
                 height="100vh",
                 width="100%",
                 spacing="0",
@@ -1299,9 +1095,9 @@ def direct_chat_route():
             overflow="hidden",
         ),
         # WebRTC call components
-        calling_popup(),
-        call_popup(),
-        video_call_popup(),
+        webrtc_calling_popup(),
+        webrtc_call_popup(),
+        webrtc_video_call_popup(),
         incoming_call_popup(),
         on_mount=ChatRoomState.setup_direct_chat,
     )
@@ -1373,6 +1169,50 @@ def sidebar() -> rx.Component:
         padding="10px",
     )
 
+def user_header() -> rx.Component:
+    return rx.hstack(
+        rx.avatar(name=ChatState.current_chat_user, size="2", border="2px solid white"),
+        rx.text(ChatState.current_chat_user, font_weight="bold", color="white", font_size="16px"),
+        rx.spacer(),
+        rx.hstack(
+            rx.button(
+                rx.icon("phone", color="white", font_size="18px"),
+                on_click=ChatState.start_call,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
+            rx.button(
+                rx.icon("video", color="white", font_size="18px"),
+                on_click=ChatState.start_video_call,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
+            rx.button(
+                rx.icon("info", color="white", font_size="18px"),
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
+            spacing="4",
+        ),
+        width="100%",
+        padding="10px 15px",
+        bg="#80d0ea",
+        border_radius="0",
+        height="60px",
+    )
+
 def message_display(sender: str, message: str) -> rx.Component:
     is_upload = isinstance(message, str) and message.startswith("/_upload")
     
@@ -1434,76 +1274,6 @@ def chat() -> rx.Component:
         width="100%",
         height="calc(100vh - 130px)",
         bg="#2d2d2d",
-    )
-
-def chat_page() -> rx.Component:
-    """The original chat page from Chat_Page.py"""
-    return rx.box(
-        rx.hstack(
-            sidebar(),
-            rx.vstack(
-                user_header(),
-                chat(),
-                message_input(),
-                height="100vh",
-                width="100%",
-                spacing="0",
-                bg="#2d2d2d",
-            ),
-            spacing="0",
-            width="100%",
-            height="100vh",
-            overflow="hidden",
-        ),
-        # WebRTC call components
-        calling_popup(),
-        call_popup(),
-        video_call_popup(),
-        incoming_call_popup(),
-    )
-
-def user_header() -> rx.Component:
-    return rx.hstack(
-        rx.avatar(name=ChatState.current_chat_user, size="2", border="2px solid white"),
-        rx.text(ChatState.current_chat_user, font_weight="bold", color="white", font_size="16px"),
-        rx.spacer(),
-        rx.hstack(
-            rx.button(
-                rx.icon("phone", color="white", font_size="18px"),
-                on_click=ChatState.start_call,
-                variant="ghost",
-                _hover={
-                    "bg": "rgba(255, 255, 255, 0.1)",
-                    "transform": "scale(1.2)",
-                },
-                transition="all 0.2s ease-in-out",
-            ),
-            rx.button(
-                rx.icon("video", color="white", font_size="18px"),
-                on_click=ChatState.start_video_call,
-                variant="ghost",
-                _hover={
-                    "bg": "rgba(255, 255, 255, 0.1)",
-                    "transform": "scale(1.2)",
-                },
-                transition="all 0.2s ease-in-out",
-            ),
-            rx.button(
-                rx.icon("info", color="white", font_size="18px"),
-                variant="ghost",
-                _hover={
-                    "bg": "rgba(255, 255, 255, 0.1)",
-                    "transform": "scale(1.2)",
-                },
-                transition="all 0.2s ease-in-out",
-            ),
-            spacing="4",
-        ),
-        width="100%",
-        padding="10px 15px",
-        bg="#80d0ea",
-        border_radius="0",
-        height="60px",
     )
 
 def message_input() -> rx.Component:
@@ -1582,6 +1352,32 @@ def message_input() -> rx.Component:
         width="100%",
         height="70px",
         align_items="center",
+    )
+
+def chat_page() -> rx.Component:
+    """The original chat page from Chat_Page.py"""
+    return rx.box(
+        rx.hstack(
+            sidebar(),
+            rx.vstack(
+                user_header(),
+                chat(),
+                message_input(),
+                height="100vh",
+                width="100%",
+                spacing="0",
+                bg="#2d2d2d",
+            ),
+            spacing="0",
+            width="100%",
+            height="100vh",
+            overflow="hidden",
+        ),
+        # WebRTC call components
+        webrtc_calling_popup(),
+        webrtc_call_popup(),
+        webrtc_video_call_popup(),
+        incoming_call_popup(),
     )
 
 def calling_popup() -> rx.Component:
