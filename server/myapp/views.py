@@ -1,6 +1,6 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -396,3 +396,11 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
             {"message": "You have successfully left this startup idea"},
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["GET"], url_path="my-ideas/(?P<username>[\w.@+-]+)")
+    def user_ideas_by_username(self, request, username):
+        """Get all startup ideas for a specific user by username in the URL path"""
+        user = get_object_or_404(User, username=username)
+        ideas = StartupIdea.objects.filter(user=user)
+        serializer = self.get_serializer(ideas, many=True)
+        return Response(serializer.data)
