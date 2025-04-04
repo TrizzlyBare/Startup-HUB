@@ -531,7 +531,9 @@ class State(rx.State):
                 )
                 
                 if response.status_code == 200:
-                    self.startup_ideas = response.json()
+                    # Extract the results array from the response
+                    data = response.json()
+                    self.startup_ideas = data.get('results', [])
                 elif response.status_code == 404:
                     self.startup_ideas = []
                 else:

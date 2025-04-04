@@ -35,6 +35,7 @@ class ChatState(rx.State):
     is_camera_off: bool = False
     show_calling_popup: bool = False
     call_type: str = "audio"
+    chat_error_message: str = ""
     
     @rx.var
     def route_username(self) -> str:
@@ -71,10 +72,77 @@ class ChatState(rx.State):
 
     @rx.event
     async def send_message(self):
-        if self.message.strip():
+        """Send a message to the current chat."""
+        print("=== Starting send_message ===")
+        if not self.message.strip():
+            print("Message is empty, returning")
+            return
+
+        try:
+            # Get username from AuthState
+            username = AuthState.username
+            print(f"Current username: {username}")
+            
+            # Use rx.cond to handle the username check
+            # Check if username is empty or None using rx.cond
+            if rx.cond((username == "") | (username == None), True, False):
+                print("Username is empty or None")
+                self.chat_error_message = "Username missing, please log in"
+                return
+
+            # Get the current room ID from ChatRoomState
+            room_state = ChatRoomState.get_state()
+            room_id = room_state.current_room_id
+            print(f"Current room ID: {room_id}")
+            
+            if not room_id:
+                print("No room ID found")
+                self.chat_error_message = "Cannot send message: Room not found"
+                return
+            
+            # Optimistically update UI
+            print(f"Adding message to chat history: {self.message}")
             self.chat_history.append(("user", self.message))
+            message_content = self.message
             self.message = ""
             yield
+            
+            # Send message to API
+            print("Sending message to API...")
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "http://startup-hub:8000/api/communication/messages/",
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "content": message_content,
+                        "message_type": "text",
+                        "room": room_id,
+                        "sender": username,  # Add sender username
+                        "is_read": False
+                    }
+                )
+                
+                print(f"API Response Status: {response.status_code}")
+                print(f"API Response Text: {response.text}")
+                
+                if response.status_code not in (200, 201):
+                    print(f"Failed to send message: {response.status_code} {response.text}")
+                    self.chat_error_message = f"Failed to send message: {response.status_code} {response.text}"
+                    # Remove the optimistic update if the API call fails
+                    if len(self.chat_history) > 0:
+                        print("Removing optimistic update due to API failure")
+                        self.chat_history.pop()
+        except Exception as e:
+            print(f"Error in send_message: {str(e)}")
+            self.chat_error_message = f"Error sending message: {str(e)}"
+            # Remove the optimistic update
+            if len(self.chat_history) > 0:
+                print("Removing optimistic update due to error")
+                self.chat_history.pop()
+        finally:
+            print("=== End of send_message ===")
+
+
 
     @rx.event
     async def handle_upload(self, files: list[rx.UploadFile]):
@@ -95,7 +163,9 @@ class ChatState(rx.State):
             yield
 
     @rx.event
-    async def start_call(self):
+    async def audio_call(self):
+        """Start a WebRTC audio call"""
+        print("Starting audio call from ChatState")
         # Use WebRTC for audio call
         webrtc_state = WebRTCState.get_state()
         webrtc_state.start_call(self.current_chat_user_id, is_video=False)
@@ -104,9 +174,11 @@ class ChatState(rx.State):
         await webrtc_state.initialize_webrtc()
         await webrtc_state.connect_to_signaling_server()
         yield
-
+        
     @rx.event
-    async def start_video_call(self):
+    async def video_call(self):
+        """Start a WebRTC video call"""
+        print("Starting video call from ChatState")
         # Use WebRTC for video call
         webrtc_state = WebRTCState.get_state()
         webrtc_state.start_call(self.current_chat_user_id, is_video=True)
@@ -168,12 +240,22 @@ class ChatRoomState(ChatState):
     current_room_id: Optional[str] = None
     current_room_type: str = "direct"  # "direct" or "group"
     is_loading: bool = False
-    error_message: str = ""
+    room_error_message: str = ""
     show_create_group_modal: bool = False
     selected_participants: List[str] = []
     group_name: str = ""
     max_participants: int = 10
     
+    @rx.event
+    async def room_audio_call(self):
+        """Start an audio call in the current room"""
+        await self.initiate_call(False)
+        
+    @rx.event
+    async def room_video_call(self):
+        """Start a video call in the current room"""
+        await self.initiate_call(True)
+        
     def reset_state(self, preserve_username=False):
         """Reset the chat state."""
         # Store username if needed
@@ -186,7 +268,7 @@ class ChatRoomState(ChatState):
         # Reset message state
         self.chat_history = []
         self.message = ""
-        self.error_message = ""
+        self.room_error_message = ""
         self.is_loading = False
         
         # Reset room state but preserve user info if needed
@@ -300,7 +382,7 @@ class ChatRoomState(ChatState):
                 print(f"Initializing room chat with ID: {room_id}")
                 await self.load_room_messages(room_id)
         except Exception as e:
-            self.error_message = f"Error initializing chat: {str(e)}"
+            self.room_error_message = f"Error initializing chat: {str(e)}"
             print(f"Error initializing chat: {str(e)}")
             
         return
@@ -310,10 +392,13 @@ class ChatRoomState(ChatState):
         self.is_loading = True
         auth_token = AuthState.token
         
-        # Use try-except instead of if-condition
         try:
-            if not auth_token or auth_token == "":
-                raise ValueError("Authentication token missing")
+            # Direct bitwise comparison for token validation
+            if (auth_token == "") | (auth_token == None):
+                print("Auth token is empty or None")
+                self.room_error_message = "Authentication token missing"
+                self.is_loading = False
+                return
             
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -356,9 +441,9 @@ class ChatRoomState(ChatState):
                     self.rooms_data = rooms
                     print(f"Loaded {len(rooms)} rooms")
                 else:
-                    self.error_message = f"Failed to load rooms: {response.status_code} {response.text}"
+                    self.room_error_message = f"Failed to load rooms: {response.status_code} {response.text}"
         except Exception as e:
-            self.error_message = f"Error loading rooms: {str(e)}"
+            self.room_error_message = f"Error loading rooms: {str(e)}"
         finally:
             self.is_loading = False
     
@@ -368,7 +453,6 @@ class ChatRoomState(ChatState):
         if not isinstance(username, str):
             username = str(username)
             
-        # Save the username before resetting the state
         print(f"load_direct_chat_messages called with username: {username}")
         
         # Store the username before any operations
@@ -388,8 +472,12 @@ class ChatRoomState(ChatState):
         print(f"Direct chat username after setup: {self.current_chat_user}")
         
         try:
-            if not auth_token or auth_token == "":
-                raise ValueError("Authentication token missing")
+            # Direct bitwise comparison for token validation
+            if rx.cond((auth_token == "") | (auth_token == None), True, False):
+                print("Auth token is empty or None")
+                self.room_error_message = "Authentication token missing"
+                self.is_loading = False
+                return
             
             # Find the room for this user
             room_id = None
@@ -401,23 +489,15 @@ class ChatRoomState(ChatState):
                 await self.load_rooms()
                 
             # Get the length of rooms_data safely
-            rooms_count = 0
-            if hasattr(self.rooms_data, "length"):
-                rooms_count = self.rooms_data.length()
-            elif hasattr(self.rooms_data, "__len__"):
-                rooms_count = len(self.rooms_data)
-                
+            rooms_count = len(self.rooms_data)
+            
             # Safely iterate through rooms_data using index
             for room_idx in range(rooms_count):
                 room = self.rooms_data[room_idx]
                 if room.room_type == "direct":
                     # Get participants count safely
-                    participants_count = 0
-                    if hasattr(room.participants, "length"):
-                        participants_count = room.participants.length()
-                    elif hasattr(room.participants, "__len__"):
-                        participants_count = len(room.participants)
-                        
+                    participants_count = len(room.participants)
+                    
                     # Safely iterate through participants using index
                     for participant_idx in range(participants_count):
                         participant = room.participants[participant_idx]
@@ -441,11 +521,13 @@ class ChatRoomState(ChatState):
             
             # When loading room messages, pass the username to preserve it
             await self.load_room_messages_for_direct_chat(room_id, username)
+            
         except Exception as e:
-            self.error_message = f"Error loading direct chat messages: {str(e)}"
+            self.room_error_message = f"Error loading direct chat messages: {str(e)}"
             print(f"Error in load_direct_chat_messages: {str(e)}")
             self.is_loading = False
-            
+
+
     async def load_room_messages_for_direct_chat(self, room_id: str, username: str):
         """Load messages for a specific room while preserving the direct chat username"""
         self.chat_history = []
@@ -460,13 +542,17 @@ class ChatRoomState(ChatState):
         print(f"Loading messages for direct chat room: {room_id}, user: {self.current_chat_user}")
         
         try:
-            if not auth_token or auth_token == "":
-                raise ValueError("Authentication token missing")
+            # Direct bitwise comparison for token validation
+            if (auth_token == "") | (auth_token == None):
+                print("Auth token is empty or None")
+                self.room_error_message = "Authentication token missing"
+                self.is_loading = False
+                return
             
             async with httpx.AsyncClient() as client:
                 # Using the messages endpoint with room_id as query parameter
                 response = await client.get(
-                    f"http://startup-hub:8000/api/communication/messages/?room_id={room_id}",
+                    f"http://startup-hub:8000/api/communication/rooms/{room_id}/messages",
                     headers={"Authorization": f"Token {auth_token}"}
                 )
                 
@@ -492,9 +578,9 @@ class ChatRoomState(ChatState):
                                 
                         self.chat_history.append((sender_type, content))
                 else:
-                    self.error_message = f"Failed to load messages: {response.status_code} {response.text}"
+                    self.room_error_message = f"Failed to load messages: {response.status_code} {response.text}"
         except Exception as e:
-            self.error_message = f"Error loading messages: {str(e)}"
+            self.room_error_message = f"Error loading messages: {str(e)}"
         finally:
             self.is_loading = False
             # Reaffirm the username one more time just to be safe
@@ -516,8 +602,12 @@ class ChatRoomState(ChatState):
         print(f"Loading messages for room: {room_id}, user: {self.current_chat_user}")
         
         try:
-            if not auth_token or auth_token == "":
-                raise ValueError("Authentication token missing")
+            # Direct bitwise comparison for token validation
+            if (auth_token == "") | (auth_token == None):
+                print("Auth token is empty or None")
+                self.room_error_message = "Authentication token missing"
+                self.is_loading = False
+                return
             
             async with httpx.AsyncClient() as client:
                 # First get room details to get the name
@@ -559,70 +649,22 @@ class ChatRoomState(ChatState):
                                 
                         self.chat_history.append((sender_type, content))
                 else:
-                    self.error_message = f"Failed to load messages: {response.status_code} {response.text}"
+                    self.room_error_message = f"Failed to load messages: {response.status_code} {response.text}"
         except Exception as e:
-            self.error_message = f"Error loading messages: {str(e)}"
+            self.room_error_message = f"Error loading messages: {str(e)}"
         finally:
             self.is_loading = False
     
-    @rx.event
-    async def send_message(self):
-        if not self.message.strip():
-            return
-            
-        try:
-            auth_token = AuthState.token
-            if not auth_token or auth_token == "":
-                raise ValueError("Authentication token missing")
-            
-            room_id = self.current_room_id
-            # For direct chats, find the room_id based on the username
-            if self.current_room_type == "direct":
-                for room in self.rooms_data:
-                    if room.room_type == "direct":
-                        for participant in room.participants:
-                            if participant.user.username == self.current_chat_user:
-                                room_id = room.id
-                                break
-                        if room_id:
-                            break
-            
-            if not room_id:
-                raise ValueError("Cannot send message: Room not found")
-            
-            # Optimistically update UI
-            self.chat_history.append(("user", self.message))
-            message_content = self.message
-            self.message = ""
-            yield
-            
-            # Send message to API
-            async with httpx.AsyncClient() as client:
-                # Use the send_message endpoint for the room
-                response = await client.post(
-                    f"http://startup-hub:8000/api/communication/rooms/{room_id}/send_message/",
-                    headers={"Authorization": f"Token {auth_token}"},
-                    json={
-                        "content": message_content,
-                        "message_type": "text"
-                    }
-                )
-                
-                if response.status_code not in (200, 201):
-                    raise ValueError(f"Failed to send message: {response.status_code} {response.text}")
-        except Exception as e:
-            self.error_message = f"Error sending message: {str(e)}"
-            # Remove the optimistic update
-            if self.chat_history.length() > 0:
-                self.chat_history.pop()
-
     @rx.event
     async def create_direct_chat(self, username: str):
         """Create a direct message chat with a user"""
         try:
             auth_token = AuthState.token
-            if not auth_token or auth_token == "":
-                raise ValueError("Authentication token missing")
+            
+            # Direct token validation
+            if (auth_token == "") | (auth_token == None):
+                self.room_error_message = "Authentication token missing"
+                return
             
             async with httpx.AsyncClient() as client:
                 # Use the create_direct_message endpoint
@@ -638,54 +680,23 @@ class ChatRoomState(ChatState):
                     room_data = response.json()
                     # Reload rooms to get the new room
                     await self.load_rooms()
-                    # Redirect to the new chat
-                    return rx.redirect(f"/chat/user/{username}")
+                    # Yield the redirect instead of returning it
+                    yield rx.redirect(f"/chat/user/{username}")
                 else:
                     raise ValueError(f"Failed to create direct chat: {response.status_code} {response.text}")
         except Exception as e:
-            self.error_message = f"Error creating direct chat: {str(e)}"
-
-    @rx.event
-    async def start_call(self, is_video: bool = False):
-        """Start a call in the current room"""
-        try:
-            auth_token = AuthState.token
-            if not auth_token or auth_token == "":
-                raise ValueError("Authentication token missing")
-            
-            room_id = self.current_room_id
-            if not room_id:
-                raise ValueError("Cannot start call: Room not found")
-            
-            async with httpx.AsyncClient() as client:
-                # Use the start_call endpoint
-                response = await client.post(
-                    f"http://startup-hub:8000/api/communication/rooms/{room_id}/start_call/",
-                    headers={"Authorization": f"Token {auth_token}"},
-                    json={
-                        "is_video": is_video
-                    }
-                )
-                
-                if response.status_code in (200, 201):
-                    call_data = response.json()
-                    # Handle call UI display
-                    if is_video:
-                        super().start_video_call()
-                    else:
-                        super().start_call()
-                else:
-                    raise ValueError(f"Failed to start call: {response.status_code} {response.text}")
-        except Exception as e:
-            self.error_message = f"Error starting call: {str(e)}"
+            self.room_error_message = f"Error creating direct chat: {str(e)}"
 
     @rx.event
     async def create_group_chat(self, name: str, max_participants: int = 10, participants: List[str] = None):
         """Create a new group chat room"""
         try:
             auth_token = AuthState.token
-            if not auth_token or auth_token == "":
-                raise ValueError("Authentication token missing")
+            
+            # Direct token validation
+            if (auth_token == "") | (auth_token == None):
+                self.room_error_message = "Authentication token missing"
+                return
             
             if participants is None or len(participants) == 0:
                 raise ValueError("No participants selected for group chat")
@@ -707,12 +718,12 @@ class ChatRoomState(ChatState):
                     room_data = response.json()
                     # Reload rooms to get the new room
                     await self.load_rooms()
-                    # Redirect to the new chat room
-                    return rx.redirect(f"/chat/room/{room_data['id']}")
+                    # Yield the redirect instead of returning it
+                    yield rx.redirect(f"/chat/room/{room_data['id']}")
                 else:
                     raise ValueError(f"Failed to create group chat: {response.status_code} {response.text}")
         except Exception as e:
-            self.error_message = f"Error creating group chat: {str(e)}"
+            self.room_error_message = f"Error creating group chat: {str(e)}"
 
     @rx.event
     def handle_key_down(self, key_event):
@@ -754,7 +765,7 @@ class ChatRoomState(ChatState):
             
             if not room_id:
                 print("No room_id found in URL parameters")
-                self.error_message = "No room ID found in URL"
+                self.room_error_message = "No room ID found in URL"
                 yield
                 return
             
@@ -777,7 +788,7 @@ class ChatRoomState(ChatState):
             yield
         except Exception as e:
             print(f"Error in setup_room_chat: {str(e)}")
-            self.error_message = f"Error setting up room chat: {str(e)}"
+            self.room_error_message = f"Error setting up room chat: {str(e)}"
             yield
     
     @rx.event
@@ -803,7 +814,7 @@ class ChatRoomState(ChatState):
             
             if not chat_user:
                 print("No chat_user found in URL parameters")
-                self.error_message = "No chat user found in URL"
+                self.room_error_message = "No chat user found in URL"
                 yield
                 return
             
@@ -825,7 +836,7 @@ class ChatRoomState(ChatState):
             yield
         except Exception as e:
             print(f"Error in setup_direct_chat: {str(e)}")
-            self.error_message = f"Error setting up direct chat: {str(e)}"
+            self.room_error_message = f"Error setting up direct chat: {str(e)}"
             yield
 
     @rx.event
@@ -835,6 +846,43 @@ class ChatRoomState(ChatState):
             await self.load_direct_chat_messages(identifier)
         else:
             await self.load_room_messages(identifier)
+            
+    @rx.event
+    async def initiate_call(self, is_video: bool = False):
+        """Start a call in the current room via API"""
+        try:
+            auth_token = AuthState.token
+            
+            # Direct token validation
+            if (auth_token == "") | (auth_token == None):
+                self.room_error_message = "Authentication token missing"
+                return
+            
+            room_id = self.current_room_id
+            if not room_id:
+                raise ValueError("Cannot start call: Room not found")
+            
+            async with httpx.AsyncClient() as client:
+                # Use the start_call endpoint
+                response = await client.post(
+                    f"http://startup-hub:8000/api/communication/rooms/{room_id}/start_call/",
+                    headers={"Authorization": f"Token {auth_token}"},
+                    json={
+                        "is_video": is_video
+                    }
+                )
+                
+                if response.status_code in (200, 201):
+                    call_data = response.json()
+                    # Handle call UI display
+                    if is_video:
+                        await self.video_call()
+                    else:
+                        await self.audio_call()
+                else:
+                    raise ValueError(f"Failed to start call: {response.status_code} {response.text}")
+        except Exception as e:
+            self.room_error_message = f"Error starting call: {str(e)}"
 
 def create_group_modal() -> rx.Component:
     """Modal for creating a new group chat."""
@@ -867,7 +915,7 @@ def create_group_modal() -> rx.Component:
                     rx.divider(),
                     rx.text("Select Participants:", font_weight="bold"),
                     rx.cond(
-                        ChatRoomState.rooms_data.length() > 0,
+                        len(ChatRoomState.rooms_data) > 0,
                         rx.vstack(
                             rx.foreach(
                                 ChatRoomState.rooms_data,
@@ -906,7 +954,7 @@ def create_group_modal() -> rx.Component:
                                     ChatRoomState.selected_participants
                                 ),
                                 is_disabled=rx.cond(
-                                    (ChatRoomState.group_name == "") | (ChatRoomState.selected_participants.length() == 0),
+                                    (ChatRoomState.group_name == "") | (len(ChatRoomState.selected_participants) == 0),
                                     True,
                                     False,
                                 ),
@@ -944,7 +992,7 @@ def room_list() -> rx.Component:
             ChatRoomState.is_loading,
             rx.spinner(),
             rx.cond(
-                ChatRoomState.rooms_data.length() > 0,
+                len(ChatRoomState.rooms_data) > 0,
                 rx.vstack(
                     rx.foreach(
                         ChatRoomState.rooms_data,
@@ -1027,11 +1075,11 @@ def chatroom_page():
             color_scheme="blue",
         ),
         rx.cond(
-            ChatRoomState.error_message != "",
+            ChatRoomState.room_error_message != "",
             rx.box(
                 rx.hstack(
                     rx.icon("warning", color="red"),
-                    rx.text(ChatRoomState.error_message, color="white"),
+                    rx.text(ChatRoomState.room_error_message, color="white"),
                 ),
                 bg="rgba(255, 0, 0, 0.2)",
                 padding="10px",
@@ -1175,9 +1223,10 @@ def user_header() -> rx.Component:
         rx.text(ChatState.current_chat_user, font_weight="bold", color="white", font_size="16px"),
         rx.spacer(),
         rx.hstack(
+            # Audio call button
             rx.button(
                 rx.icon("phone", color="white", font_size="18px"),
-                on_click=ChatState.start_call,
+                on_click=ChatRoomState.room_audio_call,
                 variant="ghost",
                 _hover={
                     "bg": "rgba(255, 255, 255, 0.1)",
@@ -1185,9 +1234,10 @@ def user_header() -> rx.Component:
                 },
                 transition="all 0.2s ease-in-out",
             ),
+            # Video call button
             rx.button(
                 rx.icon("video", color="white", font_size="18px"),
-                on_click=ChatState.start_video_call,
+                on_click=ChatRoomState.room_video_call,
                 variant="ghost",
                 _hover={
                     "bg": "rgba(255, 255, 255, 0.1)",
