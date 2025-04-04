@@ -28,6 +28,7 @@ urlpatterns = [
     # Add explicit paths that match what the client is expecting
     path("rooms/<uuid:pk>/", room_detail, name="room-detail"),
     path("rooms/<uuid:pk>/send_message/", room_send_message, name="room-send-message"),
+    # Fix for add_participant endpoint - matching UUID field to the expected param
     path(
         "rooms/<uuid:pk>/add_participant/",
         room_add_participant,
