@@ -13,3 +13,4 @@ server/db.sqlite3
 .env
 db.sqlite3
 staticfiles
+server/db.sqlite3
