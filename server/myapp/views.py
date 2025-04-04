@@ -541,13 +541,7 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
     def all_projects(self, request):
         """
         Get all projects with pagination, filtering and sorting.
-
-        Permissions:
-        - Admin users can see all projects
-        - Regular users can only see:
-          - Their own projects
-          - Projects they're a member of
-          - Public projects (if implemented)
+        This endpoint shows all projects in the database, regardless of ownership.
 
         Query Parameters:
         - page: Page number (default: 1)
@@ -556,8 +550,10 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
         - stage: Filter by stage (e.g., 'IDEA', 'MVP', 'EARLY', 'GROWTH', 'SCALING')
         - looking_for: Filter by skills/roles needed (substring match)
         - search: Search in name, pitch and description
+        - username: Filter by owner's username
         """
-        queryset = self.get_queryset()
+        # Get ALL projects, not just the ones the user has access to
+        queryset = StartupIdea.objects.all()
 
         # Apply filters based on query params
         stage = request.query_params.get("stage")
@@ -576,11 +572,24 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
                 | Q(description__icontains=search)
             ).distinct()
 
-        # Add member count annotation if requested
-        if "with_member_count" in request.query_params:
-            queryset = queryset.annotate(member_count_calc=Count("members"))
+        # Filter by owner's username if provided
+        username = request.query_params.get("username")
+        if username:
+            queryset = queryset.filter(user__username=username)
+
+        # Add member count annotation
+        queryset = queryset.annotate(member_count_calc=Count("members", distinct=True))
 
         # Apply ordering (ordering filters are handled by DRF's OrderingFilter)
+        ordering = request.query_params.get("ordering")
+        if ordering:
+            if ordering.startswith("-"):
+                queryset = queryset.order_by(ordering)
+            else:
+                queryset = queryset.order_by(ordering)
+        else:
+            # Default ordering
+            queryset = queryset.order_by("-created_at")
 
         # Apply pagination
         page = self.paginate_queryset(queryset)
