@@ -7,6 +7,12 @@ from authen.serializers import UserInfoSerializer
 class MatchSerializer(serializers.ModelSerializer):
     matched_user_details = UserInfoSerializer(source="matched_user", read_only=True)
     user_details = UserInfoSerializer(source="user", read_only=True)
+    matched_user = serializers.SlugRelatedField(
+        queryset=CustomUser.objects.all(), slug_field="username"
+    )
+    user = serializers.SlugRelatedField(
+        queryset=CustomUser.objects.all(), slug_field="username", required=False
+    )
 
     class Meta:
         model = Match
@@ -19,25 +25,37 @@ class MatchSerializer(serializers.ModelSerializer):
             "created_at",
             "is_mutual",
         ]
-        read_only_fields = ["id", "user", "created_at", "is_mutual"]
+        read_only_fields = ["id", "created_at", "is_mutual"]
 
 
 class LikeSerializer(serializers.ModelSerializer):
     liked_user_details = UserInfoSerializer(source="liked_user", read_only=True)
+    liked_user = serializers.SlugRelatedField(
+        queryset=CustomUser.objects.all(), slug_field="username"
+    )
+    user = serializers.SlugRelatedField(
+        queryset=CustomUser.objects.all(), slug_field="username", required=False
+    )
 
     class Meta:
         model = Like
         fields = ["id", "user", "liked_user", "liked_user_details", "created_at"]
-        read_only_fields = ["id", "user", "created_at"]
+        read_only_fields = ["id", "created_at"]
 
 
 class DislikeSerializer(serializers.ModelSerializer):
     disliked_user_details = UserInfoSerializer(source="disliked_user", read_only=True)
+    disliked_user = serializers.SlugRelatedField(
+        queryset=CustomUser.objects.all(), slug_field="username"
+    )
+    user = serializers.SlugRelatedField(
+        queryset=CustomUser.objects.all(), slug_field="username", required=False
+    )
 
     class Meta:
         model = Dislike
         fields = ["id", "user", "disliked_user", "disliked_user_details", "created_at"]
-        read_only_fields = ["id", "user", "created_at"]
+        read_only_fields = ["id", "created_at"]
 
 
 class PotentialMatchSerializer(serializers.ModelSerializer):

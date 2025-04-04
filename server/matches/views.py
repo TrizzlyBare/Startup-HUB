@@ -29,6 +29,10 @@ class MatchViewSet(viewsets.ModelViewSet):
             "-created_at"
         )
 
+    def perform_create(self, serializer):
+        """Set the current user automatically when creating a match"""
+        serializer.save(user=self.request.user)
+
     @action(detail=False, methods=["get"])
     def mutual(self, request):
         """Get only mutual matches"""
@@ -54,7 +58,7 @@ class LikeViewSet(viewsets.ModelViewSet):
         """Process a like (swipe right) and check for a match"""
         # Add the current user to the request data
         data = request.data.copy()
-        data["user"] = request.user.id
+        data["user"] = request.user.username  # Use username instead of ID
 
         serializer = self.get_serializer(data=data)
         if serializer.is_valid():
@@ -126,7 +130,7 @@ class DislikeViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         # Add the current user to the request data
         data = request.data.copy()
-        data["user"] = request.user.id
+        data["user"] = request.user.username  # Use username instead of ID
 
         serializer = self.get_serializer(data=data)
         if serializer.is_valid():
@@ -173,8 +177,6 @@ class PotentialMatchesView(generics.ListAPIView):
         # Return shuffled results for variety
         return potential_matches.order_by("?")
 
-
-# Add this to your matches/views.py file
 
 from rest_framework import generics, filters
 from rest_framework.authentication import TokenAuthentication, SessionAuthentication
