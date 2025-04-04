@@ -31,6 +31,8 @@ urlpatterns = [
         "api/auth/", include("authen.urls")
     ),  # Changed from authen/ to auth/ for clarity
     path("api/message/", include("message.urls")),
+    # Add the communication app URLs
+    path("api/communication/", include("communication.urls")),
     # Add direct browser-accessible API authentication URLs
     path(
         "api/", include("rest_framework.urls", namespace="rest_framework")

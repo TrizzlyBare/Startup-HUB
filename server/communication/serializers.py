@@ -1,8 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Room, Message, Participant, CallLog
+from .models import Room, Message, Participant, CallLog, CallInvitation, MediaFile
 from rest_framework import serializers
-from .models import MediaFile
 from .utils import CloudinaryHelper
 
 
@@ -49,7 +48,9 @@ class MessageSerializer(serializers.ModelSerializer):
 
 
 class RoomSerializer(serializers.ModelSerializer):
-    participants = ParticipantSerializer(many=True, read_only=True)
+    participants = ParticipantSerializer(
+        source="communication_participants", many=True, read_only=True
+    )
     last_message = serializers.SerializerMethodField()
 
     class Meta:

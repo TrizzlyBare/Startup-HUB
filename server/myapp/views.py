@@ -110,8 +110,18 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def my_ideas(self, request):
-        """Get all startup ideas for the current user"""
-        ideas = StartupIdea.objects.filter(user=request.user)
+        """
+        Get all startup ideas for a specific user by username.
+        If no username is provided, returns the current user's ideas.
+        """
+        username = request.query_params.get("username")
+
+        if username:
+            user = get_object_or_404(User, username=username)
+            ideas = StartupIdea.objects.filter(user=user)
+        else:
+            ideas = StartupIdea.objects.filter(user=request.user)
+
         serializer = self.get_serializer(ideas, many=True)
         return Response(serializer.data)
 

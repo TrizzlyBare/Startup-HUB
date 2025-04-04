@@ -26,7 +26,7 @@ class RoomViewSet(viewsets.ModelViewSet):
     serializer_class = RoomSerializer
 
     def get_queryset(self):
-        return Room.objects.filter(participants__user=self.request.user)
+        return Room.objects.filter(communication_participants__user=self.request.user)
 
     @action(detail=False, methods=["POST"])
     def create_direct_message(self, request):
