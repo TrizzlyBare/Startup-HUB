@@ -24,8 +24,7 @@ class UserBasicSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "username",
-            "profile_picture",
-            "profile_picture_url",
+            "profile_picture_url",  # Removed profile_picture from here
             "skills",
             "industry",
         ]
