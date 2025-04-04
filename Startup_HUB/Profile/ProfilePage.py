@@ -13,12 +13,15 @@ class State(rx.State):
     first_name: str = ""
     last_name: str = ""
     job_title: str = ""
+    skills: list[str] = []
     experience_level: str = ""
     category: str = ""
     past_projects: list[str] = []
     
-    # Debug information
-    auth_debug_result: str = ""
+    # Contact Links
+    linkedin_link: str = ""
+    github_link: str = ""
+    website_link: str = ""
     
     # Profile username (different from route parameter)
     profile_username: str = ""
@@ -45,7 +48,6 @@ class State(rx.State):
                 token_from_storage = await rx.call_script("localStorage.getItem('auth_token')")
                 if token_from_storage:
                     auth_state.set_token(token_from_storage)
-                    print(f"Token initialized from localStorage: {token_from_storage}")
             
             # We can't use AuthState.is_authed directly in if statements
             # Instead, load profile data and let the UI handle auth
@@ -60,11 +62,9 @@ class State(rx.State):
                     if user_data and "username" in user_data:
                         # Use the username from the auth debug data to ensure case consistency
                         correct_username = user_data["username"]
-                        print(f"Using username from auth debug: {correct_username}")
                         
                         # If the username case doesn't match, redirect to the correct URL
                         if correct_username.lower() != username.lower():
-                            print(f"Username case mismatch: {username} vs {correct_username}")
                             return rx.redirect(f"/profile/{correct_username}")
                         
                         username = correct_username
@@ -72,18 +72,15 @@ class State(rx.State):
                         # Ensure token is synchronized with the server
                         token_from_header = auth_debug_data.get("token_from_header")
                         if token_from_header and token_from_header != auth_state.token:
-                            print(f"Token mismatch detected. Updating token from {auth_state.token} to {token_from_header}")
                             auth_state.set_token(token_from_header)
                             # Update localStorage with the correct token
                             await rx.call_script(f"localStorage.setItem('auth_token', '{token_from_header}')")
-                except Exception as e:
-                    print(f"Error getting username from auth debug: {e}")
+                except Exception:
+                    pass
             
             if username:
                 self.profile_username = username
                 await self.load_profile_data()
-            # else:
-            #     return rx.redirect("/")
     
     # About section
     about: str = ""
@@ -109,11 +106,6 @@ class State(rx.State):
         """Get past projects as a comma-separated string."""
         return ",".join(self.past_projects) if self.past_projects else ""
     
-    # Online presence links
-    linkedin_link: str = ""
-    github_link: str = ""
-    portfolio_link: str = ""
-    
     # Edit mode toggle
     edit_mode: bool = False
     show_edit_form: bool = False
@@ -137,18 +129,9 @@ class State(rx.State):
                         "Accept": "application/json"
                     }
                 )
-                
-                print(f"Profile auth debug response: Status {response.status_code}")
-                debug_data = response.json() if response.status_code == 200 else {"error": response.text}
-                print(f"Profile auth debug data: {debug_data}")
-                
-                # Store debug result
-                self.auth_debug_result = f"Auth debug: {debug_data}"
-                return debug_data
-        except Exception as e:
-            print(f"Error in profile debug_auth_token: {e}")
-            self.auth_debug_result = f"Auth debug error: {str(e)}"
-            return {"error": str(e)}
+                return response.json() if response.status_code == 200 else {"error": response.text}
+        except Exception:
+            return {"error": "Error checking token"}
 
     def handle_auth_error(self):
         """Handle authentication errors by redirecting to login."""
@@ -187,8 +170,6 @@ class State(rx.State):
                         # Update AuthState with the token from localStorage
                         auth_state.set_token(auth_token)
                 
-                print(f"Retrieved auth token from AuthState: {auth_token}")
-                
                 # Debug the token to get the correct username case
                 try:
                     auth_debug_data = await self.debug_auth_token(auth_token)
@@ -196,14 +177,12 @@ class State(rx.State):
                     if user_data and "username" in user_data:
                         # Use the username from the auth debug data to ensure case consistency
                         correct_username = user_data["username"]
-                        print(f"Using username from auth debug: {correct_username}")
                         
                         # If the username case doesn't match, update it
                         if correct_username.lower() != self.profile_username.lower():
-                            print(f"Username case mismatch: {self.profile_username} vs {correct_username}")
                             self.profile_username = correct_username
-                except Exception as e:
-                    print(f"Debug token error: {e}")
+                except Exception:
+                    pass
                 
                 # Use httpx to make the request directly from the server
                 try:
@@ -221,12 +200,9 @@ class State(rx.State):
                             follow_redirects=True
                         )
                         
-                        print(f"Profile API Response: {response.status_code}")
-                        
                         if response.status_code == 200:
                             # Process the response data
                             data = response.json()
-                            print(f"Received profile data: {data}")
                             
                             # Update basic info - handle null values properly
                             self.first_name = data.get("first_name") or ""
@@ -238,6 +214,34 @@ class State(rx.State):
                             self.experience_level = data.get("experience_level") or data.get("experience") or "Not Specified"
                             self.category = data.get("category") or data.get("industry") or "Not Specified"
                             self.about = data.get("bio") or data.get("about") or ""  # Prioritize bio field
+                            
+                            # Handle skills - convert from comma-separated string to list
+                            skills_data = data.get("skills", "")
+                            if isinstance(skills_data, str):
+                                self.skills = [s.strip() for s in skills_data.split(",") if s.strip()]
+                            elif isinstance(skills_data, list):
+                                self.skills = skills_data
+                            else:
+                                self.skills = []
+                            
+                            # Handle contact links
+                            contact_links = data.get("contact_links", [])
+                            if isinstance(contact_links, list):
+                                for link in contact_links:
+                                    if isinstance(link, dict):
+                                        platform = link.get("platform", "").lower()
+                                        url = link.get("url", "")
+                                        if platform == "linkedin":
+                                            self.linkedin_link = url
+                                        elif platform == "github":
+                                            self.github_link = url
+                                        elif platform == "website":
+                                            self.website_link = url
+                            else:
+                                # Fall back to individual link fields
+                                self.linkedin_link = data.get("linkedin_link") or ""
+                                self.github_link = data.get("github_link") or ""
+                                self.website_link = data.get("website_link") or ""
                             
                             # Handle projects - ensure null data shows properly
                             projects_data = data.get("projects") or data.get("past_projects") or ""
@@ -258,27 +262,8 @@ class State(rx.State):
                                 self.past_projects = [p.strip() for p in past_projects_data.split(",") if p.strip()]
                             else:
                                 self.past_projects = []
-                            
-                            # Handle social links - ensure null data shows properly
-                            # Check for contact_links array first
-                            contact_links = data.get("contact_links") or []
-                            if contact_links:
-                                # Extract links from contact_links array
-                                for link in contact_links:
-                                    if "linkedin" in link.lower():
-                                        self.linkedin_link = link
-                                    elif "github" in link.lower():
-                                        self.github_link = link
-                                    elif "portfolio" in link.lower() or "website" in link.lower():
-                                        self.portfolio_link = link
-                            else:
-                                # Fall back to individual link fields
-                                self.linkedin_link = data.get("linkedin_link") or ""
-                                self.github_link = data.get("github_link") or ""
-                                self.portfolio_link = data.get("portfolio_link") or ""
                         elif response.status_code == 404:
                             # Profile doesn't exist yet, create it
-                            print(f"Profile for {self.profile_username} doesn't exist yet. Creating it...")
                             
                             # Get user data from auth debug
                             auth_debug_data = await self.debug_auth_token(auth_token)
@@ -297,31 +282,27 @@ class State(rx.State):
                                     "industry": "Not Specified",
                                     "experience": "Not Specified",
                                     "skills": user_data.get("skills", ""),
-                                    "contact_links": [],
+                                    "contact_links": [
+                                        {"platform": "linkedin", "url": ""},
+                                        {"platform": "github", "url": ""},
+                                        {"platform": "website", "url": ""}
+                                    ],
                                     "careers_summary": user_data.get("careers_summary", ""),
                                     "past_projects": user_data.get("past_projects", ""),
                                 }
                             )
                             
-                            print(f"Profile creation response: {create_response.status_code}")
-                            
                             if create_response.status_code in [200, 201]:
                                 # Profile created successfully, load it
-                                print("Profile created successfully. Loading profile data...")
                                 return await self.load_profile_data()
-                            else:
-                                print(f"Error creating profile: {create_response.text}")
                         elif response.status_code == 401:
-                            print(f"Authentication error: {response.status_code}")
                             # Use a non-event-handler function to redirect for auth errors
                             return self.handle_auth_error()
-                        else:
-                            print(f"Error fetching profile data: {response.status_code}")
-                except Exception as e:
-                    print(f"Error in httpx request: {e}")
+                except Exception:
+                    pass
                     
-            except Exception as e:
-                print(f"Error in load_profile_data: {str(e)}")
+            except Exception:
+                pass
 
     def logout(self):
         """Log out by clearing the authentication token and redirecting to login."""
@@ -338,9 +319,11 @@ class State(rx.State):
         self.about = form_data.get("about", self.about)
         self.category = form_data.get("category", self.category)
         self.experience_level = form_data.get("experience_level", self.experience_level)
+        
+        # Update contact links from form data
         self.linkedin_link = form_data.get("linkedin_link", self.linkedin_link)
         self.github_link = form_data.get("github_link", self.github_link)
-        self.portfolio_link = form_data.get("portfolio_link", self.portfolio_link)
+        self.website_link = form_data.get("website_link", self.website_link)
         
         # Update skills from form data
         skills_value = form_data.get("skills", "")
@@ -381,14 +364,12 @@ class State(rx.State):
             if user_data and "username" in user_data:
                 # Use the username from the auth debug data to ensure case consistency
                 correct_username = user_data["username"]
-                print(f"Using username from auth debug for update: {correct_username}")
                 
                 # If the username case doesn't match, update it
                 if correct_username.lower() != self.profile_username.lower():
-                    print(f"Username case mismatch for update: {self.profile_username} vs {correct_username}")
                     self.profile_username = correct_username
-        except Exception as e:
-            print(f"Debug token error during update: {e}")
+        except Exception:
+            pass
         
         # Create profile data for API - map to correct field names
         profile_data = {
@@ -402,7 +383,7 @@ class State(rx.State):
             "contact_links": [
                 {"platform": "linkedin", "url": self.linkedin_link} if self.linkedin_link else None,
                 {"platform": "github", "url": self.github_link} if self.github_link else None,
-                {"platform": "portfolio", "url": self.portfolio_link} if self.portfolio_link else None
+                {"platform": "website", "url": self.website_link} if self.website_link else None
             ],
             "career_summary": self.job_title,  # Use job title as career summary
             "past_projects": ",".join(self.past_projects) if self.past_projects else ""  # Send past projects as comma-separated string
@@ -426,21 +407,15 @@ class State(rx.State):
                     headers=headers
                 )
                 
-                print(f"Profile update response: {response.status_code}")
-                print(f"Profile update response text: {response.text}")
-                
                 if response.status_code in [200, 201]:
-                    print("Profile updated successfully")
                     # Close the form
                     self.show_edit_form = False
                     # Reload profile data to show updates
                     await self.load_profile_data()
                 elif response.status_code == 401:
-                    print("Authentication error when saving profile")
                     # Handle auth errors
                     return self.handle_auth_error()
                 else:
-                    print(f"Error updating profile: {response.text}")
                     # Try updating with a different endpoint
                     try:
                         # Try updating the profile with a different endpoint
@@ -450,22 +425,16 @@ class State(rx.State):
                             headers=headers
                         )
                         
-                        print(f"Profile update (alternative) response: {update_response.status_code}")
-                        print(f"Profile update (alternative) response text: {update_response.text}")
-                        
                         if update_response.status_code in [200, 201]:
-                            print("Profile updated successfully with alternative endpoint")
                             # Close the form
                             self.show_edit_form = False
                             # Reload profile data to show updates
                             await self.load_profile_data()
-                        else:
-                            print(f"Error updating profile with alternative endpoint: {update_response.text}")
-                    except Exception as alt_error:
-                        print(f"Error with alternative update request: {alt_error}")
+                    except Exception:
+                        pass
         
-        except Exception as e:
-            print(f"Error saving profile changes: {e}")
+        except Exception:
+            pass
         
         # Close the form modal
         self.show_edit_form = False
@@ -600,14 +569,14 @@ def profile_display() -> rx.Component:
                 class_name="bg-white rounded-lg shadow"
             ),
             
-            # Online Presence Section
+            # Contact Links Section
             rx.box(
-                rx.heading("Online Presence", size="5", margin_bottom="2"),
+                rx.heading("Contact Links", size="5", margin_bottom="2"),
                 rx.vstack(
                     rx.cond(
                         State.linkedin_link != "",
                         rx.hstack(
-                            rx.icon("linkedin"),
+                            rx.icon("linkedin", color="blue.500"),
                             rx.link("LinkedIn", href=State.linkedin_link, is_external=True),
                             class_name="text-blue-600 hover:text-blue-800"
                         ),
@@ -616,24 +585,24 @@ def profile_display() -> rx.Component:
                     rx.cond(
                         State.github_link != "",
                         rx.hstack(
-                            rx.icon("github"),
+                            rx.icon("github", color="gray.800"),
                             rx.link("GitHub", href=State.github_link, is_external=True),
-                            class_name="text-blue-600 hover:text-blue-800"
+                            class_name="text-gray-600 hover:text-gray-800"
                         ),
                         rx.fragment()
                     ),
                     rx.cond(
-                        State.portfolio_link != "",
+                        State.website_link != "",
                         rx.hstack(
-                            rx.icon("globe"),
-                            rx.link("Portfolio", href=State.portfolio_link, is_external=True),
-                            class_name="text-blue-600 hover:text-blue-800"
+                            rx.icon("globe", color="green.500"),
+                            rx.link("Website", href=State.website_link, is_external=True),
+                            class_name="text-green-600 hover:text-green-800"
                         ),
                         rx.fragment()
                     ),
                     rx.cond(
-                        (State.linkedin_link == "") & (State.github_link == "") & (State.portfolio_link == ""),
-                        rx.text("No links provided.", class_name="text-gray-500 italic"),
+                        (State.linkedin_link == "") & (State.github_link == "") & (State.website_link == ""),
+                        rx.text("No contact links provided.", class_name="text-gray-500 italic"),
                         rx.fragment()
                     ),
                     align_items="start",
@@ -819,8 +788,8 @@ def edit_form() -> rx.Component:
                             class_name="w-full p-2 border rounded-lg bg-white",
                         ),
                         
-                        # Online Presence
-                        rx.text("Online Presence", font_weight="medium", align="left", width="100%", margin_top="4"),
+                        # Contact Links Section
+                        rx.text("Contact Links", font_weight="medium", align="left", width="100%", margin_top="4"),
                         rx.hstack(
                             rx.icon("linkedin", color="blue.500"),
                             rx.input(
@@ -846,10 +815,10 @@ def edit_form() -> rx.Component:
                         rx.hstack(
                             rx.icon("globe", color="green.500"),
                             rx.input(
-                                placeholder="Portfolio Website",
-                                name="portfolio_link",
-                                value=State.portfolio_link,
-                                on_change=State.set_portfolio_link,
+                                placeholder="Website URL",
+                                name="website_link",
+                                value=State.website_link,
+                                on_change=State.set_website_link,
                                 class_name="w-full p-2 border rounded-lg bg-white",
                             ),
                             width="100%"
@@ -860,6 +829,7 @@ def edit_form() -> rx.Component:
                             rx.dialog.close(
                                 rx.button(
                                     "Cancel",
+                                    on_click=State.cancel_edit,
                                     class_name="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg",
                                 ),
                             ),
@@ -896,23 +866,6 @@ def profile_page() -> rx.Component:
     return rx.box(
         rx.center(
             rx.vstack(
-                # Auth check on page load
-                rx.script("""
-                    // Check token on page load
-                    const token = localStorage.getItem('auth_token');
-                    if (!token) {
-                        console.log('No token found - redirecting to login');
-                        window.location.href = '/login';
-                    } else {
-                        console.log('Token found in localStorage:', token);
-                        // Update token display
-                        const displayElement = document.getElementById('token-display');
-                        if (displayElement) {
-                            displayElement.textContent = `Token from localStorage: ${token}`;
-                        }
-                    }
-                """),
-                
                 # Page content
                 rx.hstack(
                     rx.heading(
@@ -935,22 +888,6 @@ def profile_page() -> rx.Component:
                         class_name="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
                     ),
                     width="100%",
-                ),
-                
-                # Auth Debug Information (displayed at top for easy access)
-                rx.box(
-                    rx.heading("Auth Debug Info", size="6", margin_bottom="2", color="white"),
-                    rx.text(State.auth_debug_result, color="white"),
-                    # Replace direct DOM manipulation with on_mount event handler
-                    rx.html(
-                        "",
-                        id="token-display",
-                        tag="p", 
-                        color="white",
-                    ),
-                    width="100%",
-                    padding="4",
-                    class_name="bg-gray-800 rounded-lg mb-4"
                 ),
                 
                 # Profile content
