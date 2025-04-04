@@ -1,5 +1,5 @@
 from django.shortcuts import get_object_or_404
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -19,6 +19,29 @@ from .serializers import (
 User = get_user_model()
 
 
+# Custom permission class to restrict access
+class IsOwnerOrMemberOrAdmin(permissions.BasePermission):
+    """
+    Custom permission to only allow owners, members or admins to access an idea.
+    """
+
+    def has_object_permission(self, request, view, obj):
+        # Admin permissions
+        if request.user.is_staff or request.user.is_superuser:
+            return True
+
+        # Check if user is the owner
+        if obj.user == request.user:
+            return True
+
+        # Check if user is a member
+        if obj.members.filter(id=request.user.id).exists():
+            return True
+
+        # Deny access otherwise
+        return False
+
+
 class StartupIdeaViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing startup ideas.
@@ -29,9 +52,28 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # Added JSONParser
 
+    def get_permissions(self):
+        """
+        Apply different permissions based on the action:
+        - List/Create: Basic authenticated user
+        - Retrieve/Update/Delete: Owner, member or admin
+        """
+        if self.action in ["retrieve", "update", "partial_update", "destroy"]:
+            permission_classes = [IsAuthenticated, IsOwnerOrMemberOrAdmin]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
+
     def get_queryset(self):
-        """Return all startup ideas"""
-        return StartupIdea.objects.all()
+        """Return ideas the user can access - their own or ones they're a member of"""
+        user = self.request.user
+
+        # Admin can see all
+        if user.is_staff or user.is_superuser:
+            return StartupIdea.objects.all()
+
+        # Regular users can only see their own ideas or those they're a member of
+        return StartupIdea.objects.filter(Q(user=user) | Q(members=user)).distinct()
 
     def perform_create(self, serializer):
         """Associate the new idea with the current user"""
@@ -65,10 +107,26 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
         """
         username = request.query_params.get("username")
 
+        # Check if the user is admin
+        is_admin = request.user.is_staff or request.user.is_superuser
+
         if username:
             try:
-                user = User.objects.get(username=username)
-                ideas = StartupIdea.objects.filter(user=user)
+                target_user = User.objects.get(username=username)
+
+                # Security check: only allow viewing others' ideas if:
+                # 1. You are the target user (viewing your own)
+                # 2. You are an admin
+                # 3. You are a member of the ideas
+                if request.user.username != username and not is_admin:
+                    # Only get ideas where the current user is a member
+                    ideas = StartupIdea.objects.filter(
+                        user=target_user, members=request.user
+                    ).distinct()
+                else:
+                    # Get all ideas for the target user (admin or self access)
+                    ideas = StartupIdea.objects.filter(user=target_user)
+
             except User.DoesNotExist:
                 return Response(
                     {"error": f"User '{username}' not found"},
@@ -150,13 +208,35 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
         """
         Get all startup ideas for a specific user by username.
         If no username is provided, returns the current user's ideas.
+        This method maintains security restrictions like my_ideas.
         """
         username = request.query_params.get("username")
 
+        # Check if the user is admin
+        is_admin = request.user.is_staff or request.user.is_superuser
+
         if username:
-            # Find user by username
-            user = get_object_or_404(User, username=username)
-            ideas = StartupIdea.objects.filter(user=user)
+            try:
+                target_user = User.objects.get(username=username)
+
+                # Security check: only allow viewing others' ideas if:
+                # 1. You are the target user (viewing your own)
+                # 2. You are an admin
+                # 3. You are a member of the ideas
+                if request.user.username != username and not is_admin:
+                    # Only get ideas where the current user is a member
+                    ideas = StartupIdea.objects.filter(
+                        user=target_user, members=request.user
+                    ).distinct()
+                else:
+                    # Get all ideas for the target user (admin or self access)
+                    ideas = StartupIdea.objects.filter(user=target_user)
+
+            except User.DoesNotExist:
+                return Response(
+                    {"error": f"User '{username}' not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
         else:
             # If no username provided, default to current user's ideas
             ideas = StartupIdea.objects.filter(user=request.user)
@@ -175,12 +255,16 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def search(self, request):
-        """Search for startup ideas by various criteria"""
+        """
+        Search for startup ideas by various criteria.
+        Only returns ideas the user has access to (own or member of).
+        """
         stage = request.query_params.get("stage", "")
         user_role = request.query_params.get("user_role", "")
         looking_for = request.query_params.get("looking_for", "")
         skills = request.query_params.get("skills", "")
 
+        # Start with the user's accessible queryset
         queryset = self.get_queryset()
 
         if stage:
@@ -206,7 +290,8 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
         user = request.user
 
         # Get all ideas that aren't from the current user
-        all_ideas = StartupIdea.objects.exclude(user=user)
+        # Only get ideas the user has access to
+        all_ideas = self.get_queryset().exclude(user=user)
         matching_ideas = []
 
         # If user has skills defined, find ideas looking for those skills
@@ -232,7 +317,8 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
                     matching_ideas.append(idea.id)
 
         # Get the matched ideas as a queryset
-        matches = StartupIdea.objects.filter(id__in=matching_ideas)
+        # Only include ideas the user has access to
+        matches = self.get_queryset().filter(id__in=matching_ideas)
 
         serializer = self.get_serializer(matches, many=True)
         return Response(serializer.data)
