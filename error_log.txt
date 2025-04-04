@@ -1,0 +1,114 @@
+─────────────────────────────────────────── Starting Reflex App ────────────────────────────────────────────
+DeprecationWarning: implicit-none-for-component-fields has been deprecated in version 0.7.2. Passing Vars 
+with possible None values to component fields not explicitly marked as Optional is deprecated. Passed 
+(!((match["matched_user_details"]["profile_picture_url"] === null)) ? 
+match["matched_user_details"]["profile_picture_url"] : "/profile.jpg") of type typing.Optional to <class 
+'str'>. It will be completely removed in 0.8.0. (Startup_HUB/Matcher/SideBar.py:13)
+DeprecationWarning: implicit-none-for-component-fields has been deprecated in version 0.7.2. Passing Vars 
+with possible None values to component fields not explicitly marked as Optional is deprecated. Passed (true 
+? like["liked_user_details"]["profile_picture_url"] : "../../profile.jpg") of type typing.Optional to <class
+'str'>. It will be completely removed in 0.8.0. (Startup_HUB/Matcher/SideBar.py:60)
+DeprecationWarning: implicit-none-for-component-fields has been deprecated in version 0.7.2. Passing Vars 
+with possible None values to component fields not explicitly marked as Optional is deprecated. Passed (true 
+? room["profile_image"] : "../../profile.jpg") of type typing.Optional to <class 'str'>. It will be 
+completely removed in 0.8.0. (Startup_HUB/Matcher/SideBar.py:110)
+DeprecationWarning: implicit-none-for-component-fields has been deprecated in version 0.7.2. Passing Vars 
+with possible None values to component fields not explicitly marked as Optional is deprecated. Passed (true 
+? like["liked_user_details"]["profile_picture_url"] : "../../profile.jpg") of type typing.Optional to <class
+'str'>. It will be completely removed in 0.8.0. (Startup_HUB/Matcher/SideBar.py:314)
+Form data received: <reflex.Var>-7664771771684522801</reflex.Var>form_data
+Form data type: <class 'reflex.vars.base.Var'>
+Warning: Invalid icon tag: x_circle. Please use one of the following: loader_circle, message_circle, 
+message_circle_code, message_circle_dashed, message_circle_heart, message_circle_more, message_circle_off, 
+message_circle_plus, message_circle_question, message_circle_reply, ...
+See full list at https://reflex.dev/docs/library/data-display/icon/#icons-list. Using 'circle-help' icon 
+instead.
+Warning: Invalid icon tag: check_circle. Please use one of the following: check_check, loader_circle, 
+message_circle, message_circle_code, message_circle_dashed, message_circle_heart, message_circle_more, 
+message_circle_off, message_circle_plus, message_circle_question, ...
+See full list at https://reflex.dev/docs/library/data-display/icon/#icons-list. Using 'circle-help' icon 
+instead.
+Form data received: <reflex.Var>-7664771771684522801</reflex.Var>form_data
+Form data type: <class 'reflex.vars.base.Var'>
+Warning: Invalid icon tag: x_circle. Please use one of the following: loader_circle, message_circle, 
+message_circle_code, message_circle_dashed, message_circle_heart, message_circle_more, message_circle_off, 
+message_circle_plus, message_circle_question, message_circle_reply, ...
+See full list at https://reflex.dev/docs/library/data-display/icon/#icons-list. Using 'circle-help' icon 
+instead.
+Warning: Invalid icon tag: check_circle. Please use one of the following: check_check, loader_circle, 
+message_circle, message_circle_code, message_circle_dashed, message_circle_heart, message_circle_more, 
+message_circle_off, message_circle_plus, message_circle_question, ...
+See full list at https://reflex.dev/docs/library/data-display/icon/#icons-list. Using 'circle-help' icon 
+instead.
+Form data received: <reflex.Var>-7664771771684522801</reflex.Var>form_data
+Form data type: <class 'reflex.vars.base.Var'>
+Warning: Invalid icon tag: x_circle. Please use one of the following: loader_circle, message_circle, 
+message_circle_code, message_circle_dashed, message_circle_heart, message_circle_more, message_circle_off, 
+message_circle_plus, message_circle_question, message_circle_reply, ...
+See full list at https://reflex.dev/docs/library/data-display/icon/#icons-list. Using 'circle-help' icon 
+instead.
+Warning: Invalid icon tag: check_circle. Please use one of the following: check_check, loader_circle, 
+message_circle, message_circle_code, message_circle_dashed, message_circle_heart, message_circle_more, 
+message_circle_off, message_circle_plus, message_circle_question, ...
+See full list at https://reflex.dev/docs/library/data-display/icon/#icons-list. Using 'circle-help' icon 
+instead.
+Form data received: <reflex.Var>-7664771771684522801</reflex.Var>form_data
+Form data type: <class 'reflex.vars.base.Var'>
+Warning: Invalid icon tag: x_circle. Please use one of the following: loader_circle, message_circle, 
+message_circle_code, message_circle_dashed, message_circle_heart, message_circle_more, message_circle_off, 
+message_circle_plus, message_circle_question, message_circle_reply, ...
+See full list at https://reflex.dev/docs/library/data-display/icon/#icons-list. Using 'circle-help' icon 
+instead.
+Warning: Invalid icon tag: check_circle. Please use one of the following: check_check, loader_circle, 
+message_circle, message_circle_code, message_circle_dashed, message_circle_heart, message_circle_more, 
+message_circle_off, message_circle_plus, message_circle_question, ...
+See full list at https://reflex.dev/docs/library/data-display/icon/#icons-list. Using 'circle-help' icon 
+instead.
+Form data received: <reflex.Var>-7664771771684522801</reflex.Var>form_data
+Form data type: <class 'reflex.vars.base.Var'>
+Form data received: <reflex.Var>-7664771771684522801</reflex.Var>form_data
+Form data type: <class 'reflex.vars.base.Var'>
+DeprecationWarning: implicit-none-for-component-fields has been deprecated in version 0.7.2. Passing Vars 
+with possible None values to component fields not explicitly marked as Optional is deprecated. Passed 
+startup["owner"]["profile_picture"] of type typing.Optional to <class 'str'>. It will be completely removed 
+in 0.8.0. (Startup_HUB/Search/search_page.py:205)
+Form data received: <reflex.Var>-7664771771684522801</reflex.Var>form_data
+Form data type: <class 'reflex.vars.base.Var'>
+Form data received: <reflex.Var>-7664771771684522801</reflex.Var>form_data
+Form data type: <class 'reflex.vars.base.Var'>
+Form data received: <reflex.Var>-7664771771684522801</reflex.Var>form_data
+Form data type: <class 'reflex.vars.base.Var'>
+Form data received: <reflex.Var>-7664771771684522801</reflex.Var>form_data
+Form data type: <class 'reflex.vars.base.Var'>
+Form data received: <reflex.Var>-7664771771684522801</reflex.Var>form_data
+Form data type: <class 'reflex.vars.base.Var'>
+Warning: Output includes reflex___state____state.router["page"]["params"] which will be displayed as a 
+string. If you are calling `str` on a Var, consider using .to_string() instead.
+Warning: Output includes reflex___state____state.router["page"]["params"] which will be displayed as a 
+string. If you are calling `str` on a Var, consider using .to_string() instead.
+Warning: Output includes reflex___state____state.router["page"]["params"] which will be displayed as a 
+string. If you are calling `str` on a Var, consider using .to_string() instead.
+Warning: Output includes reflex___state____state.router["page"]["params"] which will be displayed as a 
+string. If you are calling `str` on a Var, consider using .to_string() instead.
+Traceback (most recent call last):
+  File "/Users/aunstotheaing/Documents/GitHub/Startup-HUB/venv/lib/python3.11/site-packages/reflex/utils/prerequisites.py", line 509, in compile_or_validate_app
+    compile_app()
+  File "/Users/aunstotheaing/Documents/GitHub/Startup-HUB/venv/lib/python3.11/site-packages/reflex/utils/prerequisites.py", line 453, in compile_app
+    get_compiled_app(reload=reload, export=export)
+  File "/Users/aunstotheaing/Documents/GitHub/Startup-HUB/venv/lib/python3.11/site-packages/reflex/utils/prerequisites.py", line 442, in get_compiled_app
+    app._compile(export=export)
+  File "/Users/aunstotheaing/Documents/GitHub/Startup-HUB/venv/lib/python3.11/site-packages/reflex/app.py", line 1151, in _compile
+    self._compile_page(route, save_page=should_compile)
+  File "/Users/aunstotheaing/Documents/GitHub/Startup-HUB/venv/lib/python3.11/site-packages/reflex/app.py", line 775, in _compile_page
+    component, enable_state = compiler.compile_unevaluated_page(
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/aunstotheaing/Documents/GitHub/Startup-HUB/venv/lib/python3.11/site-packages/reflex/compiler/compiler.py", line 720, in compile_unevaluated_page
+    component = into_component(page.component)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/aunstotheaing/Documents/GitHub/Startup-HUB/venv/lib/python3.11/site-packages/reflex/compiler/compiler.py", line 658, in into_component
+    and (converted := _into_component_once(component())) is not None
+                                           ^^^^^^^^^^^
+  File "/Users/aunstotheaing/Documents/GitHub/Startup-HUB/Startup_HUB/chat/ChatPage.py", line 661, in chat_room_route
+    rx.text("Room ID from URL: " + rx.State.router.page.params.get("room_id", "Not found"), color="white"),
+            ~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+TypeError: can only concatenate str (not "CustomVarOperation") to str

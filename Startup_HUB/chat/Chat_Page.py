@@ -401,7 +401,7 @@ def video_call_popup() -> rx.Component:
 
 def user_header() -> rx.Component:
     return rx.hstack(
-        rx.avatar(name="Andy Collins", size="2", border="2px solid white"),
+        rx.avatar(name=ChatState.current_chat_user, size="2", border="2px solid white"),
         rx.text(ChatState.current_chat_user, font_weight="bold", color="white", font_size="16px"),
         rx.spacer(),
         rx.hstack(
