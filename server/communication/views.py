@@ -28,14 +28,26 @@ class RoomViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return Room.objects.filter(communication_participants__user=self.request.user)
 
+    @action(detail=True, methods=["GET"])
+    def messages(self, request, pk=None):
+        """
+        Retrieve messages for a specific room
+        """
+        room = self.get_object()
+        messages = Message.objects.filter(room=room).order_by("-sent_at")
+        serializer = MessageSerializer(messages, many=True)
+        return Response(serializer.data)
+
     @action(detail=False, methods=["POST"])
     def create_direct_message(self, request):
         recipient_id = request.data.get("recipient_id")
 
         # Check for existing direct message room
         existing_room = (
-            Room.objects.filter(room_type="direct", participants__user=request.user)
-            .filter(participants__user_id=recipient_id)
+            Room.objects.filter(
+                room_type="direct", communication_participants__user=request.user
+            )
+            .filter(communication_participants__user_id=recipient_id)
             .first()
         )
 
@@ -152,8 +164,30 @@ class MessageViewSet(viewsets.ModelViewSet):
     serializer_class = MessageSerializer
 
     def get_queryset(self):
-        room_id = self.request.query_params.get("room_id")
-        return Message.objects.filter(room_id=room_id).order_by("-sent_at")
+        """
+        This allows filtering messages by room_id both as a URL parameter
+        and as a query parameter
+        """
+        room_id = self.kwargs.get("room_id") or self.request.query_params.get("room_id")
+        if room_id:
+            # Also verify that the user has access to this room
+            queryset = Message.objects.filter(
+                room_id=room_id,
+                room__communication_participants__user=self.request.user,
+            ).order_by("-sent_at")
+            return queryset
+        # Return empty queryset if no room_id specified
+        return Message.objects.none()
+
+    def create(self, request, *args, **kwargs):
+        """
+        Create a new message, ensuring room_id from URL is used if present
+        """
+        room_id = self.kwargs.get("room_id")
+        if room_id and "room" not in request.data:
+            request.data["room"] = room_id
+
+        return super().create(request, *args, **kwargs)
 
 
 class MediaFileViewSet(viewsets.ModelViewSet):
