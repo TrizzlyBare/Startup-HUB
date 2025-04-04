@@ -124,134 +124,137 @@ class RoomViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-
-@action(detail=True, methods=["POST"], url_path="add_participant")
-def add_participant(self, request, pk=None):
-    """
-    Add a participant to a room
-    """
-    try:
-        # Log incoming request data for debugging
-        logger.info(f"add_participant called with data: {request.data}")
-
-        # Get room directly from pk in URL rather than using get_object()
-        # This bypasses the queryset filtering which might be causing the issue
+    @action(detail=True, methods=["POST"], url_path="add_participant")
+    def add_participant(self, request, pk=None):
+        """
+        Add a participant to a room
+        """
         try:
-            room = Room.objects.get(pk=pk)
-            logger.info(f"Found room with id: {room.id}")
-        except Room.DoesNotExist:
-            logger.error(f"Room with id {pk} does not exist")
-            return Response(
-                {"error": f"Room with id {pk} does not exist"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            # Log incoming request data for debugging
+            logger.info(f"add_participant called with data: {request.data}")
 
-        # Get username from request data
-        username = request.data.get("username")
-
-        if username:
-            # If username is provided, lookup user by username
+            # Get room directly from pk in URL rather than using get_object()
+            # This bypasses the queryset filtering which might be causing the issue
             try:
-                from django.contrib.auth import get_user_model
-
-                User = get_user_model()
-                user = User.objects.get(username=username)
-                user_id = user.id
-                logger.info(f"Found user by username: {username}, id: {user_id}")
-            except User.DoesNotExist:
-                logger.warning(f"User with username {username} does not exist")
+                room = Room.objects.get(pk=pk)
+                logger.info(f"Found room with id: {room.id}")
+            except Room.DoesNotExist:
+                logger.error(f"Room with id {pk} does not exist")
                 return Response(
-                    {"error": f"User with username {username} does not exist"},
+                    {"error": f"Room with id {pk} does not exist"},
                     status=status.HTTP_404_NOT_FOUND,
                 )
-        else:
-            # If no username, try user_id
-            user_id = request.data.get("user_id")
-            if not user_id:
-                logger.warning("Neither username nor user_id was provided")
+
+            # Get username from request data
+            username = request.data.get("username")
+
+            if username:
+                # If username is provided, lookup user by username
+                try:
+                    from django.contrib.auth import get_user_model
+
+                    User = get_user_model()
+                    user = User.objects.get(username=username)
+                    user_id = user.id
+                    logger.info(f"Found user by username: {username}, id: {user_id}")
+                except User.DoesNotExist:
+                    logger.warning(f"User with username {username} does not exist")
+                    return Response(
+                        {"error": f"User with username {username} does not exist"},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+            else:
+                # If no username, try user_id
+                user_id = request.data.get("user_id")
+                if not user_id:
+                    logger.warning("Neither username nor user_id was provided")
+                    return Response(
+                        {"error": "Either username or user_id is required"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                # Check if the user_id is valid
+                try:
+                    from django.contrib.auth import get_user_model
+
+                    User = get_user_model()
+                    user = User.objects.get(id=user_id)
+                    logger.info(
+                        f"Found user by id: {user.id}, username: {user.username}"
+                    )
+                except User.DoesNotExist:
+                    logger.warning(f"User with id {user_id} does not exist")
+                    return Response(
+                        {"error": f"User with id {user_id} does not exist"},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+
+            # Check if user is already in the room
+            if Participant.objects.filter(room=room, user_id=user_id).exists():
+                logger.info(
+                    f"User {user_id} is already a participant in room {room.id}"
+                )
                 return Response(
-                    {"error": "Either username or user_id is required"},
+                    {"message": "User is already a participant in this room"},
+                    status=status.HTTP_200_OK,
+                )
+
+            # Check if room has reached max participants
+            if (
+                room.max_participants > 0
+                and room.communication_participants.count() >= room.max_participants
+            ):
+                logger.warning(
+                    f"Room {room.id} has reached maximum number of participants ({room.max_participants})"
+                )
+                return Response(
+                    {"error": "Room has reached maximum number of participants"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Check if the user_id is valid
+            # Add participant
+            is_admin = request.data.get("is_admin", False)
+            logger.info(
+                f"Creating participant with user_id={user_id}, room_id={room.id}, is_admin={is_admin}"
+            )
+
+            participant = Participant.objects.create(
+                user_id=user_id, room=room, is_admin=is_admin
+            )
+
+            logger.info(f"Participant created successfully: {participant.id}")
+
+            # Notify other participants via WebSocket if needed
             try:
-                from django.contrib.auth import get_user_model
-
-                User = get_user_model()
-                user = User.objects.get(id=user_id)
-                logger.info(f"Found user by id: {user.id}, username: {user.username}")
-            except User.DoesNotExist:
-                logger.warning(f"User with id {user_id} does not exist")
-                return Response(
-                    {"error": f"User with id {user_id} does not exist"},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-
-        # Check if user is already in the room
-        if Participant.objects.filter(room=room, user_id=user_id).exists():
-            logger.info(f"User {user_id} is already a participant in room {room.id}")
-            return Response(
-                {"message": "User is already a participant in this room"},
-                status=status.HTTP_200_OK,
-            )
-
-        # Check if room has reached max participants
-        if (
-            room.max_participants > 0
-            and room.communication_participants.count() >= room.max_participants
-        ):
-            logger.warning(
-                f"Room {room.id} has reached maximum number of participants ({room.max_participants})"
-            )
-            return Response(
-                {"error": "Room has reached maximum number of participants"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Add participant
-        is_admin = request.data.get("is_admin", False)
-        logger.info(
-            f"Creating participant with user_id={user_id}, room_id={room.id}, is_admin={is_admin}"
-        )
-
-        participant = Participant.objects.create(
-            user_id=user_id, room=room, is_admin=is_admin
-        )
-
-        logger.info(f"Participant created successfully: {participant.id}")
-
-        # Notify other participants via WebSocket if needed
-        try:
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f"room_{room.id}",
-                {
-                    "type": "participant_added",
-                    "participant": {
-                        "user_id": str(participant.user.id),
-                        "username": participant.user.username,
-                        "is_admin": participant.is_admin,
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f"room_{room.id}",
+                    {
+                        "type": "participant_added",
+                        "participant": {
+                            "user_id": str(participant.user.id),
+                            "username": participant.user.username,
+                            "is_admin": participant.is_admin,
+                        },
                     },
-                },
+                )
+            except Exception as e:
+                logger.error(f"Error sending WebSocket notification: {str(e)}")
+                # Continue with the response even if notification fails
+
+            return Response(
+                {"message": "Participant added successfully"},
+                status=status.HTTP_201_CREATED,
             )
         except Exception as e:
-            logger.error(f"Error sending WebSocket notification: {str(e)}")
-            # Continue with the response even if notification fails
+            logger.error(f"Unexpected error in add_participant: {str(e)}")
+            import traceback
 
-        return Response(
-            {"message": "Participant added successfully"},
-            status=status.HTTP_201_CREATED,
-        )
-    except Exception as e:
-        logger.error(f"Unexpected error in add_participant: {str(e)}")
-        import traceback
-
-        logger.error(traceback.format_exc())
-        return Response(
-            {"error": f"Failed to add participant: {str(e)}"},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+            logger.error(traceback.format_exc())
+            return Response(
+                {"error": f"Failed to add participant: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     @action(detail=True, methods=["POST"])
     def start_call(self, request, pk=None):
