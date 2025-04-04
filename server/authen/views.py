@@ -14,13 +14,15 @@ from django.conf import settings
 from django.http import Http404
 from django.db.models import Q
 from .serializers import (
+    ContactLinkSerializer,
     UserSerializer,
     UserInfoSerializer,
     LoginSerializer,
 )
-from .models import CustomUser
+from .models import ContactLink, CustomUser
 from .authentication import BearerTokenAuthentication
 import logging
+from rest_framework.views import APIView
 
 
 class AuthViewSet(viewsets.ViewSet):
@@ -300,7 +302,7 @@ class LogoutView(generics.GenericAPIView):
 class ProfileView(generics.RetrieveUpdateDestroyAPIView):
     """View, update and delete user profile"""
 
-    serializer_class = UserInfoSerializer
+    serializer_class = UserSerializer
     authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -755,4 +757,160 @@ class PublicProfileView(generics.RetrieveAPIView):
         except Http404:
             return Response(
                 {"error": "User profile not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+
+class ContactLinkViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing contact links
+    Provides CRUD operations for contact links
+    """
+
+    serializer_class = ContactLinkSerializer
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """
+        Return contact links based on parameters:
+        - If username is provided in query params, return links for that user
+        - Otherwise return current user's links
+        """
+        username = self.request.query_params.get("username", None)
+        if username:
+            try:
+                user = CustomUser.objects.get(username=username)
+                return ContactLink.objects.filter(user=user)
+            except CustomUser.DoesNotExist:
+                return ContactLink.objects.none()
+        return ContactLink.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        """
+        Automatically associate the contact link with the current user
+        """
+        serializer.save(user=self.request.user)
+
+    @action(detail=False, methods=["GET"])
+    def my_links(self, request):
+        """
+        Get all contact links for the current user
+        """
+        links = ContactLink.objects.filter(user=request.user)
+        serializer = self.get_serializer(links, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["GET"])
+    def user(self, request):
+        """
+        Get all contact links for a specified user by username
+        """
+        username = request.query_params.get("username")
+        if not username:
+            return Response(
+                {"error": "Username parameter is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = CustomUser.objects.get(username=username)
+            links = ContactLink.objects.filter(user=user)
+            serializer = self.get_serializer(links, many=True)
+            return Response(serializer.data)
+        except CustomUser.DoesNotExist:
+            return Response(
+                {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Custom destroy method to ensure user can only delete their own links
+        """
+        instance = self.get_object()
+        if instance.user != request.user:
+            return Response(
+                {"error": "You do not have permission to delete this contact link."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=False, methods=["get"], url_path="username/(?P<username>[^/.]+)")
+    def retrieve_by_username(self, request, username=None):
+        """
+        Get contact links for a specific username.
+        This explicitly handles the URL path with username parameter.
+        """
+        try:
+            user = CustomUser.objects.get(username=username)
+            links = ContactLink.objects.filter(user=user)
+            serializer = self.get_serializer(links, many=True)
+            return Response(serializer.data)
+        except CustomUser.DoesNotExist:
+            return Response(
+                {"error": f"User '{username}' not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+
+class PublicContactLinksView(generics.ListAPIView):
+    """
+    View to retrieve public contact links for a specific user
+    """
+
+    serializer_class = ContactLinkSerializer
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        """
+        Retrieve contact links for a specific username
+        """
+        username = self.kwargs.get("username")
+        try:
+            user = CustomUser.objects.get(username=username)
+            return ContactLink.objects.filter(user=user)
+        except CustomUser.DoesNotExist:
+            return ContactLink.objects.none()
+
+
+class UserContactLinksView(generics.ListAPIView):
+    """
+    View to retrieve contact links for a specific user by username
+    This endpoint requires authentication but allows viewing any user's links
+    """
+
+    serializer_class = ContactLinkSerializer
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """
+        Retrieve contact links for a specific username
+        """
+        username = self.kwargs.get("username")
+        try:
+            user = CustomUser.objects.get(username=username)
+            return ContactLink.objects.filter(user=user)
+        except CustomUser.DoesNotExist:
+            return ContactLink.objects.none()
+
+
+class UserContactLinksAPIView(APIView):
+    """
+    Simple API view to get contact links by username
+    """
+
+    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, username, format=None):
+        try:
+            user = CustomUser.objects.get(username=username)
+            links = ContactLink.objects.filter(user=user)
+            serializer = ContactLinkSerializer(links, many=True)
+            return Response(serializer.data)
+        except CustomUser.DoesNotExist:
+            return Response(
+                {"error": f"User '{username}' not found"},
+                status=status.HTTP_404_NOT_FOUND,
             )

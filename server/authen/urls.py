@@ -6,6 +6,8 @@ from rest_framework import permissions
 from .views import (
     # ViewSet
     AuthViewSet,
+    ContactLinkViewSet,
+    PublicContactLinksView,
     # Authentication Views
     RegisterView,
     LoginView,
@@ -20,11 +22,13 @@ from .views import (
     GetTokenView,
     # Career Summary
     CareerSummaryView,
+    UserContactLinksAPIView,
     # User Search
     UserSearchView,
     # Debug Views
     AuthDebugView,
     token_debug,
+    UserContactLinksView,
 )
 
 # Create a schema view for API documentation
@@ -44,6 +48,8 @@ schema_view = get_schema_view(
 # Create router for ViewSet routes
 router = DefaultRouter()
 router.register(r"auth", AuthViewSet, basename="auth")
+# Add the contact links router here BEFORE using it in urlpatterns
+router.register(r"contact-links", ContactLinkViewSet, basename="contact-links")
 
 # URL patterns
 urlpatterns = [
@@ -84,5 +90,22 @@ urlpatterns = [
         "redoc/",
         schema_view.with_ui("redoc", cache_timeout=0),
         name="schema-redoc",
+    ),
+    # Public contact links for a specific user - add it here in the main urlpatterns
+    path(
+        "contact-links/username/<str:username>/",
+        ContactLinkViewSet.as_view({"get": "retrieve_by_username"}),
+        name="contact-links-by-username",
+    ),
+    # Public contact links with explicit path
+    path(
+        "public-contact-links/<str:username>/",
+        PublicContactLinksView.as_view(),
+        name="public-contact-links",
+    ),
+    path(
+        "contact-links/<str:username>/",
+        UserContactLinksAPIView.as_view(),
+        name="user-contact-links",
     ),
 ]
