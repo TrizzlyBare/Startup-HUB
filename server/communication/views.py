@@ -423,15 +423,32 @@ class MessageViewSet(viewsets.ModelViewSet):
     serializer_class = MessageSerializer
     pagination_class = MessagePagination
 
+    def validate_room_id(self, room_id):
+        """
+        Clean and validate room_id UUID
+        """
+        try:
+            # Remove trailing slash and validate UUID
+            cleaned_room_id = str(room_id).rstrip("/")
+            return uuid.UUID(cleaned_room_id)
+        except (ValueError, AttributeError):
+            raise serializers.ValidationError("Invalid room ID format")
+
     def get_queryset(self):
         """Filter messages by room_id and verify user access"""
         room_id = self.request.query_params.get("room_id")
         if not room_id:
             return Message.objects.none()
 
+        # Use the new validation method
+        try:
+            validated_room_id = self.validate_room_id(room_id)
+        except serializers.ValidationError:
+            return Message.objects.none()
+
         # Verify that the user has access to this room
         return Message.objects.filter(
-            room_id=room_id,
+            room_id=validated_room_id,
             room__communication_participants__user=self.request.user,
         ).order_by("-sent_at")
 
@@ -444,10 +461,18 @@ class MessageViewSet(viewsets.ModelViewSet):
                 {"error": "room_id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Use the new validation method
+        try:
+            validated_room_id = self.validate_room_id(room_id)
+        except serializers.ValidationError:
+            return Response(
+                {"error": "Invalid room ID format"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
         # Verify room exists and user has access
         try:
             room = Room.objects.get(
-                id=room_id, communication_participants__user=request.user
+                id=validated_room_id, communication_participants__user=request.user
             )
         except Room.DoesNotExist:
             return Response(

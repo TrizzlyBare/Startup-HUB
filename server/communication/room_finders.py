@@ -8,6 +8,10 @@ from .models import Room
 from .serializers import RoomSerializer
 import logging
 
+import uuid
+from rest_framework import serializers
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,6 +19,17 @@ class FindDirectRoomView(APIView):
     """Find a direct message room between users"""
 
     permission_classes = [permissions.IsAuthenticated]
+
+    def validate_room_id(self, room_id):
+        """
+        Clean and validate room_id UUID
+        """
+        try:
+            # Remove trailing slash and validate UUID
+            cleaned_room_id = str(room_id).rstrip("/")
+            return uuid.UUID(cleaned_room_id)
+        except (ValueError, AttributeError):
+            raise serializers.ValidationError("Invalid room ID format")
 
     def get(self, request):
         """Find direct message room between current user and another user"""

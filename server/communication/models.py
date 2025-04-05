@@ -5,6 +5,7 @@ from django.conf import settings
 from django.utils import timezone
 import cloudinary
 from django.core.validators import MaxValueValidator, MinValueValidator
+from django.core.exceptions import ValidationError
 
 
 class Room(models.Model):
@@ -22,6 +23,20 @@ class Room(models.Model):
     is_active = models.BooleanField(default=True)
     max_participants = models.IntegerField(default=10)
     profile_image = CloudinaryField("image", null=True, blank=True)
+
+    def clean(self):
+        """
+        Validate that the UUID is correctly formatted
+        """
+        try:
+            # Attempt to validate the UUID
+            uuid.UUID(str(self.id))
+        except ValueError:
+            raise ValidationError({"id": "Invalid UUID format"})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
