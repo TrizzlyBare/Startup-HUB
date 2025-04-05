@@ -1448,9 +1448,6 @@ class ChatState(rx.State):
                     print(f"{error_message} - {response.text}")
                     self.chat_error_message = error_message
                     
-                    # Show the error in the chat
-                    self.chat_history.append(("system", f"Error: {error_message}"))
-                    
                     # If unauthorized, try to refresh token and retry
                     if response.status_code == 401:
                         print("Unauthorized. Attempting to refresh token...")
@@ -1462,7 +1459,7 @@ class ChatState(rx.State):
             error_message = f"Error loading messages: {str(e)}"
             print(error_message)
             self.chat_error_message = error_message
-            self.chat_history.append(("system", f"Error: {error_message}"))
+            
             import traceback
             traceback.print_exc()
         finally:
@@ -2022,12 +2019,25 @@ class ChatRoomState(ChatState):
                     print(f"{error_message} - {response.text}")
                     self.chat_error_message = error_message
                     
-                    # Show the error in the chat
-                    self.chat_history.append(("system", f"Error: {error_message}"))
+                    # If unauthorized, try to refresh token and retry
+                    if response.status_code == 401:
+                        print("Unauthorized. Attempting to refresh token...")
+                        new_token = await ChatState.get_auth_token(force_refresh=True)
+                        if new_token:
+                            print("Token refreshed. Retrying...")
+                            await self.fetch_room_messages(room_id)
         except Exception as e:
             error_message = f"Error loading messages: {str(e)}"
             print(error_message)
             self.chat_error_message = error_message
+            
+            # If unauthorized, try to refresh token and retry
+            if response.status_code == 401:
+                print("Unauthorized. Attempting to refresh token...")
+                new_token = await ChatState.get_auth_token(force_refresh=True)
+                if new_token:
+                    print("Token refreshed. Retrying...")
+                    await self.fetch_room_messages(room_id)
             
             # Show the error in the chat
             self.chat_history.append(("system", f"Error: {error_message}"))
@@ -2728,19 +2738,6 @@ def chatroom_page():
             on_click=ChatRoomState.load_rooms,
             color_scheme="blue",
         ),
-        rx.cond(
-            ChatRoomState.room_error_message != "",
-            rx.box(
-                rx.hstack(
-                    rx.icon("warning", color="red"),
-                    rx.text(ChatRoomState.room_error_message, color="white"),
-                ),
-                bg="rgba(255, 0, 0, 0.2)",
-                padding="10px",
-                border_radius="md",
-            ),
-            rx.fragment(),
-        ),
         padding="20px",
         spacing="4",
         bg="#2d2d2d",
@@ -3003,6 +3000,7 @@ def message_display(sender: str, message: str) -> rx.Component:
 def chat() -> rx.Component:
     return rx.box(
         rx.vstack(
+            # No error messages displayed
             rx.foreach(
                 ChatState.chat_history,
                 lambda messages: message_display(messages[0], messages[1])
