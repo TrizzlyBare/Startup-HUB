@@ -886,6 +886,12 @@ def profile_display() -> rx.Component:
                         on_click=rx.redirect(f"/my-projects/user/{State.profile_username}"),
                         class_name="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm",
                     ),
+
+                    rx.button(
+                        "Log Out",
+                        on_click=State.logout,
+                        class_name="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                    ),
                     spacing="4"
                 ),
                 width="100%",
@@ -918,6 +924,26 @@ def profile_display() -> rx.Component:
                     rx.foreach(
                         State.skills,
                         skill_badge
+                    ),
+                    wrap="wrap",
+                    gap="2"
+                ),
+                width="100%",
+                padding="4",
+                class_name="bg-white rounded-lg shadow"
+            ),
+
+            rx.box(
+                rx.hstack(
+                    rx.heading("Projects", size="5"),
+                    rx.spacer(),
+                    width="100%",
+                    margin_bottom="2",
+                ),
+                rx.flex(
+                    rx.foreach(
+                        State.projects,
+                        project_badge
                     ),
                     wrap="wrap",
                     gap="2"
@@ -1177,6 +1203,7 @@ def edit_form() -> rx.Component:
                             rx.dialog.close(
                                 rx.button(
                                     "Cancel",
+                                    on_click=State.cancel_edit,
                                     class_name="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg",
                                 ),
                             ),
@@ -1232,37 +1259,27 @@ def profile_page() -> rx.Component:
                 
                 # Page content
                 rx.hstack(
-                    rx.heading(
-                        State.name,
-                        size="4",
-                        color="white",
-                        class_name="mb-4"
-                    ),
                     rx.spacer(),
                     # Add logout button
-                    rx.button(
-                        "Log Out",
-                        on_click=State.logout,
-                        class_name="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-                    ),
+                    
                     width="100%",
                 ),
                 
-                # Auth Debug Information (displayed at top for easy access)
-                rx.box(
-                    rx.heading("Auth Debug Info", size="6", margin_bottom="2", color="white"),
-                    rx.text(State.auth_debug_result, color="white"),
-                    # Replace direct DOM manipulation with on_mount event handler
-                    rx.html(
-                        "",
-                        id="token-display",
-                        tag="p", 
-                        color="white",
-                    ),
-                    width="100%",
-                    padding="4",
-                    class_name="bg-gray-800 rounded-lg mb-4"
-                ),
+                # # Auth Debug Information (displayed at top for easy access)
+                # rx.box(
+                #     rx.heading("Auth Debug Info", size="6", margin_bottom="2", color="white"),
+                #     rx.text(State.auth_debug_result, color="white"),
+                #     # Replace direct DOM manipulation with on_mount event handler
+                #     rx.html(
+                #         "",
+                #         id="token-display",
+                #         tag="p", 
+                #         color="white",
+                #     ),
+                #     width="100%",
+                #     padding="4",
+                #     class_name="bg-gray-800 rounded-lg mb-4"
+                # ),
                 
                 # Profile content
                 profile_display(),

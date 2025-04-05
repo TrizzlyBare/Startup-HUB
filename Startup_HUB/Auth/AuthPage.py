@@ -353,17 +353,6 @@ def login_form() -> rx.Component:
             rx.text(AuthState.success, class_name="text-green-500 text-sm"),
             rx.text("", class_name="hidden"),
         ),
-        
-        # Auth Debug Information
-        rx.cond(
-            AuthState.auth_debug_result != "",
-            rx.box(
-                rx.heading("Auth Debug", size="6", class_name="text-blue-600 text-sm mb-2"),
-                rx.text(AuthState.auth_debug_result, class_name="text-gray-700 text-xs"),
-                class_name="bg-gray-100 p-2 rounded mb-4 w-full"
-            ),
-            rx.text("", class_name="hidden"),
-        ),
 
         rx.input(
             placeholder="Email Address",
@@ -430,17 +419,6 @@ def signup_form() -> rx.Component:
         rx.cond(
             AuthState.success,
             rx.text(AuthState.success, class_name="text-green-500 text-sm"),
-            rx.text("", class_name="hidden"),
-        ),
-        
-        # Auth Debug Information
-        rx.cond(
-            AuthState.auth_debug_result != "",
-            rx.box(
-                rx.heading("Auth Debug", size="6", class_name="text-blue-600 text-sm mb-2"),
-                rx.text(AuthState.auth_debug_result, class_name="text-gray-700 text-xs"),
-                class_name="bg-gray-100 p-2 rounded mb-4 w-full"
-            ),
             rx.text("", class_name="hidden"),
         ),
 
