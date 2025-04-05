@@ -94,7 +94,7 @@ class DirectRoomView(APIView):
             try:
                 numeric_id = int(recipient_id)
                 recipient = User.objects.get(id=numeric_id)
-            except ValueError:
+            except (ValueError, TypeError):
                 # If conversion to int fails, try looking up by username
                 recipient = User.objects.get(username=recipient_id)
         except User.DoesNotExist:
@@ -102,6 +102,7 @@ class DirectRoomView(APIView):
                 {"error": f"User with id or username '{recipient_id}' does not exist"},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
         # Check for existing direct message room
         existing_room = (
             Room.objects.filter(
