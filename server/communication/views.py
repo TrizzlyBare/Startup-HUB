@@ -22,10 +22,44 @@ from .serializers import MediaFileSerializer
 
 from django.utils import timezone
 from datetime import timedelta
-
+from django.contrib.auth import get_user_model
+from rest_framework.views import APIView
+from rest_framework.response import Response
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+
+class UsernameLoginView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        username = request.data.get("username")
+
+        User = get_user_model()
+        try:
+            # Find user by username
+            user = User.objects.get(username=username)
+
+            return Response(
+                {"username": user.username, "message": "Login successful"},
+                status=status.HTTP_200_OK,
+            )
+
+        except User.DoesNotExist:
+            # Optional: Auto-create user if not exists
+            try:
+                user = User.objects.create_user(username=username)
+                return Response(
+                    {"username": user.username, "message": "User created successfully"},
+                    status=status.HTTP_201_CREATED,
+                )
+            except Exception as e:
+                return Response(
+                    {"error": "User creation failed", "details": str(e)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
 
 class MessagePagination(PageNumberPagination):
@@ -73,6 +107,39 @@ class RoomViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["POST"])
     def create_direct_message(self, request):
+        recipient_id = request.data.get("recipient_id")
+
+        # Check for existing direct message room
+        existing_room = (
+            Room.objects.filter(
+                room_type="direct", communication_participants__user=request.user
+            )
+            .filter(communication_participants__user_id=recipient_id)
+            .first()
+        )
+
+        if existing_room:
+            serializer = self.get_serializer(existing_room)
+            return Response(serializer.data)
+
+        # Create new room
+        room = Room.objects.create(
+            name=f"Chat between {request.user.username} and {recipient_id}",
+            room_type="direct",
+        )
+
+        # Add participants
+        Participant.objects.create(user=request.user, room=room)
+        Participant.objects.create(user_id=recipient_id, room=room)
+
+        serializer = self.get_serializer(room)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["POST"])
+    def create_direct_chat(self, request):
+        """
+        Create a direct message room between two users
+        """
         recipient_id = request.data.get("recipient_id")
 
         # Check for existing direct message room

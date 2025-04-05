@@ -3,10 +3,17 @@ from . import consumers
 from . import webrtc
 
 websocket_urlpatterns = [
-    # Use only the consumer classes that are actually defined
+    # Username-based WebSocket route
     re_path(
-        r"ws/communication/(?P<room_id>[0-9a-f-]+)/$",
+        r"ws/communication/(?P<username>[\w-]+)/$",
         consumers.CommunicationConsumer.as_asgi(),
+        name="direct_chat",
+    ),
+    # Existing room-based route
+    re_path(
+        r"ws/communication/room/(?P<room_id>[0-9a-f-]+)/$",
+        consumers.CommunicationConsumer.as_asgi(),
+        name="room_communication",
     ),
     # WebRTC signaling (unchanged)
     re_path(
