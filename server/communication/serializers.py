@@ -24,12 +24,14 @@ class ParticipantSerializer(serializers.ModelSerializer):
 
 class MessageSerializer(serializers.ModelSerializer):
     sender = UserSerializer(read_only=True)
+    room_id = serializers.UUIDField(source="room.id", read_only=True)
 
     class Meta:
         model = Message
         fields = [
             "id",
             "room",
+            "room_id",
             "sender",
             "content",
             "message_type",
@@ -45,6 +47,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "call_type",
             "call_status",
         ]
+        read_only_fields = ["room_id", "sender", "sent_at", "is_read"]
 
 
 class RoomSerializer(serializers.ModelSerializer):

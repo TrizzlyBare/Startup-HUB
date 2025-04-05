@@ -150,6 +150,10 @@ class CommunicationConsumer(AsyncJsonWebsocketConsumer):
                 logger.error(f"Failed to send error message: {str(inner_e)}")
 
     async def handle_text_message(self, content):
+        if not self.room_id:
+            await self.send_json({"type": "error", "message": "No room_id specified"})
+            return
+
         message = await self.save_message(
             content=content.get("content"), message_type="text"
         )
@@ -347,29 +351,44 @@ class CommunicationConsumer(AsyncJsonWebsocketConsumer):
     def save_message(self, content, message_type, image=None, video=None, audio=None):
         from .models import Message, Room
 
-        message = Message.objects.create(
-            room_id=self.room_id,
-            sender=self.user,
-            content=content,
-            message_type=message_type,
-            image=image,
-            video=video,
-            audio=audio,
-        )
-        return {
-            "id": str(message.id),
-            "content": message.content,
-            "sender_id": str(message.sender.id),
-            "sender": {
-                "id": str(message.sender.id),
-                "username": message.sender.username,
-            },
-            "message_type": message.message_type,
-            "image": message.image,
-            "video": message.video,
-            "audio": message.audio,
-            "sent_at": message.sent_at.isoformat(),
-        }
+        if not self.room_id:
+            logger.error("Attempted to save message without room_id")
+            return None
+
+        try:
+            # Verify room exists
+            room = Room.objects.get(id=self.room_id)
+
+            message = Message.objects.create(
+                room=room,
+                sender=self.user,
+                content=content,
+                message_type=message_type,
+                image=image,
+                video=video,
+                audio=audio,
+            )
+            return {
+                "id": str(message.id),
+                "content": message.content,
+                "sender_id": str(message.sender.id),
+                "sender": {
+                    "id": str(message.sender.id),
+                    "username": message.sender.username,
+                },
+                "message_type": message.message_type,
+                "image": message.image,
+                "video": message.video,
+                "audio": message.audio,
+                "sent_at": message.sent_at.isoformat(),
+                "room_id": str(message.room.id),
+            }
+        except Room.DoesNotExist:
+            logger.error(f"Room with id {self.room_id} does not exist")
+            return None
+        except Exception as e:
+            logger.error(f"Error saving message: {str(e)}")
+            return None
 
     @database_sync_to_async
     def update_user_presence(self, is_online):

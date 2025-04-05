@@ -402,36 +402,70 @@ class MessageViewSet(viewsets.ModelViewSet):
     pagination_class = MessagePagination
 
     def get_queryset(self):
-        """Filter messages by room_id and user access"""
+        """Filter messages by room_id and verify user access"""
         room_id = self.request.query_params.get("room_id")
-        if room_id:
-            # Verify that the user has access to this room
-            queryset = Message.objects.filter(
-                room_id=room_id,
-                room__communication_participants__user=self.request.user,
-            ).order_by("-sent_at")
-            return queryset
-        # Return empty queryset if no room_id specified
-        return Message.objects.none()
-
-    def perform_create(self, serializer):
-        """Set sender to current user"""
-        room_id = self.request.data.get("room_id")
         if not room_id:
-            raise serializers.ValidationError({"room_id": "This field is required."})
+            return Message.objects.none()
+
+        # Verify that the user has access to this room
+        return Message.objects.filter(
+            room_id=room_id,
+            room__communication_participants__user=self.request.user,
+        ).order_by("-sent_at")
+
+    def create(self, request, *args, **kwargs):
+        """Override create to ensure room_id is valid and user has access"""
+        # Get and validate room_id
+        room_id = request.data.get("room_id")
+        if not room_id:
+            return Response(
+                {"error": "room_id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         # Verify room exists and user has access
         try:
             room = Room.objects.get(
+                id=room_id, communication_participants__user=request.user
+            )
+        except Room.DoesNotExist:
+            return Response(
+                {"error": "Room does not exist or you don't have access"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Continue with message creation
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Set sender and room explicitly
+        self.perform_create(serializer)
+
+        # Notify via WebSocket if successful
+        message = serializer.instance
+        if message:
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"room_{room_id}",
+                {"type": "chat_message", "message": serializer.data},
+            )
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            serializer.data, status=status.HTTP_201_CREATED, headers=headers
+        )
+
+    def perform_create(self, serializer):
+        """Set sender to current user and ensure room is set"""
+        room_id = self.request.data.get("room_id")
+        try:
+            room = Room.objects.get(
                 id=room_id, communication_participants__user=self.request.user
             )
+            serializer.save(sender=self.request.user, room=room)
         except Room.DoesNotExist:
             raise serializers.ValidationError(
                 {"room_id": "Room does not exist or you don't have access."}
             )
-
-        # Set sender and room
-        serializer.save(sender=self.request.user, room=room)
 
 
 class MediaFileViewSet(viewsets.ModelViewSet):
