@@ -1,6 +1,9 @@
 from rest_framework import serializers
 from .models import StartupIdea, StartupImage
 from django.contrib.auth import get_user_model
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Get the CustomUser model
 CustomUser = get_user_model()
