@@ -1,0 +1,4 @@
+Usage: python -m reflex [OPTIONS] COMMAND [ARGS]...
+Try 'python -m reflex --help' for help.
+
+Error: No such command 'compile'.

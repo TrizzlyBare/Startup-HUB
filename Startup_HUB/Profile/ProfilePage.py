@@ -7,6 +7,7 @@ class State(rx.State):
     
     # API endpoint
     API_URL = "http://100.95.107.24:8000/api/auth"
+    STARTUP_IDEAS_API = "http://100.95.107.24:8000/api/startup-profile/startup-ideas"
     
     # Basic Info
     name: str = ""
@@ -15,6 +16,11 @@ class State(rx.State):
     job_title: str = ""
     experience_level: str = ""
     category: str = ""
+    
+    # Startup Ideas
+    startup_ideas: list = []
+    show_startup_modal: bool = False
+    editing_startup: dict = {}
     
     # Debug information
     auth_debug_result: str = ""
@@ -83,6 +89,8 @@ class State(rx.State):
                 await self.load_profile_data()
             # else:
             #     return rx.redirect("/")
+        
+        await self.load_startup_ideas()
     
     # About section
     about: str = ""
@@ -210,7 +218,7 @@ class State(rx.State):
                         
                         # Make the request with the correct username case
                         response = await client.get(
-                            f"{self.API_URL}/profiles/{self.profile_username}/",
+                            f"{self.API_URL}/profile/{self.profile_username}/",
                             headers=headers,
                             follow_redirects=True
                         )
@@ -244,7 +252,7 @@ class State(rx.State):
                                 self.skills = []
                             
                             # Handle projects - ensure null data shows properly
-                            projects_data = data.get("projects") or []
+                            projects_data = data.get("projects") or data.get("past_projects") or []
                             if isinstance(projects_data, list):
                                 self.projects = projects_data
                             elif isinstance(projects_data, str):
@@ -279,8 +287,8 @@ class State(rx.State):
                             user_data = auth_debug_data.get("user_from_token", {})
                             
                             # Create a new profile
-                            create_response = await client.post(
-                                f"{self.API_URL}/profiles/",
+                            create_response = await client.put(
+                                f"{self.API_URL}/profile/{self.profile_username}/",
                                 headers=headers,
                                 json={
                                     "username": self.profile_username,
@@ -290,7 +298,7 @@ class State(rx.State):
                                     "bio": "",
                                     "industry": "Not Specified",
                                     "experience": "Not Specified",
-                                    "skills": [],
+                                    "skills": user_data.get("skills", ""),
                                     "contact_links": []
                                 }
                             )
@@ -379,78 +387,114 @@ class State(rx.State):
         
         # Create profile data for API - map to correct field names
         profile_data = {
-            "username": self.profile_username,  # Include username field
+            "id": None,  # Will be set by the API
+            "username": self.profile_username,
             "first_name": self.first_name,
             "last_name": self.last_name,
-            "bio": self.about,  # Map about to bio
-            "industry": self.category,  # Map category to industry
-            "experience": self.experience_level,  # Map experience_level to experience
-            "skills": ",".join(self.skills) if self.skills else "",  # Send skills as a comma-separated string
-            "contact_links": [
-                {"platform": "linkedin", "url": self.linkedin_link} if self.linkedin_link else None,
-                {"platform": "github", "url": self.github_link} if self.github_link else None,
-                {"platform": "portfolio", "url": self.portfolio_link} if self.portfolio_link else None
-            ]
+            "email": user_data.get("email", ""),  # Get email from auth debug data
+            "profile_picture_url": None,  # Will be handled separately if needed
+            "bio": self.about,
+            "industry": self.category,
+            "experience": self.experience_level,
+            "skills": ",".join(self.skills) if self.skills else "",
+            "past_projects": ",".join(self.projects) if self.projects else "",
+            "career_summary": self.job_title,  # Using job_title as career_summary
+            "contact_links": []  # Initialize empty contact_links array
         }
         
-        # Remove None values from contact_links
-        profile_data["contact_links"] = [link for link in profile_data["contact_links"] if link is not None]
+        # If we have contact links, add them
+        if self.linkedin_link:
+            profile_data["contact_links"].append({
+                "title": "LinkedIn",
+                "url": self.linkedin_link if self.linkedin_link.startswith(("http://", "https://")) else f"https://{self.linkedin_link}"
+            })
+        if self.github_link:
+            profile_data["contact_links"].append({
+                "title": "GitHub",
+                "url": self.github_link if self.github_link.startswith(("http://", "https://")) else f"https://{self.github_link}"
+            })
+        if self.portfolio_link:
+            profile_data["contact_links"].append({
+                "title": "Portfolio",
+                "url": self.portfolio_link if self.portfolio_link.startswith(("http://", "https://")) else f"https://{self.portfolio_link}"
+            })
+        
+        # Define headers here
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Token {auth_token}"
+        }
         
         try:
-            # Make the API request directly with httpx
             async with httpx.AsyncClient() as client:
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Token {auth_token}"
-                }
-                
-                # Try updating the profile using PUT method
-                response = await client.put(
-                    f"{self.API_URL}/profiles/{self.profile_username}/",
-                    json=profile_data,
+                # First get the existing profile data
+                get_response = await client.get(
+                    f"{self.API_URL}/profile/{self.profile_username}/",
                     headers=headers
                 )
                 
-                print(f"Profile update response: {response.status_code}")
-                print(f"Profile update response text: {response.text}")
+                if get_response.status_code == 200:
+                    existing_data = get_response.json()
+                    # Preserve existing fields that we're not updating
+                    for key in existing_data:
+                        if key not in profile_data:
+                            profile_data[key] = existing_data[key]
                 
-                if response.status_code in [200, 201]:
-                    print("Profile updated successfully")
-                    # Close the form
-                    self.show_edit_form = False
-                    # Reload profile data to show updates
-                    await self.load_profile_data()
-                elif response.status_code == 401:
-                    print("Authentication error when saving profile")
-                    # Handle auth errors
-                    return self.handle_auth_error()
+                # First try to get the profile to see if it exists
+                get_response = await client.get(
+                    f"{self.API_URL}/profile/{self.profile_username}/",
+                    headers=headers
+                )
+                
+                print(f"GET Profile Response: {get_response.status_code}")
+                print(f"GET Profile Data: {get_response.text}")
+                
+                if get_response.status_code == 404:
+                    # Profile doesn't exist, create it using PUT
+                    create_response = await client.put(
+                        f"{self.API_URL}/profile/{self.profile_username}/",
+                        json=profile_data,
+                        headers=headers
+                    )
+                    
+                    print(f"Create Profile Request Data: {profile_data}")
+                    print(f"Create Profile Response: {create_response.status_code}")
+                    print(f"Create Profile Response Data: {create_response.text}")
+                    
+                    if create_response.status_code in [200, 201]:
+                        print("Profile created successfully")
+                        self.show_edit_form = False
+                        await self.load_profile_data()
+                    else:
+                        print(f"Error creating profile: {create_response.text}")
+                        print(f"Response status: {create_response.status_code}")
+                        print(f"Response headers: {create_response.headers}")
                 else:
-                    print(f"Error updating profile: {response.text}")
-                    # Try updating with a different endpoint
-                    try:
-                        # Try updating the profile with a different endpoint
-                        update_response = await client.put(
-                            f"{self.API_URL}/profile/{self.profile_username}/",
-                            json=profile_data,
-                            headers=headers
-                        )
+                    # Profile exists, update it
+                    update_response = await client.put(
+                        f"{self.API_URL}/profile/{self.profile_username}/",
+                        json=profile_data,
+                        headers=headers
+                    )
+                    
+                    print(f"Update Profile Request Data: {profile_data}")
+                    print(f"Update Profile Response: {update_response.status_code}")
+                    print(f"Update Profile Response Data: {update_response.text}")
+                    
+                    if update_response.status_code in [200, 201]:
+                        print("Profile updated successfully")
+                        self.show_edit_form = False
+                        # Reload profile data to ensure UI is updated
+                        await self.load_profile_data()
+                    else:
+                        print(f"Error updating profile: {update_response.text}")
+                        print(f"Response status: {update_response.status_code}")
+                        print(f"Response headers: {update_response.headers}")
                         
-                        print(f"Profile update (alternative) response: {update_response.status_code}")
-                        print(f"Profile update (alternative) response text: {update_response.text}")
-                        
-                        if update_response.status_code in [200, 201]:
-                            print("Profile updated successfully with alternative endpoint")
-                            # Close the form
-                            self.show_edit_form = False
-                            # Reload profile data to show updates
-                            await self.load_profile_data()
-                        else:
-                            print(f"Error updating profile with alternative endpoint: {update_response.text}")
-                    except Exception as alt_error:
-                        print(f"Error with alternative update request: {alt_error}")
-        
         except Exception as e:
             print(f"Error saving profile changes: {e}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
         
         # Close the form modal
         self.show_edit_form = False
@@ -464,6 +508,135 @@ class State(rx.State):
         """Check if about text exists."""
         return len(self.about) > 0
 
+    async def load_startup_ideas(self):
+        """Load startup ideas for the current user."""
+        try:
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.STARTUP_IDEAS_API}/my-ideas/?username={self.profile_username}",
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    # Extract the results array from the response
+                    data = response.json()
+                    self.startup_ideas = data.get('results', [])
+                elif response.status_code == 404:
+                    self.startup_ideas = []
+                else:
+                    print(f"Error loading startup ideas: {response.text}")
+        except Exception as e:
+            print(f"Error in load_startup_ideas: {e}")
+            self.startup_ideas = []
+
+    async def save_startup_idea(self, form_data: dict):
+        """Save a new or updated startup idea."""
+        try:
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            startup_data = {
+                "name": form_data.get("name", ""),
+                "stage": form_data.get("stage", "IDEA"),
+                "user_role": form_data.get("user_role", "FOUNDER"),
+                "pitch": form_data.get("pitch", ""),
+                "description": form_data.get("description", ""),
+                "skills": form_data.get("skills", "").split(",") if form_data.get("skills") else [],
+                "looking_for": form_data.get("looking_for", "").split(",") if form_data.get("looking_for") else [],
+                "pitch_deck": form_data.get("pitch_deck", ""),
+                "website": form_data.get("website", ""),
+                "funding_stage": form_data.get("funding_stage", "Pre-seed"),
+                "investment_needed": float(form_data.get("investment_needed", 0)) if form_data.get("investment_needed") else None
+            }
+            
+            async with httpx.AsyncClient() as client:
+                if self.editing_startup:
+                    # Update existing idea
+                    response = await client.put(
+                        f"{self.STARTUP_IDEAS_API}/my-ideas/{self.editing_startup.get('id')}/",
+                        json=startup_data,
+                        headers=headers
+                    )
+                else:
+                    # Create new idea
+                    response = await client.post(
+                        f"{self.STARTUP_IDEAS_API}/my-ideas/",
+                        json=startup_data,
+                        headers=headers
+                    )
+                
+                if response.status_code in [200, 201]:
+                    self.show_startup_modal = False
+                    self.editing_startup = {}
+                    await self.load_startup_ideas()
+                else:
+                    print(f"Error saving startup idea: {response.text}")
+        except Exception as e:
+            print(f"Error in save_startup_idea: {e}")
+
+    def toggle_startup_modal(self):
+        """Toggle the startup idea modal."""
+        self.show_startup_modal = not self.show_startup_modal
+        if not self.show_startup_modal:
+            self.editing_startup = {}
+
+    def edit_startup(self, startup: dict):
+        """Start editing a startup idea."""
+        self.editing_startup = startup
+        self.show_startup_modal = True
+
+    async def delete_startup(self, startup_id: str):
+        """Delete a startup idea."""
+        try:
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.delete(
+                    f"{self.STARTUP_IDEAS_API}/my-ideas/{startup_id}/",
+                    headers=headers
+                )
+                
+                if response.status_code == 204:
+                    await self.load_startup_ideas()
+                else:
+                    print(f"Error deleting startup idea: {response.text}")
+        except Exception as e:
+            print(f"Error in delete_startup: {e}")
+
 def skill_badge(skill: str) -> rx.Component:
     """Create a badge for a skill."""
     return rx.badge(
@@ -476,6 +649,183 @@ def project_badge(project: str) -> rx.Component:
     return rx.badge(
         project,
         class_name="bg-gray-100 text-gray-800 px-3 py-1 rounded-lg m-1"
+    )
+
+def startup_idea_modal() -> rx.Component:
+    """Render the startup idea modal."""
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title(
+                "Startup Idea",
+                class_name="text-3xl font-bold mb-4 text-blue-600",
+            ),
+            rx.form(
+                rx.vstack(
+                    rx.input(
+                        placeholder="Startup Name",
+                        name="name",
+                        required=True,
+                        default_value=rx.cond(
+                            State.editing_startup,
+                            State.editing_startup.get("name", ""),
+                            ""
+                        ),
+                        class_name="w-full p-2 border rounded-lg bg-white",
+                    ),
+                    rx.select(
+                        ["IDEA", "MVP", "BETA", "LAUNCHED", "SCALING"],
+                        placeholder="Stage",
+                        name="stage",
+                        default_value=rx.cond(
+                            State.editing_startup,
+                            State.editing_startup.get("stage", "IDEA"),
+                            "IDEA"
+                        ),
+                        class_name="w-full p-2 border rounded-lg bg-white",
+                    ),
+                    rx.select(
+                        ["FOUNDER", "CO-FOUNDER", "TEAM_MEMBER", "INVESTOR", "ADVISOR"],
+                        placeholder="Your Role",
+                        name="user_role",
+                        default_value=rx.cond(
+                            State.editing_startup,
+                            State.editing_startup.get("user_role", "FOUNDER"),
+                            "FOUNDER"
+                        ),
+                        class_name="w-full p-2 border rounded-lg bg-white",
+                    ),
+                    rx.text_area(
+                        placeholder="Elevator Pitch",
+                        name="pitch",
+                        default_value=rx.cond(
+                            State.editing_startup,
+                            State.editing_startup.get("pitch", ""),
+                            ""
+                        ),
+                        class_name="w-full p-2 border rounded-lg bg-white",
+                    ),
+                    rx.text_area(
+                        placeholder="Description",
+                        name="description",
+                        default_value=rx.cond(
+                            State.editing_startup,
+                            State.editing_startup.get("description", ""),
+                            ""
+                        ),
+                        class_name="w-full p-2 border rounded-lg bg-white",
+                    ),
+                    rx.input(
+                        placeholder="Skills (comma-separated)",
+                        name="skills",
+                        default_value=rx.cond(
+                            State.editing_startup,
+                            ",".join(State.editing_startup.get("skills", [])),
+                            ""
+                        ),
+                        class_name="w-full p-2 border rounded-lg bg-white",
+                    ),
+                    rx.input(
+                        placeholder="Looking for (comma-separated)",
+                        name="looking_for",
+                        default_value=rx.cond(
+                            State.editing_startup,
+                            ",".join(State.editing_startup.get("looking_for", [])),
+                            ""
+                        ),
+                        class_name="w-full p-2 border rounded-lg bg-white",
+                    ),
+                    rx.input(
+                        placeholder="Pitch Deck URL",
+                        name="pitch_deck",
+                        default_value=rx.cond(
+                            State.editing_startup,
+                            State.editing_startup.get("pitch_deck", ""),
+                            ""
+                        ),
+                        class_name="w-full p-2 border rounded-lg bg-white",
+                    ),
+                    rx.input(
+                        placeholder="Website URL",
+                        name="website",
+                        default_value=rx.cond(
+                            State.editing_startup,
+                            State.editing_startup.get("website", ""),
+                            ""
+                        ),
+                        class_name="w-full p-2 border rounded-lg bg-white",
+                    ),
+                    rx.select(
+                        ["Pre-seed", "Seed", "Early", "Growth", "Expansion", "Exit"],
+                        placeholder="Funding Stage",
+                        name="funding_stage",
+                        default_value=rx.cond(
+                            State.editing_startup,
+                            State.editing_startup.get("funding_stage", "Pre-seed"),
+                            "Pre-seed"
+                        ),
+                        class_name="w-full p-2 border rounded-lg bg-white",
+                    ),
+                    rx.input(
+                        placeholder="Investment Needed",
+                        name="investment_needed",
+                        type="number",
+                        default_value=rx.cond(
+                            State.editing_startup,
+                            str(State.editing_startup.get("investment_needed", 0)),
+                            "0"
+                        ),
+                        class_name="w-full p-2 border rounded-lg bg-white",
+                    ),
+                    rx.hstack(
+                        rx.button(
+                            "Cancel",
+                            on_click=State.toggle_startup_modal,
+                            class_name="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg",
+                        ),
+                        rx.button(
+                            "Save",
+                            type="submit",
+                            class_name="px-6 py-2 bg-sky-600 text-white hover:bg-sky-700 rounded-lg",
+                        ),
+                        spacing="4",
+                        justify="end",
+                        width="100%",
+                    ),
+                    spacing="4",
+                ),
+                on_submit=State.save_startup_idea,
+            ),
+            class_name="bg-white p-8 rounded-xl shadow-2xl border border-gray-200",
+        ),
+        open=State.show_startup_modal,
+    )
+
+def startup_idea_card(startup: dict) -> rx.Component:
+    """Render a startup idea card."""
+    return rx.box(
+        rx.vstack(
+            rx.heading(startup.get("name", ""), size="5"),
+            rx.text(startup.get("pitch", ""), noOfLines=2),
+            rx.hstack(
+                rx.badge(startup.get("stage", ""), class_name="bg-blue-100 text-blue-800"),
+                rx.badge(startup.get("funding_stage", ""), class_name="bg-green-100 text-green-800"),
+                spacing="2",
+            ),
+            rx.hstack(
+                rx.button(
+                    "Edit",
+                    on_click=lambda: State.edit_startup(startup),
+                    class_name="px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700",
+                ),
+                rx.button(
+                    "Delete",
+                    on_click=lambda: State.delete_startup(startup.get("id")),
+                    class_name="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700",
+                ),
+                spacing="2",
+            ),
+            class_name="bg-white p-4 rounded-lg shadow",
+        ),
     )
 
 def profile_display() -> rx.Component:
@@ -516,11 +866,28 @@ def profile_display() -> rx.Component:
                     spacing="2"
                 ),
                 rx.spacer(),
-                # Edit Profile Button
-                rx.button(
-                    rx.icon("pencil"),  # This is the pencil icon
-                    on_click=State.toggle_edit_form,
-                    class_name="px-6 py-3 bg-white text-gray-600 rounded-lg hover:bg-sky-200 hover:text-gray-600 transition-all duration-200"),
+                # Buttons
+                rx.hstack(
+                    # Edit Profile Button
+                    rx.button(
+                        rx.icon("pencil"),
+                        on_click=State.toggle_edit_form,
+                        class_name="px-6 py-3 bg-white text-gray-600 rounded-lg hover:bg-sky-200 hover:text-gray-600 transition-all duration-200"
+                    ),
+                    # View Matches Button
+                    rx.button(
+                        "View Matches",
+                        on_click=rx.redirect(f"/match/from-profile/{State.profile_username}"),
+                        class_name="px-6 py-3 bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-all duration-200"
+                    ),
+                    # My Projects Button
+                    rx.button(
+                        "My Projects",
+                        on_click=rx.redirect(f"/my-projects/user/{State.profile_username}"),
+                        class_name="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm",
+                    ),
+                    spacing="4"
+                ),
                 width="100%",
                 padding="4",
                 spacing="4"
@@ -554,31 +921,6 @@ def profile_display() -> rx.Component:
                     ),
                     wrap="wrap",
                     gap="2"
-                ),
-                width="100%",
-                padding="4",
-                class_name="bg-white rounded-lg shadow"
-            ),
-            
-            # Projects Section
-            rx.box(
-                rx.hstack(
-                    rx.heading("Projects", size="5"),
-                    rx.spacer(),
-                    width="100%",
-                    margin_bottom="2",
-                ),
-                rx.cond(
-                    State.projects.length() > 0,
-                    rx.flex(
-                        rx.foreach(
-                            State.projects,
-                            project_badge
-                        ),
-                        wrap="wrap",
-                        gap="2"
-                    ),
-                    rx.text("No projects added yet.", class_name="text-gray-500 italic")
                 ),
                 width="100%",
                 padding="4",

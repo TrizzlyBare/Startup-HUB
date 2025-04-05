@@ -11,6 +11,7 @@ class AuthState(BaseState):
     username: str = ""
     email: str = ""
     password: str = ""
+    confirm_password: str = ""
     show_login: bool = True
     
     # Error and success messages
@@ -29,6 +30,31 @@ class AuthState(BaseState):
     # Add auth debug result field
     auth_debug_result: str = ""
     
+    # Additional method for debug login
+    @rx.event
+    def set_debug_credentials(self, username: str, token: str):
+        print(f"=== Setting debug credentials ===")
+        print(f"Username: {username}")
+        print(f"Token: {token[:8]}...")
+        
+        # Store credentials
+        self.username = username
+        self.token = token
+        
+        # Set debug info for logging
+        self.auth_debug_result = f"Debug login successful for user: {username} with token: {token}"
+        
+        # Show feedback
+        self.auth_error = ""
+        
+        # Redirect to main page
+        return rx.redirect("/")
+    
+    @rx.var
+    def is_authenticated(self) -> bool:
+        """Check if the user is authenticated."""
+        return bool(self.token)
+    
     def clear_messages(self):
         """Clear error and success messages."""
         self.error = None
@@ -41,6 +67,7 @@ class AuthState(BaseState):
         self.username = ""
         self.email = ""
         self.password = ""
+        self.confirm_password = ""
         self.profile_picture = None
         self.clear_messages()
 

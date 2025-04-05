@@ -183,98 +183,109 @@ def edit_project_modal() -> rx.Component:
         rx.dialog.content(
             rx.dialog.title(
                 "Edit Project", 
-                class_name="text-3xl font-bold mb-4",
+                class_name="text-3xl font-bold mb-4 text-sky-600",
             ),
             rx.dialog.description(
-                rx.form(
-                    rx.vstack(
-                        rx.input(
-                            placeholder="Project Name",
-                            name="name",
-                            required=True,
-                            style={"& input::placeholder": {"color": "grey"}},
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                            default_value=rx.cond(
-                                MyProjectsState.editing_project,
-                                MyProjectsState.editing_project.name,
-                                ""
-                            ),
+                rx.vstack(
+                    # Error message display
+                    rx.cond(
+                        MyProjectsState.error,
+                        rx.text(
+                            MyProjectsState.error,
+                            class_name="text-red-500 mb-4 p-2 bg-red-50 rounded-lg",
                         ),
-                        rx.text_area(
-                            placeholder="Project Description", 
-                            name="description",
-                            required=True,
-                            height="120px",
-                            style={"& textarea::placeholder": {"color": "grey"}},
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                            default_value=rx.cond(
-                                MyProjectsState.editing_project,
-                                MyProjectsState.editing_project.description,
-                                ""
-                            ),
-                        ),
-                        rx.input(
-                            placeholder="Tech Stack (comma-separated)",
-                            name="tech_stack",
-                            style={"& input::placeholder": {"color": "grey"}},
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                            default_value=MyProjectsState.formatted_tech_stack
-                        ),
-                        rx.select(
-                            ["Pre-seed", "Seed", "Early", "Growth", "Expansion", "Exit"],
-                            placeholder="Funding Stage",
-                            name="funding_stage",
-                            style={"& input::placeholder": {"color": "grey"}},
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                            default_value=rx.cond(
-                                MyProjectsState.editing_project,
-                                MyProjectsState.editing_project.funding_stage,
-                                "Pre-seed"
-                            ),
-                        ),
-                        rx.input(
-                            placeholder="Team Size",
-                            name="team_size",
-                            type="number",
-                            min_value=1,
-                            style={"& input::placeholder": {"color": "grey"}},
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                            default_value=MyProjectsState.formatted_team_size
-                        ),
-                        rx.input(
-                            placeholder="Looking for (comma-separated roles)",
-                            name="looking_for",
-                            style={"& input::placeholder": {"color": "grey"}},
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                            default_value=MyProjectsState.formatted_looking_for
-                        ),
-                        
-                        # Buttons
-                        rx.hstack(
-                            rx.button(
-                                "Cancel",
-                                variant="soft",
-                                color_scheme="gray",
-                                on_click=MyProjectsState.toggle_edit_modal,
-                                class_name="px-6 py-2 bg-red-600 hover:bg-red-700 rounded-lg",
-                            ),
-                            rx.dialog.close(
-                                rx.button(
-                                    "Save Changes",
-                                    type="submit",
-                                    class_name="px-6 py-2 bg-sky-600 text-white hover:bg-sky-700 rounded-lg",
+                    ),
+                    rx.form(
+                        rx.vstack(
+                            rx.input(
+                                placeholder="Project Name",
+                                name="name",
+                                required=True,
+                                style={"& input::placeholder": {"color": "grey"}},
+                                class_name="w-full p-2 border rounded-lg bg-white",
+                                default_value=rx.cond(
+                                    MyProjectsState.editing_project,
+                                    MyProjectsState.editing_project.name,
+                                    ""
                                 ),
                             ),
-                            spacing="4",
-                            justify="end",
-                            width="100%",
-                            margin_top="6",
+                            rx.text_area(
+                                placeholder="Project Description", 
+                                name="description",
+                                required=True,
+                                height="120px",
+                                style={"& textarea::placeholder": {"color": "grey"}},
+                                class_name="w-full p-2 border rounded-lg bg-white",
+                                default_value=rx.cond(
+                                    MyProjectsState.editing_project,
+                                    MyProjectsState.editing_project.description,
+                                    ""
+                                ),
+                            ),
+                            rx.input(
+                                placeholder="Tech Stack (comma-separated)",
+                                name="tech_stack",
+                                style={"& input::placeholder": {"color": "grey"}},
+                                class_name="w-full p-2 border rounded-lg bg-white",
+                                default_value=MyProjectsState.formatted_tech_stack
+                            ),
+                            rx.select(
+                                ["Pre-seed", "Seed", "Early", "Growth", "Expansion", "Exit"],
+                                placeholder="Funding Stage",
+                                name="funding_stage",
+                                style={"& input::placeholder": {"color": "grey"}},
+                                class_name="w-full p-2 border rounded-lg bg-white",
+                                default_value=rx.cond(
+                                    MyProjectsState.editing_project,
+                                    MyProjectsState.editing_project.funding_stage,
+                                    "Pre-seed"
+                                ),
+                            ),
+                            rx.input(
+                                placeholder="Team Size",
+                                name="team_size",
+                                type="number",
+                                min_value=1,
+                                style={"& input::placeholder": {"color": "grey"}},
+                                class_name="w-full p-2 border rounded-lg bg-white",
+                                default_value=MyProjectsState.formatted_team_size
+                            ),
+                            rx.input(
+                                placeholder="Looking for (comma-separated roles)",
+                                name="looking_for",
+                                style={"& input::placeholder": {"color": "grey"}},
+                                class_name="w-full p-2 border rounded-lg bg-white",
+                                default_value=MyProjectsState.formatted_looking_for
+                            ),
+                            
+                            # Buttons
+                            rx.hstack(
+                                rx.button(
+                                    "Cancel",
+                                    variant="soft",
+                                    color_scheme="gray",
+                                    on_click=MyProjectsState.toggle_edit_modal,
+                                    class_name="px-6 py-2 bg-red-600 hover:bg-red-700 rounded-lg",
+                                ),
+                                rx.dialog.close(
+                                    rx.button(
+                                        "Save Changes",
+                                        type="submit",
+                                        class_name="px-6 py-2 bg-sky-600 text-white hover:bg-sky-700 rounded-lg",
+                                    ),
+                                ),
+                                spacing="4",
+                                justify="end",
+                                width="100%",
+                                margin_top="6",
+                            ),
+                            spacing="6",
+                            padding="4",
                         ),
-                        spacing="6",
-                        padding="4",
+                        on_submit=MyProjectsState.edit_project,
+                        reset_on_submit=True,
                     ),
-                    on_submit=MyProjectsState.edit_project,
-                    reset_on_submit=True,
+                    width="100%",
                 ),
                 width="100%",
             ),
@@ -358,6 +369,7 @@ def my_projects_page() -> rx.Component:
                 padding="20px",
                 width="100%",
                 class_name="bg-gray-800",  # Added gray background color
+                on_mount=MyProjectsState.load_projects,  # Load projects when the page mounts
             ),
             width="100%",
             height="100vh",
