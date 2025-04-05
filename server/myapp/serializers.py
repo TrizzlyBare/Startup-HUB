@@ -32,17 +32,26 @@ class UserBasicSerializer(serializers.ModelSerializer):
 
     def get_user_profile_picture(self, obj):
         try:
+            # First try the normal way
             return obj.user.profile_picture.url
-        except ValueError as e:
-            # Configure Cloudinary if needed
-            from .utils.cloudinary_helper import CloudinaryHelper
+        except ValueError:
+            # If Cloudinary configuration is missing, configure it
+            try:
+                import cloudinary
+                from django.conf import settings
 
-            CloudinaryHelper.configure()
-            # Try again
-            return obj.user.profile_picture.url
-        except Exception:
-            # Return a default URL or None if profile picture can't be retrieved
-            return None
+                # Reconfigure Cloudinary
+                cloudinary.config(
+                    cloud_name=settings.CLOUDINARY_STORAGE["CLOUD_NAME"],
+                    api_key=settings.CLOUDINARY_STORAGE["API_KEY"],
+                    api_secret=settings.CLOUDINARY_STORAGE["API_SECRET"],
+                )
+
+                # Try again after configuration
+                return obj.user.profile_picture.url
+            except Exception as e:
+                # If there's still an issue, provide a fallback
+                return None
 
 
 class StartupImageSerializer(serializers.ModelSerializer):
