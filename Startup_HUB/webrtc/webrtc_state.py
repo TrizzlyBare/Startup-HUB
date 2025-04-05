@@ -11,6 +11,11 @@ class WebRTCState(rx.State):
     current_room_id: str = None
     connected_to_signaling: bool = False
     
+    # Incoming call state
+    is_receiving_call: bool = False
+    incoming_caller_name: str = ""
+    incoming_call_type: str = "audio"  # "audio" or "video"
+    
     # Participant information
     call_participants: list = []
     remote_streams: dict = {}
@@ -48,6 +53,15 @@ class WebRTCState(rx.State):
     async def accept_call(self):
         """Accept an incoming call."""
         self.is_in_call = True
+        self.is_receiving_call = False
+        yield
+    
+    @rx.event
+    async def reject_call(self):
+        """Reject an incoming call."""
+        self.is_receiving_call = False
+        self.incoming_caller_name = ""
+        self.incoming_call_type = "audio"
         yield
     
     def add_participant(self, user_id: str, username: str):
@@ -101,4 +115,41 @@ class WebRTCState(rx.State):
         self.call_participants = []
         self.remote_streams = {}
         self.peer_connections = {}
-        yield 
+        yield
+    
+    @rx.event
+    async def handle_incoming_call(self, caller_name: str, call_type: str = "audio"):
+        """Handle an incoming call.
+        
+        Args:
+            caller_name: The name of the caller
+            call_type: The type of call ("audio" or "video")
+        """
+        # Update incoming call state
+        self.is_receiving_call = True
+        self.incoming_caller_name = caller_name
+        self.incoming_call_type = call_type
+        yield
+    
+    @classmethod
+    def get_state(cls):
+        """Get the WebRTCState singleton instance."""
+        return rx.State.get_state(WebRTCState)
+    
+    async def handle_signaling_message(self, data):
+        """Handle a signaling message from the WebSocket.
+        
+        Args:
+            data: The message data
+        """
+        message_type = data.get("type", "")
+        
+        if message_type == "webrtc_offer":
+            # Handle offer by passing it to JavaScript
+            await rx.run_js(f"handleRemoteOffer('{data}')")
+        elif message_type == "webrtc_answer":
+            # Handle answer by passing it to JavaScript
+            await rx.run_js(f"handleRemoteAnswer('{data}')")
+        elif message_type == "ice_candidate":
+            # Handle ICE candidate by passing it to JavaScript
+            await rx.run_js(f"handleRemoteIceCandidate('{data}')") 
