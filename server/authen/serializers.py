@@ -71,9 +71,13 @@ class BaseUserSerializer(serializers.ModelSerializer):
         ]
 
     def get_profile_picture_url(self, obj):
-        """Get the Cloudinary URL for the profile picture"""
-        if obj.profile_picture:
-            return obj.profile_picture.url
+        """Get the Cloudinary URL for the profile picture with error handling"""
+        if obj.profile_picture and obj.profile_picture.public_id:
+            try:
+                return obj.profile_picture.url
+            except ValueError:
+                # Return None when Cloudinary is not configured properly
+                return None
         return None
 
     def get_skills_list(self, obj):
@@ -110,9 +114,13 @@ class UserInfoSerializer(BaseUserSerializer):
         return ContactLinkSerializer(obj.contact_links.all(), many=True).data
 
     def get_profile_picture_url(self, obj):
-        """Get the Cloudinary URL for the profile picture"""
-        if obj.profile_picture:
-            return obj.profile_picture.url
+        """Get the Cloudinary URL for the profile picture with error handling"""
+        if obj.profile_picture and obj.profile_picture.public_id:
+            try:
+                return obj.profile_picture.url
+            except ValueError:
+                # Return None when Cloudinary is not configured properly
+                return None
         return None
 
     def get_skills_list(self, obj):
