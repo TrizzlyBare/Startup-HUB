@@ -222,13 +222,12 @@ class ChatState(rx.State):
                 
                 # First try to create a direct chat room
                 create_room_payload = {
-                    "user_id": target_username,
-                    "is_direct": True
+                    "username": target_username
                 }
                 
                 async with httpx.AsyncClient() as client:
                     create_room_response = await client.post(
-                        "http://startup-hub:8000/api/communication/rooms/create_direct_chat/",
+                        "http://startup-hub:8000/api/communication/rooms/create_direct_message/",
                         headers=headers,
                         json=create_room_payload,
                         timeout=10.0
@@ -242,7 +241,7 @@ class ChatState(rx.State):
                         print(f"Failed to create room: {create_room_response.status_code}")
                         print(f"Response: {create_room_response.text}")
                         # Use a hardcoded room ID as fallback
-                        room_id = "496d0115-8a7a-43e9-9adc-2d18b8a09bb6"
+                        room_id = "630037fa-b654-4786-908e-54639a7c21de"
                         print(f"Using hardcoded room ID: {room_id}")
             
             # Prepare message data with the room field
@@ -276,11 +275,10 @@ class ChatState(rx.State):
                 else:
                     print(f"Error sending message: {response.status_code}")
                     print(f"Response: {response.text}")
-                    self.chat_history.append(("system", f"Error sending message: {response.text}"))
+                    self.chat_error_message = f"Error sending message: {response.text}"
         except Exception as e:
             print(f"Error in send_message: {str(e)}")
             self.chat_error_message = f"Error sending message: {str(e)}"
-            self.chat_history.append(("system", f"Error sending message: {str(e)}"))
             import traceback
             traceback.print_exc()
     
@@ -522,7 +520,7 @@ class ChatState(rx.State):
                     # Connect to WebSocket with auth headers
                     async with websockets.connect(
                         self.websocket_url,
-                        extra_headers=extra_headers
+                        headers=extra_headers
                     ) as websocket:
                         print("WebSocket connection established!")
                         self.websocket_connected = True
@@ -807,7 +805,7 @@ class ChatState(rx.State):
             # Send the message
             async with websockets.connect(
                 self.websocket_url,
-                extra_headers=extra_headers
+                headers=extra_headers
             ) as ws:
                 await ws.send(message_json)
                 print(f"Message sent via WebSocket: {message[:20]}...")
@@ -823,7 +821,7 @@ class ChatState(rx.State):
                         if "error" in confirm_data:
                             print(f"Error sending message: {confirm_data['error']}")
                             # Add error to chat history
-                            self.chat_history.append(("system", f"Error: {confirm_data['error']}"))
+                            self.chat_error_message = f"Error: {confirm_data['error']}"
                             # Try HTTP fallback
                             print("Falling back to HTTP API...")
                             await self.send_message()
@@ -843,7 +841,7 @@ class ChatState(rx.State):
         except Exception as e:
             print(f"Error sending message via WebSocket: {str(e)}")
             # Don't call send_message again to avoid infinite recursion
-            self.chat_history.append(("system", f"Error sending message: {str(e)}"))
+            self.chat_error_message = f"Error sending message: {str(e)}"
             import traceback
             traceback.print_exc()
     
@@ -1211,7 +1209,7 @@ class ChatState(rx.State):
             try:
                 async with websockets.connect(
                     f"ws://startup-hub:8000/ws/chat/",
-                    extra_headers=extra_headers
+                    headers=extra_headers
                 ) as websocket:
                     await websocket.send(message_json)
                     print(f"Sent typing indicator: {is_typing}")
@@ -1269,7 +1267,7 @@ class ChatState(rx.State):
                     # Send response
                     async with websockets.connect(
                         self.websocket_url,
-                        extra_headers=extra_headers
+                        headers=extra_headers
                     ) as ws:
                         await ws.send(json.dumps(response_message))
                         print(f"Sent call response ({response_message['response']}) to {caller}")
@@ -1299,7 +1297,7 @@ class ChatState(rx.State):
                 # Use HTTP API
                 async with httpx.AsyncClient() as client:
                     response = await client.post(
-                        f"http://100.95.107.24:8000/api/communication/messages/",
+                        f"http://startup-hub:8000/api/communication/messages/",
                         headers=get_auth_header(username, auth_token),
                         json={
                             "receiver": caller,
@@ -1679,7 +1677,7 @@ class ChatRoomState(ChatState):
             
             async with httpx.AsyncClient() as client:
                 response = await client.get(
-                    "http://100.95.107.24:8000/api/communication/rooms/",
+                    "http://startup-hub:8000/api/communication/rooms/",
                     headers=headers
                 )
                 
@@ -1781,7 +1779,7 @@ class ChatRoomState(ChatState):
             # Get messages directly with the receiver parameter
             async with httpx.AsyncClient() as client:
                 messages_response = await client.get(
-                    f"http://100.95.107.24:8000/api/communication/messages/",
+                    f"http://startup-hub:8000/api/communication/messages/",
                     headers=headers,
                     params={"receiver": target_username},
                     timeout=10.0
@@ -2362,7 +2360,7 @@ class ChatRoomState(ChatState):
                         # Send call invitation
                         async with websockets.connect(
                             self.websocket_url,
-                            extra_headers=extra_headers
+                            headers=extra_headers
                         ) as ws:
                             await ws.send(json.dumps(call_message))
                             print(f"Sent call invitation to {target_username}")
@@ -2387,7 +2385,7 @@ class ChatRoomState(ChatState):
                     # Use HTTP API to create call invitation
                     async with httpx.AsyncClient() as client:
                         response = await client.post(
-                            f"http://100.95.107.24:8000/api/communication/messages/",
+                            f"http://startup-hub:8000/api/communication/messages/",
                             headers=get_auth_header(username, auth_token),
                             json={
                                 "receiver": target_username,
@@ -2415,7 +2413,7 @@ class ChatRoomState(ChatState):
             async with httpx.AsyncClient() as client:
                 # Use the start_call endpoint
                 response = await client.post(
-                    f"http://100.95.107.24:8000/api/communication/rooms/{room_id}/start_call/",
+                    f"http://startup-hub:8000/api/communication/rooms/{room_id}/start_call/",
                     headers=get_auth_header(token=auth_token),
                     json={
                         "is_video": is_video
