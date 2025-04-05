@@ -1647,25 +1647,57 @@ class MatchState(rx.State):
             self.error_message = f"Error creating group chat: {str(e)}"
 
     # Chat related methods
-    def open_chat(self, username: str):
+    async def open_chat(self, username: str):
         """Open a direct chat with the specified user.
         This will create a chat room if one doesn't exist already, or
         open an existing chat room between the current user and the liked user.
         """
         print(f"Opening chat with user: {username}")
         
-        # Redirect to the direct chat route which will handle the room creation/loading
-        # This leverages the chat routing system which has been updated to use the new path
-        import reflex as rx
-        return rx.redirect(f"/chat/user/{username}")
-        
-        # Note: ChatRoomState.create_direct_chat method will be triggered when the chat route 
-        # is loaded, which handles:
-        # 1. Finding an existing chat room between the users
-        # 2. Creating a new chat room if one doesn't exist
-        # 3. Loading the messages in the correct format
-        # 4. Setting up the UI for the chat
-    
+        try:
+            # Get token from AuthState first
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                # If no token in state, try to get it from local storage
+                auth_token = await self.get_token()
+                if not auth_token:
+                    self.error_message = "Authentication required. Please log in."
+                    return []
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            # First try to get or create a direct chat room
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.API_BASE_URL}/communication/room/direct/",
+                    headers=headers,
+                    json={"recipient_id": username},  # Changed from recipient_id to username
+                    timeout=10.0
+                )
+                
+                if response.status_code in (200, 201):
+                    room_data = response.json()
+                    room_id = room_data.get("id")
+                    if room_id:
+                        # Return redirect event in a list
+                        return [rx.redirect(f"/chat/room/{room_id}")]
+                    else:
+                        self.error_message = "Failed to get room ID from response"
+                else:
+                    self.error_message = f"Failed to create/get chat room: {response.text}"
+                    
+        except Exception as e:
+            print(f"Error in open_chat: {str(e)}")
+            self.error_message = f"Error opening chat: {str(e)}"
+            
+        # Return empty list if we hit any error cases
+        return []
+
     def open_group_chat(self, room_id: str, room_name: str):
         """Open a group chat with the specified ID."""
         print(f"Opening group chat: {room_name} ({room_id})")

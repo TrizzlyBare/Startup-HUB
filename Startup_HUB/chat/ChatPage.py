@@ -1655,61 +1655,70 @@ class ChatRoomState(ChatState):
             }
             
             # Get messages directly with the receiver parameter
-            async with httpx.AsyncClient() as client:
-                messages_response = await client.get(
-                    f"http://100.95.107.24:8000/api/communication/messages/",
-                    headers=headers,
-                    params={"receiver": target_username},
-                    timeout=10.0
-                )
-                
-                if messages_response.status_code == 200:
-                    try:
-                        messages_data = messages_response.json()
-                        print(f"Got {len(messages_data) if isinstance(messages_data, list) else 'unknown'} messages")
-                        
-                        # Clear current chat history
-                        self.chat_history = []
-                        
-                        # Process messages if we got a list
-                        if isinstance(messages_data, list):
-                            # Sort messages by timestamp if available
-                            try:
-                                sorted_messages = sorted(
-                                    messages_data, 
-                                    key=lambda x: x.get("timestamp", "")
-                                )
-                            except:
-                                sorted_messages = messages_data
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                try:
+                    messages_response = await client.get(
+                        "http://startup-hub:8000/api/communication/messages/",
+                        headers=headers,
+                        params={"receiver": target_username}
+                    )
+                    
+                    if messages_response.status_code == 200:
+                        try:
+                            messages_data = messages_response.json()
+                            print(f"Got {len(messages_data) if isinstance(messages_data, list) else 'unknown'} messages")
                             
-                            # Get current username
-                            try:
-                                from ..Auth.AuthPage import AuthState
-                                current_username = str(AuthState.username)
-                                if current_username == "None" or not current_username:
+                            # Clear current chat history
+                            self.chat_history = []
+                            
+                            # Process messages if we got a list
+                            if isinstance(messages_data, list):
+                                # Sort messages by timestamp if available
+                                try:
+                                    sorted_messages = sorted(
+                                        messages_data, 
+                                        key=lambda x: x.get("timestamp", "")
+                                    )
+                                except:
+                                    sorted_messages = messages_data
+                                
+                                # Get current username
+                                try:
+                                    from ..Auth.AuthPage import AuthState
+                                    current_username = str(AuthState.username)
+                                    if current_username == "None" or not current_username:
+                                        current_username = "Tester"  # Default
+                                except ImportError:
                                     current_username = "Tester"  # Default
-                            except ImportError:
-                                current_username = "Tester"  # Default
-                                
-                            # Add messages to chat history
-                            for message in sorted_messages:
-                                sender = message.get("sender", {}).get("username", "")
-                                content = message.get("content", "")
-                                
-                                # Add to chat history (user is the current user, other is the chat partner)
-                                if sender == current_username:
-                                    self.chat_history.append(("user", content))
-                                else:
-                                    self.chat_history.append(("other", content))
-                        
-                        print(f"Loaded {len(self.chat_history)} messages for direct chat")
-                    except Exception as e:
-                        print(f"Error parsing messages: {str(e)}")
-                        import traceback
-                        traceback.print_exc()
-                else:
-                    print(f"Error loading messages: {messages_response.status_code}")
-                    print(f"Response: {messages_response.text}")
+                                    
+                                # Add messages to chat history
+                                for message in sorted_messages:
+                                    sender = message.get("sender", {}).get("username", "")
+                                    content = message.get("content", "")
+                                    
+                                    # Add to chat history (user is the current user, other is the chat partner)
+                                    if sender == current_username:
+                                        self.chat_history.append(("user", content))
+                                    else:
+                                        self.chat_history.append(("other", content))
+                            
+                            print(f"Loaded {len(self.chat_history)} messages for direct chat")
+                        except Exception as e:
+                            print(f"Error parsing messages: {str(e)}")
+                            import traceback
+                            traceback.print_exc()
+                    else:
+                        print(f"Error loading messages: {messages_response.status_code}")
+                        print(f"Response: {messages_response.text}")
+                except httpx.ConnectError as e:
+                    print(f"Connection error: {str(e)}")
+                    self.chat_error_message = "Could not connect to the server. Please check your internet connection."
+                except httpx.TimeoutException as e:
+                    print(f"Request timed out: {str(e)}")
+                    self.chat_error_message = "Request timed out. Please try again."
+                except httpx.HTTPError as e:
+                    print(f"HTTP error: {str(e)}")
+                    self.chat_error_message = f"HTTP error: {str(e)}"
             
             print(f"Direct chat setup complete for user: {target_username}")
                 
@@ -1783,28 +1792,36 @@ class ChatRoomState(ChatState):
             self.current_chat_user = username
     
     async def load_room_messages(self, room_id: str):
-        """
-        Load messages for a specific chat room.
+        """Load messages for a chat room (both direct and group chats).
         
         Args:
             room_id: The ID of the room to load messages for
         """
         print(f"Loading messages for room {room_id}...")
         self.rooms_loading = True
+        self.chat_history = []  # Reset chat history
         
         try:
             # Get authentication token
             token = await ChatState.get_auth_token()
-            
-            # Store the current room ID
-            self.active_room_id = room_id
-            
-            # Set up HTTP client headers for the request
+            if not token:
+                self.room_error_message = "Authentication token missing"
+                return
+                
+            # Set up HTTP client headers
             headers = {
                 "Content-Type": "application/json",
-                "Accept": "application/json",
                 "Authorization": f"Token {token}"
             }
+            
+            # Get current username for message formatting
+            try:
+                from ..Auth.AuthPage import AuthState
+                current_username = str(AuthState.username)
+                if current_username == "None" or not current_username:
+                    current_username = "Tester"  # Fallback
+            except ImportError:
+                current_username = "Tester"  # Default
             
             # Send request to get room messages
             async with httpx.AsyncClient() as client:
@@ -1816,9 +1833,6 @@ class ChatRoomState(ChatState):
                 
                 if response.status_code == 200:
                     messages = response.json()
-                    current_username = str(AuthState.username)
-                    if current_username == "None" or not current_username:
-                        current_username = "Tester"
                     
                     # Convert API messages format to chat_history format
                     for msg in messages:
@@ -1827,20 +1841,24 @@ class ChatRoomState(ChatState):
                         
                         # Handle different message types
                         if msg["message_type"] != "text":
-                            if msg["image"]:
+                            if msg.get("image"):
                                 content = msg["image"]
-                            elif msg["video"]:
+                            elif msg.get("video"):
                                 content = msg["video"]
-                            elif msg["audio"]:
+                            elif msg.get("audio"):
                                 content = msg["audio"]
-                            elif msg["document"]:
+                            elif msg.get("document"):
                                 content = msg["document"]
                                 
                         self.chat_history.append((sender_type, content))
                 else:
                     self.room_error_message = f"Failed to load messages: {response.status_code} {response.text}"
+                    print(f"Error loading messages: {response.text}")
         except Exception as e:
             self.room_error_message = f"Error loading messages: {str(e)}"
+            print(f"Exception in load_room_messages: {str(e)}")
+            import traceback
+            traceback.print_exc()
         finally:
             self.rooms_loading = False
     
@@ -1923,9 +1941,9 @@ class ChatRoomState(ChatState):
 
     @rx.event
     async def setup_room_chat(self):
-        """Set up room chat from URL parameters"""
+        """Set up chat from room ID in URL parameters"""
         try:
-            # Get the room_id parameter directly from the router's page params
+            # Get the room_id parameter from the router's page params
             room_id = None
             if hasattr(self, "router") and hasattr(self.router, "page"):
                 page = self.router.page
@@ -1948,20 +1966,46 @@ class ChatRoomState(ChatState):
                 yield
                 return
             
-            # Update the current room ID and type
-            self.current_room_id = str(room_id)
-            self.current_room_type = "group"
+            # Get room details from API
+            token = await ChatState.get_auth_token()
+            if not token:
+                self.room_error_message = "Authentication token missing"
+                yield
+                return
             
-            # Reset the state but preserve room ID
-            self.reset_state(preserve_username=False)
-            self.current_room_id = str(room_id)
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {token}"
+            }
             
-            # Set a default room name (we'll try to update it in load_room_messages)
-            self.current_chat_user = f"Group Chat"
-            
-            # Load the room messages
-            print(f"Loading messages for room ID: {self.current_room_id}")
-            await self.load_room_messages(str(room_id))
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"http://startup-hub:8000/api/communication/rooms/{room_id}/",
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    room_data = response.json()
+                    # Update state with room info
+                    self.current_room_id = str(room_id)
+                    self.current_room_type = room_data.get("room_type", "direct")
+                    
+                    # Set chat user name based on room type
+                    if self.current_room_type == "direct":
+                        # For direct chats, set the other user's name
+                        participants = room_data.get("participants", [])
+                        for participant in participants:
+                            if participant["username"] != AuthState.username:
+                                self.current_chat_user = participant["username"]
+                                break
+                    else:
+                        # For group chats, use room name
+                        self.current_chat_user = room_data.get("name", "Group Chat")
+                    
+                    # Load the room messages
+                    await self.load_room_messages(str(room_id))
+                else:
+                    self.room_error_message = f"Failed to load room: {response.text}"
             
             print(f"Room chat setup complete for room: {room_id}")
             yield
@@ -2035,12 +2079,15 @@ class ChatRoomState(ChatState):
     async def initiate_call(self, is_video: bool = False):
         """Start a call in the current room via API"""
         try:
-            auth_token = ChatState.get_auth_token()
+            # Get auth token - properly await the coroutine
+            auth_token = await ChatState.get_auth_token()
             
             # Check if token is valid
             if not auth_token:
                 self.room_error_message = "Authentication token missing"
                 return
+            
+            print(f"current_room_id: {self.current_room_id}")
             
             room_id = self.current_room_id
             if not room_id:
@@ -2050,9 +2097,13 @@ class ChatRoomState(ChatState):
                     raise ValueError("Cannot start call: No target user")
                 
                 # Get current username
-                username = str(AuthState.username)
-                if username == "None" or not username:
-                    username = "Tester"  # Fallback
+                try:
+                    from ..Auth.AuthPage import AuthState
+                    username = str(AuthState.username)
+                    if username == "None" or not username:
+                        username = "Tester"  # Fallback
+                except ImportError:
+                    username = "Tester"  # Default
                 
                 # Send call invitation via WebSocket if available
                 if self.websocket_connected:
@@ -2101,7 +2152,7 @@ class ChatRoomState(ChatState):
                     # Use HTTP API to create call invitation
                     async with httpx.AsyncClient() as client:
                         response = await client.post(
-                            f"http://100.95.107.24:8000/api/communication/messages/",
+                            "http://startup-hub:8000/api/communication/messages/",
                             headers=get_auth_header(username, auth_token),
                             json={
                                 "receiver": target_username,
@@ -2129,7 +2180,7 @@ class ChatRoomState(ChatState):
             async with httpx.AsyncClient() as client:
                 # Use the start_call endpoint
                 response = await client.post(
-                    f"http://100.95.107.24:8000/api/communication/rooms/{room_id}/start_call/",
+                    "http://startup-hub:8000/api/communication/rooms/{room_id}/start_call/",
                     headers=get_auth_header(token=auth_token),
                     json={
                         "is_video": is_video
@@ -2386,36 +2437,6 @@ def chat_room_route():
         incoming_call_popup(),
         on_mount=ChatRoomState.setup_room_chat,
     )
-
-@rx.page(route="/chat/user/[chat_user]")
-def direct_chat_route():
-    """Route for /chat/user/{chat_user}"""
-    return rx.box(
-        rx.hstack(
-            sidebar(),
-            rx.vstack(
-                user_header(),
-                chat(),
-                message_input(),
-                height="100vh",
-                width="100%",
-                spacing="0",
-                bg="#2d2d2d",
-            ),
-            spacing="0",
-            width="100%",
-            height="100vh",
-            overflow="hidden",
-        ),
-        # WebRTC call components
-        webrtc_calling_popup(),
-        webrtc_call_popup(),
-        webrtc_video_call_popup(),
-        incoming_call_popup(),
-        on_mount=ChatRoomState.setup_direct_chat,
-    )
-
-# Define the UI components from Chat_Page.py
 
 def sidebar() -> rx.Component:
     return rx.vstack(
