@@ -141,6 +141,23 @@ class RoomViewSet(viewsets.ModelViewSet):
         """
         recipient_id = request.data.get("recipient_id")
 
+        # Validate the recipient_id
+        if not recipient_id:
+            return Response(
+                {"error": "Recipient ID is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verify the recipient exists
+        User = get_user_model()
+        try:
+            recipient = User.objects.get(id=recipient_id)
+        except User.DoesNotExist:
+            return Response(
+                {"error": f"User with ID {recipient_id} does not exist"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
         # Check for existing direct message room
         existing_room = (
             Room.objects.filter(
@@ -156,13 +173,15 @@ class RoomViewSet(viewsets.ModelViewSet):
 
         # Create new room
         room = Room.objects.create(
-            name=f"Chat between {request.user.username} and {recipient_id}",
+            name=f"Chat between {request.user.username} and {recipient.username}",
             room_type="direct",
         )
 
         # Add participants
         Participant.objects.create(user=request.user, room=room)
-        Participant.objects.create(user_id=recipient_id, room=room)
+        Participant.objects.create(
+            user=recipient, room=room
+        )  # Use recipient object instead of just ID
 
         serializer = self.get_serializer(room)
         return Response(serializer.data)
