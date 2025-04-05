@@ -1,21 +1,22 @@
-from django.urls import path, include
-from rest_framework_nested import routers
+from django.urls import path
 from . import views
 
-# Create main router
-router = routers.DefaultRouter()
-router.register(r"rooms", views.RoomViewSet, basename="room")
-
-# Create nested router for room-specific endpoints
-rooms_router = routers.NestedDefaultRouter(router, r"rooms", lookup="room")
-rooms_router.register(r"messages", views.MessageViewSet, basename="room-messages")
-rooms_router.register(
-    r"participants", views.ParticipantViewSet, basename="room-participants"
-)
-
-app_name = "chat"
-
 urlpatterns = [
-    path("", include(router.urls)),
-    path("", include(rooms_router.urls)),
+    path(
+        "messages/",
+        views.MessageViewSet.as_view({"get": "list", "post": "create"}),
+        name="message-list",
+    ),
+    path(
+        "messages/<uuid:pk>/",
+        views.MessageViewSet.as_view(
+            {"get": "retrieve", "put": "update", "delete": "destroy"}
+        ),
+        name="message-detail",
+    ),
+    path(
+        "messages/by-channel/",
+        views.MessageViewSet.as_view({"get": "get_messages_by_channel"}),
+        name="messages-by-channel",
+    ),
 ]

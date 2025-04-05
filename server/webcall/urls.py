@@ -16,11 +16,5 @@ urlpatterns = [
         name="update_media_status",
     ),
     path("end-call/<uuid:room_id>/", views.end_call, name="end_call"),
-    path("invite-to-call/<uuid:room_id>/", views.invite_to_call, name="invite_to_call"),
-    path(
-        "respond-to-invitation/",
-        views.respond_to_invitation,
-        name="respond_to_invitation",
-    ),
     path("active-calls/", views.active_calls, name="active_calls"),
 ]

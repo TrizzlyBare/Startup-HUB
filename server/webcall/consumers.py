@@ -5,8 +5,6 @@ from .models import Room, Participant
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 import asyncio
-from urllib.parse import parse_qs
-from message.models import Room as MessageRoom, Participant as MessageParticipant
 
 User = get_user_model()
 
@@ -18,16 +16,6 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
         self.room_group_name = f"call_{self.room_id}"
         self.user_specific_group = f"user_{self.user.id}"
 
-        # Message room ID can be passed as a query parameter
-        query_string = self.scope["query_string"].decode()
-        query_params = {}
-        for param in query_string.split("&"):
-            if "=" in param:
-                key, value = param.split("=", 1)
-                query_params[key] = value
-
-        self.message_room_id = query_params.get("message_room_id")
-
         # Check if user is authenticated
         if self.user.is_anonymous:
             await self.close()
@@ -38,15 +26,6 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
         if not is_participant:
             await self.close()
             return
-
-        # If message room is specified, verify user is part of that message room
-        if self.message_room_id:
-            is_message_participant = await self.is_message_room_participant(
-                self.user.id, self.message_room_id
-            )
-            if not is_message_participant:
-                await self.close()
-                return
 
         # Join room group
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
@@ -77,22 +56,6 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
             },
         )
 
-        # If message room is specified, also notify that room
-        if self.message_room_id:
-            await self.channel_layer.group_send(
-                f"chat_{self.message_room_id}",
-                {
-                    "type": "notification",
-                    "message": "video_call_joined",
-                    "data": {
-                        "video_room_id": str(self.room_id),
-                        "message_room_id": self.message_room_id,
-                        "user_id": self.user.id,
-                        "username": self.user.username,
-                    },
-                },
-            )
-
     async def disconnect(self, close_code):
         # Leave room group
         if hasattr(self, "room_group_name"):
@@ -109,22 +72,6 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
                 },
             )
 
-            # If message room is specified, also notify that room
-            if hasattr(self, "message_room_id") and self.message_room_id:
-                await self.channel_layer.group_send(
-                    f"chat_{self.message_room_id}",
-                    {
-                        "type": "notification",
-                        "message": "video_call_left",
-                        "data": {
-                            "video_room_id": str(self.room_id),
-                            "message_room_id": self.message_room_id,
-                            "user_id": self.user.id,
-                            "username": self.user.username,
-                        },
-                    },
-                )
-
             # Leave groups
             await self.channel_layer.group_discard(
                 self.room_group_name, self.channel_name
@@ -140,119 +87,39 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
 
         # Handle various WebRTC signaling messages
         if message_type == "send_offer":
-            recipient_id = content.get("recipient_id")
-            if recipient_id:
-                # Verify recipient is in the same message room if specified
-                if self.message_room_id:
-                    is_in_same_room = await self.are_users_in_same_message_room(
-                        self.user.id, recipient_id, self.message_room_id
-                    )
-                    if not is_in_same_room:
-                        await self.send_json(
-                            {
-                                "type": "error",
-                                "message": "Recipient is not in the same message room",
-                            }
-                        )
-                        return
-
-                # Send offer to specific user
-                await self.channel_layer.group_send(
-                    f"user_{recipient_id}",
-                    {
-                        "type": "send_offer",
-                        "offer": content["offer"],
-                        "sender_id": self.user.id,
-                        "sender_username": self.user.username,
-                    },
-                )
-            else:
-                # Broadcast offer to all users in the room
-                await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {
-                        "type": "send_offer",
-                        "offer": content["offer"],
-                        "sender_id": self.user.id,
-                        "sender_username": self.user.username,
-                    },
-                )
+            # Broadcast offer to all users in the room
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "send_offer",
+                    "offer": content["offer"],
+                    "sender_id": self.user.id,
+                    "sender_username": self.user.username,
+                },
+            )
 
         elif message_type == "send_answer":
-            recipient_id = content.get("recipient_id")
-            if recipient_id:
-                # Verify recipient is in the same message room if specified
-                if self.message_room_id:
-                    is_in_same_room = await self.are_users_in_same_message_room(
-                        self.user.id, recipient_id, self.message_room_id
-                    )
-                    if not is_in_same_room:
-                        await self.send_json(
-                            {
-                                "type": "error",
-                                "message": "Recipient is not in the same message room",
-                            }
-                        )
-                        return
-
-                # Send answer to specific user
-                await self.channel_layer.group_send(
-                    f"user_{recipient_id}",
-                    {
-                        "type": "send_answer",
-                        "answer": content["answer"],
-                        "sender_id": self.user.id,
-                        "sender_username": self.user.username,
-                    },
-                )
-            else:
-                # Broadcast answer to all users in the room
-                await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {
-                        "type": "send_answer",
-                        "answer": content["answer"],
-                        "sender_id": self.user.id,
-                        "sender_username": self.user.username,
-                    },
-                )
+            # Broadcast answer to all users in the room
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "send_answer",
+                    "answer": content["answer"],
+                    "sender_id": self.user.id,
+                    "sender_username": self.user.username,
+                },
+            )
 
         elif message_type == "send_ice_candidate":
-            recipient_id = content.get("recipient_id")
-            if recipient_id:
-                # Verify recipient is in the same message room if specified
-                if self.message_room_id:
-                    is_in_same_room = await self.are_users_in_same_message_room(
-                        self.user.id, recipient_id, self.message_room_id
-                    )
-                    if not is_in_same_room:
-                        await self.send_json(
-                            {
-                                "type": "error",
-                                "message": "Recipient is not in the same message room",
-                            }
-                        )
-                        return
-
-                # Send ICE candidate to specific user
-                await self.channel_layer.group_send(
-                    f"user_{recipient_id}",
-                    {
-                        "type": "send_ice_candidate",
-                        "ice_candidate": content["ice_candidate"],
-                        "sender_id": self.user.id,
-                    },
-                )
-            else:
-                # Broadcast ICE candidate to all users in the room
-                await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {
-                        "type": "send_ice_candidate",
-                        "ice_candidate": content["ice_candidate"],
-                        "sender_id": self.user.id,
-                    },
-                )
+            # Broadcast ICE candidate to all users in the room
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "send_ice_candidate",
+                    "ice_candidate": content["ice_candidate"],
+                    "sender_id": self.user.id,
+                },
+            )
 
         # Handle call control messages
         elif message_type == "mute_audio":
@@ -372,40 +239,11 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
-    async def notification(self, event):
-        # Forward notification to WebSocket
-        await self.send_json(
-            {
-                "type": "notification",
-                "message": event["message"],
-                "data": event.get("data", {}),
-            }
-        )
-
     # Database access methods
     @database_sync_to_async
     def is_room_participant(self, user_id, room_id):
         """Check if the user is a participant in the room"""
         return Participant.objects.filter(user_id=user_id, room_id=room_id).exists()
-
-    @database_sync_to_async
-    def is_message_room_participant(self, user_id, message_room_id):
-        """Check if the user is a participant in the message room"""
-        return MessageParticipant.objects.filter(
-            user_id=user_id, room_id=message_room_id
-        ).exists()
-
-    @database_sync_to_async
-    def are_users_in_same_message_room(self, user_id1, user_id2, message_room_id):
-        """Check if both users are in the same message room"""
-        return (
-            MessageParticipant.objects.filter(
-                user_id=user_id1, room_id=message_room_id
-            ).exists()
-            and MessageParticipant.objects.filter(
-                user_id=user_id2, room_id=message_room_id
-            ).exists()
-        )
 
     @database_sync_to_async
     def update_audio_status(self, is_muted):
@@ -429,7 +267,7 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
         except Participant.DoesNotExist:
             pass
 
-    # Redis presence methods
+    # Presence methods
     async def update_presence(self, is_online):
         """Update user presence in Redis"""
         # Use Redis channel layer to track presence
@@ -438,16 +276,6 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
         if is_online:
             # Store presence with 30-second expiration
             await self.update_participant_last_active()
-            await self.channel_layer.send(
-                presence_key,
-                {
-                    "type": "presence_update",
-                    "user_id": self.user.id,
-                    "username": self.user.username,
-                    "is_online": True,
-                    "timestamp": timezone.now().isoformat(),
-                },
-            )
 
     @database_sync_to_async
     def update_participant_last_active(self):
@@ -468,45 +296,16 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
             room_id=self.room_id, last_active__gte=thirty_sec_ago
         ).select_related("user")
 
-        # If we have a message room ID, filter to only include participants from that room
-        if self.message_room_id:
-            message_participants = set()
-            try:
-                message_participants = set(
-                    MessageParticipant.objects.filter(
-                        room_id=self.message_room_id
-                    ).values_list("user_id", flat=True)
-                )
-            except Exception:
-                pass
-
-            filtered_participants = [
-                participant
-                for participant in participants
-                if participant.user_id in message_participants
-            ]
-
-            return [
-                {
-                    "user_id": participant.user.id,
-                    "username": participant.user.username,
-                    "joined_at": participant.joined_at.isoformat(),
-                    "is_audio_muted": participant.is_audio_muted,
-                    "is_video_muted": participant.is_video_muted,
-                }
-                for participant in filtered_participants
-            ]
-        else:
-            return [
-                {
-                    "user_id": participant.user.id,
-                    "username": participant.user.username,
-                    "joined_at": participant.joined_at.isoformat(),
-                    "is_audio_muted": participant.is_audio_muted,
-                    "is_video_muted": participant.is_video_muted,
-                }
-                for participant in participants
-            ]
+        return [
+            {
+                "user_id": participant.user.id,
+                "username": participant.user.username,
+                "joined_at": participant.joined_at.isoformat(),
+                "is_audio_muted": participant.is_audio_muted,
+                "is_video_muted": participant.is_video_muted,
+            }
+            for participant in participants
+        ]
 
     @database_sync_to_async
     def end_call(self):
@@ -528,48 +327,12 @@ class VideoCallConsumer(AsyncJsonWebsocketConsumer):
                         "message": "video_call_ended",
                         "data": {
                             "video_room_id": str(self.room_id),
-                            "message_room_id": (
-                                self.message_room_id
-                                if hasattr(self, "message_room_id")
-                                else None
-                            ),
                             "ended_by_id": self.user.id,
                             "ended_by_username": self.user.username,
                         },
                     },
                 )
             )
-
-            # If message room is specified, also notify that room
-            if hasattr(self, "message_room_id") and self.message_room_id:
-                # Create a system message in the message room
-                from message.models import Message
-
-                try:
-                    Message.objects.create(
-                        room_id=self.message_room_id,
-                        sender=self.user,
-                        content=f"ended the video call",
-                    )
-                except Exception:
-                    pass
-
-                # Notify the message room
-                asyncio.create_task(
-                    self.channel_layer.group_send(
-                        f"chat_{self.message_room_id}",
-                        {
-                            "type": "notification",
-                            "message": "video_call_ended",
-                            "data": {
-                                "video_room_id": str(self.room_id),
-                                "message_room_id": self.message_room_id,
-                                "ended_by_id": self.user.id,
-                                "ended_by_username": self.user.username,
-                            },
-                        },
-                    )
-                )
 
             return True
         except Room.DoesNotExist:
