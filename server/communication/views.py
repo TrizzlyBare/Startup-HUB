@@ -72,6 +72,18 @@ class UsernameLoginView(APIView):
 class DirectRoomView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    def get(self, request):
+        """
+        Get direct message rooms for the current user
+        """
+        # Get all direct message rooms the user is part of
+        direct_rooms = Room.objects.filter(
+            room_type="direct", communication_participants__user=request.user
+        ).distinct()
+
+        serializer = RoomSerializer(direct_rooms, many=True)
+        return Response(serializer.data)
+
     def post(self, request):
         """
         Create or retrieve a direct message room between the current user and another user
@@ -88,21 +100,23 @@ class DirectRoomView(APIView):
         # Get user model
         User = get_user_model()
 
-        # Try to find the user by ID or username
+        # Find recipient - don't try to use ID directly
         try:
-            # First try to convert to int and look up by ID
+            # Check if it's a UUID format
             try:
-                numeric_id = int(recipient_id)
-                recipient = User.objects.get(id=numeric_id)
+                uuid_obj = uuid.UUID(recipient_id)
+                recipient = User.objects.get(id=uuid_obj)
             except (ValueError, TypeError):
-                # If conversion to int fails, try looking up by username
+                # Not a valid UUID, try to find user by username
                 recipient = User.objects.get(username=recipient_id)
+
         except User.DoesNotExist:
             return Response(
                 {"error": f"User with id or username '{recipient_id}' does not exist"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        # Rest of the existing code...
         # Check for existing direct message room
         existing_room = (
             Room.objects.filter(
