@@ -25,6 +25,18 @@ from .serializers import (
 from django.contrib.auth import get_user_model
 from rest_framework.authtoken.models import Token
 
+import uuid
+from django.contrib.auth import get_user_model
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework import permissions
+
+from .models import Room, Message
+from .serializers import MessageSerializer
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -157,7 +169,6 @@ class RoomMessagesView(APIView):
         """
         Get messages for a specific room with pagination
         """
-        # Validate room exists and user has access
         try:
             room = Room.objects.get(
                 id=room_id, communication_participants__user=request.user
@@ -170,13 +181,9 @@ class RoomMessagesView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Get messages ordered by sent_at
         messages = Message.objects.filter(room=room).order_by("-sent_at")
-
-        # Use pagination
         paginator = self.pagination_class()
         paginated_messages = paginator.paginate_queryset(messages, request)
-
         serializer = MessageSerializer(paginated_messages, many=True)
         return paginator.get_paginated_response(serializer.data)
 
@@ -184,7 +191,6 @@ class RoomMessagesView(APIView):
         """
         Add a new message to the room
         """
-        # Validate room exists and user has access
         try:
             room = Room.objects.get(
                 id=room_id, communication_participants__user=request.user
@@ -199,7 +205,7 @@ class RoomMessagesView(APIView):
 
         # Prepare message data
         message_data = {
-            "room": room.id,
+            "room": str(room.id),
             "sender": request.user.id,
             "content": request.data.get("content", ""),
             "message_type": request.data.get("message_type", "text"),
