@@ -197,50 +197,42 @@ class RoomMessagesView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Create message
-        message_type = request.data.get("message_type", "text")
-        content = request.data.get("content", "")
-
+        # Prepare message data
         message_data = {
-            "room": room,
-            "sender": request.user,
-            "content": content,
-            "message_type": message_type,
+            "room": room.id,
+            "sender": request.user.id,
+            "content": request.data.get("content", ""),
+            "message_type": request.data.get("message_type", "text"),
         }
 
         # Handle media attachments
-        if message_type == "image" and request.FILES.get("image"):
-            from .utils import MediaProcessor
+        if "image" in request.FILES:
+            message_data["image"] = request.FILES["image"]
+            message_data["message_type"] = "image"
+        elif "video" in request.FILES:
+            message_data["video"] = request.FILES["video"]
+            message_data["message_type"] = "video"
+        elif "audio" in request.FILES:
+            message_data["audio"] = request.FILES["audio"]
+            message_data["message_type"] = "audio"
 
-            image_url = MediaProcessor.upload_image(request.FILES["image"])
-            if image_url:
-                message_data["image"] = image_url
+        # Use serializer for validation and creation
+        serializer = MessageSerializer(data=message_data)
 
-        elif message_type == "video" and request.FILES.get("video"):
-            from .utils import MediaProcessor
+        try:
+            serializer.is_valid(raise_exception=True)
+            message = serializer.save()
 
-            video_result = MediaProcessor.upload_video(request.FILES["video"])
-            if video_result:
-                message_data["video"] = video_result.get("video_url")
+            # Notify via WebSocket
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"room_{room.id}",
+                {"type": "chat_message", "message": serializer.data},
+            )
 
-        elif message_type == "audio" and request.FILES.get("audio"):
-            from .utils import MediaProcessor
-
-            audio_url = MediaProcessor.upload_audio(request.FILES["audio"])
-            if audio_url:
-                message_data["audio"] = audio_url
-
-        # Create the message
-        message = Message.objects.create(**message_data)
-
-        # Notify via WebSocket
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"room_{room.id}",
-            {"type": "chat_message", "message": MessageSerializer(message).data},
-        )
-
-        return Response(MessageSerializer(message).data, status=status.HTTP_201_CREATED)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class RoomViewSet(viewsets.ModelViewSet):
