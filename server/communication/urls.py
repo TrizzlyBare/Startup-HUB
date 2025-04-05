@@ -3,12 +3,16 @@ from rest_framework.routers import DefaultRouter
 from .views import RoomViewSet, MessageViewSet, MediaFileViewSet
 
 router = DefaultRouter()
-router.register(r"rooms", RoomViewSet)
-router.register(r"messages", MessageViewSet)
-router.register(r"media", MediaFileViewSet)
+router.register(r"rooms", RoomViewSet, basename="room")
+router.register(r"messages", MessageViewSet, basename="message")
+router.register(r"media", MediaFileViewSet, basename="media")
 
 urlpatterns = [
     path("", include(router.urls)),
-    # Room messages
-    path("messages/", MessageViewSet.as_view({"get": "list"}), name="message-list"),
+    # Specific route for room messages
+    path(
+        "rooms/<uuid:room_id>/messages/",
+        RoomViewSet.as_view({"get": "messages"}),
+        name="room-messages",
+    ),
 ]
