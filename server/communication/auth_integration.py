@@ -13,28 +13,32 @@ class CommunicationAuthMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        # Check for authentication token in headers
-        headers = dict(scope.get("headers", []))
-        token_key = headers.get(b"authorization", b"").decode().replace("Token ", "")
+        # Extract username from route
+        username = scope["url_route"]["kwargs"].get("username")
 
-        user = None
-        if token_key:
-            user = await self.get_user_by_token(token_key)
+        # Find user by username if provided
+        if username:
+            user = await self.get_user_by_username(username)
 
-        # If no valid token, user remains unauthenticated
-        if not user:
-            scope["user"] = AnonymousUser()
-        else:
+            # Ensure user is authenticated
+            if not user or not user.is_authenticated:
+                await send(
+                    {"type": "websocket.close", "code": 4003}  # Authentication failure
+                )
+                return
+
+            # Modify scope to include authenticated user
             scope["user"] = user
 
         return await self.app(scope, receive, send)
 
     @database_sync_to_async
-    def get_user_by_token(self, token_key):
+    def get_user_by_username(self, username):
         try:
-            token = Token.objects.select_related("user").get(key=token_key)
-            if token.user.is_active:
-                return token.user
-        except Token.DoesNotExist:
-            logger.warning(f"Invalid token: {token_key}")
+            user = User.objects.get(username=username)
+            # Optional: Add additional authentication checks
+            if user.is_active:
+                return user
+        except User.DoesNotExist:
+            logger.warning(f"User not found: {username}")
         return None

@@ -15,64 +15,79 @@ from .models import Room, Participant, Message
 
 
 class CommunicationConsumer(AsyncJsonWebsocketConsumer):
+    # async def connect(self):
+    #     self.user = self.scope["user"]
+    #     self.room_id = self.scope["url_route"]["kwargs"]["room_id"]
+    #     self.room_group_name = f"room_{self.room_id}"
+    #     self.user_group_name = f"user_{self.user.id}"
+
+    #     # Verify room participation
+    #     is_participant = await self.is_room_participant()
+    #     if not is_participant:
+    #         await self.close()
+    #         return
+
+    #     # Join room and user groups
+    #     await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+    #     await self.channel_layer.group_add(self.user_group_name, self.channel_name)
+
+    #     await self.accept()
+    #     await self.update_user_presence(True)
+
     async def connect(self):
-        # Extract room_id from route
-        self.room_id = self.scope["url_route"]["kwargs"].get("room_id")
-        self.user = self.scope["user"]
+        # Extract username from route
+        username = self.scope["url_route"]["kwargs"].get("username")
 
-        # Verify room_id is not None
-        if not self.room_id:
-            logger.error(f"Connection attempt with no room_id")
-            await self.close(code=4004)  # Bad request
-            return
+        User = get_user_model()
+        try:
+            # Find user by username
+            user = await self.get_user_by_username(username)
 
-        # Verify room exists and user is a participant
-        is_participant = await self.is_room_participant()
-        if not is_participant:
-            logger.warning(
-                f"User {self.user.id} attempted to connect to room {self.room_id} without permission"
-            )
-            await self.close(code=4003)  # Authentication/permission failure
-            return
+            if not user:
+                await self.close()
+                return
 
-        # Set up room group
-        self.room_group_name = f"room_{self.room_id}"
-        self.user_group_name = f"user_{self.user.id}"
+            # Set user in scope
+            self.scope["user"] = user
+            self.user = user
 
-        # Join room and user groups
-        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-        await self.channel_layer.group_add(self.user_group_name, self.channel_name)
+            # Proceed with room setup
+            await self.setup_room(username)
 
-        await self.accept()
-        await self.update_user_presence(True)
+            await self.accept()
 
-        # Notify other participants that user has joined
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "user_joined",
-                "user_id": str(self.user.id),
-                "username": self.user.username,
-            },
-        )
+        except Exception as e:
+            logger.error(f"Connection error: {e}")
+            await self.close()
 
     @database_sync_to_async
-    def is_room_participant(self):
-        from .models import Participant, Room
+    def setup_room(self, username):
+        # Find or create direct message room
+        other_user = get_user_model().objects.get(username=username)
 
-        if not self.room_id:
-            return False
+        # Ensure consistent room naming
+        room_name = sorted([self.user.username, username])
+        room_name = f"Chat between {room_name[0]} and {room_name[1]}"
 
+        room, created = Room.objects.get_or_create(name=room_name, room_type="direct")
+
+        # Ensure participants exist
+        Participant.objects.get_or_create(user=self.user, room=room)
+        Participant.objects.get_or_create(user=other_user, room=room)
+
+        self.room_id = str(room.id)
+        self.room_group_name = f"room_{self.room_id}"
+
+        # Join room group
+        return self.channel_layer.group_add(self.room_group_name, self.channel_name)
+
+    @database_sync_to_async
+    def get_user_by_username(self, username):
+        User = get_user_model()
         try:
-            # Check if room exists and user is a participant
-            room = Room.objects.get(id=self.room_id)
-            return Participant.objects.filter(room=room, user=self.user).exists()
-        except Room.DoesNotExist:
-            logger.warning(f"Room with id {self.room_id} does not exist")
-            return False
-        except Exception as e:
-            logger.error(f"Error checking room participation: {str(e)}")
-            return False
+            return User.objects.get(username=username)
+        except User.DoesNotExist:
+            return None
 
     async def disconnect(self, close_code):
         # Leave groups
@@ -89,16 +104,24 @@ class CommunicationConsumer(AsyncJsonWebsocketConsumer):
         # Update user presence
         await self.update_user_presence(False)
 
-        # Notify others that user has left
-        if hasattr(self, "room_group_name") and hasattr(self, "user"):
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type": "user_left",
-                    "user_id": str(self.user.id),
-                    "username": self.user.username,
-                },
-            )
+    @database_sync_to_async
+    def setup_room(self, username):
+        # Find or create direct message room
+        room, created = Room.objects.get_or_create(
+            name=f"Chat between {self.user.username} and {username}", room_type="direct"
+        )
+
+        # Ensure participants exist
+        other_user = get_user_model().objects.get(username=username)
+
+        Participant.objects.get_or_create(user=self.user, room=room)
+        Participant.objects.get_or_create(user=other_user, room=room)
+
+        self.room_id = str(room.id)
+        self.room_group_name = f"room_{self.room_id}"
+
+        # Join room group
+        return self.channel_layer.group_add(self.room_group_name, self.channel_name)
 
     async def receive_json(self, content):
         message_type = content.get("type")
@@ -347,6 +370,23 @@ class CommunicationConsumer(AsyncJsonWebsocketConsumer):
             },
         )
 
+    # # Database Sync Methods
+    # @database_sync_to_async
+    # def is_room_participant(self):
+    #     from .models import Participant
+
+    #     return Participant.objects.filter(room_id=self.room_id, user=self.user).exists()
+    @database_sync_to_async
+    def is_room_participant(self):
+        from .models import Participant, Room
+
+        try:
+            # Check if room exists and user is a participant
+            room = Room.objects.get(id=self.room_id)
+            return Participant.objects.filter(room=room, user=self.user).exists()
+        except Room.DoesNotExist:
+            return False
+
     @database_sync_to_async
     def save_message(self, content, message_type, image=None, video=None, audio=None):
         from .models import Message, Room
@@ -522,24 +562,6 @@ class CommunicationConsumer(AsyncJsonWebsocketConsumer):
     async def participant_added(self, event):
         await self.send_json(
             {"type": "participant_added", "participant": event["participant"]}
-        )
-
-    async def user_joined(self, event):
-        await self.send_json(
-            {
-                "type": "user_joined",
-                "user_id": event["user_id"],
-                "username": event["username"],
-            }
-        )
-
-    async def user_left(self, event):
-        await self.send_json(
-            {
-                "type": "user_left",
-                "user_id": event["user_id"],
-                "username": event["username"],
-            }
         )
 
     async def webrtc_offer(self, event):
