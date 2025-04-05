@@ -397,78 +397,188 @@ def create_project_modal() -> rx.Component:
             rx.box(
                 rx.form(
                     rx.vstack(
-                        rx.input(
-                            placeholder="Project Name",
-                            name="name",
-                            required=True,
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                        # Project name field with label
+                        rx.vstack(
+                            rx.text("Project Name", class_name="font-medium text-gray-700 mb-1"),
+                            rx.input(
+                                placeholder="Enter your project name",
+                                name="name",
+                                required=True,
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                            ),
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
-                        rx.text_area(
-                            placeholder="Project Description",
-                            name="description",
-                            required=True,
-                            height="120px",
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                        
+                        # Description field with label
+                        rx.vstack(
+                            rx.text("Description", class_name="font-medium text-gray-700 mb-1"),
+                            rx.text_area(
+                                placeholder="Describe your project in detail",
+                                name="description",
+                                required=True,
+                                height="120px",
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                            ),
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
-                        rx.text_area(
-                            placeholder="Elevator Pitch",
-                            name="pitch",
-                            required=True,
-                            height="100px",
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                        
+                        # Pitch field with label
+                        rx.vstack(
+                            rx.text("Elevator Pitch", class_name="font-medium text-gray-700 mb-1"),
+                            rx.text_area(
+                                placeholder="Brief, compelling summary of your project",
+                                name="pitch",
+                                required=True,
+                                height="100px",
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                            ),
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
-                        rx.select(
-                            ["IDEA", "MVP", "BETA", "LAUNCHED", "SCALING"],
-                            placeholder="Stage",
-                            name="stage",
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                        
+                        # Two columns for stage and role
+                        rx.hstack(
+                            # Stage field with label
+                            rx.vstack(
+                                rx.text("Project Stage", class_name="font-medium text-gray-700 mb-1"),
+                                rx.select(
+                                    ["IDEA", "MVP", "BETA", "LAUNCHED", "SCALING"],
+                                    placeholder="Select stage",
+                                    name="stage",
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
+                            ),
+                            
+                            # Role field with label
+                            rx.vstack(
+                                rx.text("Your Role", class_name="font-medium text-gray-700 mb-1"),
+                                rx.select(
+                                    ["FOUNDER", "CO-FOUNDER", "TEAM_MEMBER", "INVESTOR", "ADVISOR"],
+                                    placeholder="Select your role",
+                                    name="user_role",
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
+                            ),
+                            spacing="4",
+                            width="100%",
                         ),
-                        rx.select(
-                            ["FOUNDER", "CO-FOUNDER", "TEAM_MEMBER", "INVESTOR", "ADVISOR"],
-                            placeholder="Your Role",
-                            name="user_role",
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                        
+                        # Tech Stack field with label
+                        rx.vstack(
+                            rx.text("Tech Stack", class_name="font-medium text-gray-700 mb-1"),
+                            rx.input(
+                                placeholder="e.g. React, Python, Django (comma-separated)",
+                                name="tech_stack",
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                            ),
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
-                        rx.input(
-                            placeholder="Tech Stack (comma-separated)",
-                            name="tech_stack",
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                        
+                        # Two columns for funding stage and team size
+                        rx.hstack(
+                            # Funding stage field with label
+                            rx.vstack(
+                                rx.text("Funding Stage", class_name="font-medium text-gray-700 mb-1"),
+                                rx.select(
+                                    ["Pre-seed", "Seed", "Early", "Growth", "Expansion", "Exit"],
+                                    placeholder="Select stage",
+                                    name="funding_stage",
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
+                            ),
+                            
+                            # Team size field with label
+                            rx.vstack(
+                                rx.text("Team Size", class_name="font-medium text-gray-700 mb-1"),
+                                rx.input(
+                                    placeholder="Number of people",
+                                    name="team_size",
+                                    type="number",
+                                    min_value=1,
+                                    default_value="1",
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
+                            ),
+                            spacing="4",
+                            width="100%",
                         ),
-                        rx.select(
-                            ["Pre-seed", "Seed", "Early", "Growth", "Expansion", "Exit"],
-                            placeholder="Funding Stage",
-                            name="funding_stage",
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                        
+                        # Looking for field with label
+                        rx.vstack(
+                            rx.text("Looking For", class_name="font-medium text-gray-700 mb-1"),
+                            rx.input(
+                                placeholder="e.g. Developer, Designer, Marketing (comma-separated)",
+                                name="looking_for",
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                            ),
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
-                        rx.input(
-                            placeholder="Team Size",
-                            name="team_size",
-                            type="number",
-                            min_value=1,
-                            default_value="1",
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                        
+                        # Two columns for website and investment
+                        rx.hstack(
+                            # Website field with label
+                            rx.vstack(
+                                rx.text("Website URL", class_name="font-medium text-gray-700 mb-1"),
+                                rx.input(
+                                    placeholder="https://example.com",
+                                    name="website",
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
+                            ),
+                            
+                            # Investment field with label
+                            rx.vstack(
+                                rx.text("Investment Needed ($)", class_name="font-medium text-gray-700 mb-1"),
+                                rx.input(
+                                    placeholder="e.g. 50000",
+                                    name="investment_needed",
+                                    type="number",
+                                    min_value=0,
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
+                            ),
+                            spacing="4",
+                            width="100%",
                         ),
-                        rx.input(
-                            placeholder="Looking for (comma-separated roles)",
-                            name="looking_for",
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                        ),
-                        rx.input(
-                            placeholder="Website URL",
-                            name="website",
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                        ),
-                        rx.input(
-                            placeholder="Investment Needed (amount)",
-                            name="investment_needed",
-                            type="number",
-                            min_value=0,
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                        ),
-                        rx.input(
-                            placeholder="Pitch Deck URL",
-                            name="pitch_deck",
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                        
+                        # Pitch deck field with label
+                        rx.vstack(
+                            rx.text("Pitch Deck URL", class_name="font-medium text-gray-700 mb-1"),
+                            rx.input(
+                                placeholder="Link to your presentation",
+                                name="pitch_deck",
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                            ),
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
                         
                         # Buttons
@@ -476,31 +586,33 @@ def create_project_modal() -> rx.Component:
                             rx.button(
                                 "Cancel",
                                 on_click=ProjectsState.toggle_modal,
-                                class_name="px-6 py-2 bg-red-600 hover:bg-red-700 rounded-lg",
+                                class_name="px-6 py-3 bg-gray-200 text-gray-800 hover:bg-gray-300 rounded-lg font-medium",
                             ),
                             rx.dialog.close(
                                 rx.button(
                                     "Create Project",
                                     type="submit",
-                                    class_name="px-6 py-2 bg-sky-600 text-white hover:bg-sky-700 rounded-lg",
+                                    class_name="px-6 py-3 bg-sky-600 text-white hover:bg-sky-700 rounded-lg font-medium",
                                 ),
                             ),
                             spacing="4",
                             justify="end",
                             width="100%",
-                            margin_top="6",
+                            margin_top="8",
                         ),
                         spacing="6",
-                        padding="4",
+                        padding="6",
+                        bg="white",
+                        border_radius="lg",
                     ),
                     on_submit=ProjectsState.create_project,
                     reset_on_submit=True,
                 ),
                 width="100%",
             ),
-            max_width="600px",
+            max_width="800px",
             width="90vw",
-            class_name="bg-white p-8 rounded-xl shadow-2xl border border-gray-200",
+            class_name="bg-gray-50 p-8 rounded-xl shadow-2xl border border-gray-200",
         ),
         open=ProjectsState.show_modal,
     )
@@ -516,137 +628,247 @@ def edit_project_modal() -> rx.Component:
             rx.box(
                 rx.form(
                     rx.vstack(
-                        rx.input(
-                            placeholder="Project Name",
-                            name="name",
-                            required=True,
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                ProjectsState.editing_project.name,
-                                ""
+                        # Project name field with label
+                        rx.vstack(
+                            rx.text("Project Name", class_name="font-medium text-gray-700 mb-1"),
+                            rx.input(
+                                placeholder="Enter your project name",
+                                name="name",
+                                required=True,
+                                default_value=rx.cond(
+                                    ProjectsState.editing_project,
+                                    ProjectsState.editing_project.name,
+                                    ""
+                                ),
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
                             ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
-                        rx.text_area(
-                            placeholder="Project Description",
-                            name="description",
-                            required=True,
-                            height="120px",
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                ProjectsState.editing_project.description,
-                                ""
+                        
+                        # Description field with label
+                        rx.vstack(
+                            rx.text("Description", class_name="font-medium text-gray-700 mb-1"),
+                            rx.text_area(
+                                placeholder="Describe your project in detail",
+                                name="description",
+                                required=True,
+                                height="120px",
+                                default_value=rx.cond(
+                                    ProjectsState.editing_project,
+                                    ProjectsState.editing_project.description,
+                                    ""
+                                ),
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
                             ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
-                        rx.text_area(
-                            placeholder="Elevator Pitch",
-                            name="pitch",
-                            required=True,
-                            height="100px",
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                ProjectsState.editing_project.pitch,
-                                ""
+                        
+                        # Pitch field with label
+                        rx.vstack(
+                            rx.text("Elevator Pitch", class_name="font-medium text-gray-700 mb-1"),
+                            rx.text_area(
+                                placeholder="Brief, compelling summary of your project",
+                                name="pitch",
+                                required=True,
+                                height="100px",
+                                default_value=rx.cond(
+                                    ProjectsState.editing_project,
+                                    ProjectsState.editing_project.pitch,
+                                    ""
+                                ),
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
                             ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
-                        rx.select(
-                            ["IDEA", "MVP", "BETA", "LAUNCHED", "SCALING"],
-                            placeholder="Stage",
-                            name="stage",
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                ProjectsState.editing_project.stage,
-                                "IDEA"
+                        
+                        # Two columns for stage and role
+                        rx.hstack(
+                            # Stage field with label
+                            rx.vstack(
+                                rx.text("Project Stage", class_name="font-medium text-gray-700 mb-1"),
+                                rx.select(
+                                    ["IDEA", "MVP", "BETA", "LAUNCHED", "SCALING"],
+                                    placeholder="Select stage",
+                                    name="stage",
+                                    default_value=rx.cond(
+                                        ProjectsState.editing_project,
+                                        ProjectsState.editing_project.stage,
+                                        "IDEA"
+                                    ),
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
                             ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            
+                            # Role field with label
+                            rx.vstack(
+                                rx.text("Your Role", class_name="font-medium text-gray-700 mb-1"),
+                                rx.select(
+                                    ["FOUNDER", "CO-FOUNDER", "TEAM_MEMBER", "INVESTOR", "ADVISOR"],
+                                    placeholder="Select your role",
+                                    name="user_role",
+                                    default_value=rx.cond(
+                                        ProjectsState.editing_project,
+                                        ProjectsState.editing_project.user_role,
+                                        "FOUNDER"
+                                    ),
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
+                            ),
+                            spacing="4",
+                            width="100%",
                         ),
-                        rx.select(
-                            ["FOUNDER", "CO-FOUNDER", "TEAM_MEMBER", "INVESTOR", "ADVISOR"],
-                            placeholder="Your Role",
-                            name="user_role",
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                ProjectsState.editing_project.user_role,
-                                "FOUNDER"
+                        
+                        # Tech Stack field with label
+                        rx.vstack(
+                            rx.text("Tech Stack", class_name="font-medium text-gray-700 mb-1"),
+                            rx.input(
+                                placeholder="e.g. React, Python, Django (comma-separated)",
+                                name="tech_stack",
+                                default_value=rx.cond(
+                                    ProjectsState.editing_project,
+                                    ",".join(ProjectsState.editing_project.tech_stack),
+                                    ""
+                                ),
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
                             ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
-                        rx.input(
-                            placeholder="Tech Stack (comma-separated)",
-                            name="tech_stack",
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                ",".join(ProjectsState.editing_project.tech_stack),
-                                ""
+                        
+                        # Two columns for funding stage and team size
+                        rx.hstack(
+                            # Funding stage field with label
+                            rx.vstack(
+                                rx.text("Funding Stage", class_name="font-medium text-gray-700 mb-1"),
+                                rx.select(
+                                    ["Pre-seed", "Seed", "Early", "Growth", "Expansion", "Exit"],
+                                    placeholder="Select stage",
+                                    name="funding_stage",
+                                    default_value=rx.cond(
+                                        ProjectsState.editing_project,
+                                        ProjectsState.editing_project.funding_stage,
+                                        "Pre-seed"
+                                    ),
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
                             ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            
+                            # Team size field with label
+                            rx.vstack(
+                                rx.text("Team Size", class_name="font-medium text-gray-700 mb-1"),
+                                rx.input(
+                                    placeholder="Number of people",
+                                    name="team_size",
+                                    type="number",
+                                    min_value=1,
+                                    default_value=rx.cond(
+                                        ProjectsState.editing_project,
+                                        str(ProjectsState.editing_project.team_size),
+                                        "1"
+                                    ),
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
+                            ),
+                            spacing="4",
+                            width="100%",
                         ),
-                        rx.select(
-                            ["Pre-seed", "Seed", "Early", "Growth", "Expansion", "Exit"],
-                            placeholder="Funding Stage",
-                            name="funding_stage",
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                ProjectsState.editing_project.funding_stage,
-                                "Pre-seed"
+                        
+                        # Looking for field with label
+                        rx.vstack(
+                            rx.text("Looking For", class_name="font-medium text-gray-700 mb-1"),
+                            rx.input(
+                                placeholder="e.g. Developer, Designer, Marketing (comma-separated)",
+                                name="looking_for",
+                                default_value=rx.cond(
+                                    ProjectsState.editing_project,
+                                    ",".join(ProjectsState.editing_project.looking_for),
+                                    ""
+                                ),
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
                             ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
-                        rx.input(
-                            placeholder="Team Size",
-                            name="team_size",
-                            type="number",
-                            min_value=1,
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                str(ProjectsState.editing_project.team_size),
-                                "1"
+                        
+                        # Two columns for website and investment
+                        rx.hstack(
+                            # Website field with label
+                            rx.vstack(
+                                rx.text("Website URL", class_name="font-medium text-gray-700 mb-1"),
+                                rx.input(
+                                    placeholder="https://example.com",
+                                    name="website",
+                                    default_value=rx.cond(
+                                        ProjectsState.editing_project,
+                                        ProjectsState.editing_project.website,
+                                        ""
+                                    ),
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
                             ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            
+                            # Investment field with label
+                            rx.vstack(
+                                rx.text("Investment Needed ($)", class_name="font-medium text-gray-700 mb-1"),
+                                rx.input(
+                                    placeholder="e.g. 50000",
+                                    name="investment_needed",
+                                    type="number",
+                                    min_value=0,
+                                    default_value=rx.cond(
+                                        ProjectsState.editing_project,
+                                        str(ProjectsState.editing_project.investment_needed),
+                                        "0"
+                                    ),
+                                    class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
+                                ),
+                                align_items="start",
+                                width="100%",
+                                spacing="0",
+                            ),
+                            spacing="4",
+                            width="100%",
                         ),
-                        rx.input(
-                            placeholder="Looking for (comma-separated roles)",
-                            name="looking_for",
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                ",".join(ProjectsState.editing_project.looking_for),
-                                ""
+                        
+                        # Pitch deck field with label
+                        rx.vstack(
+                            rx.text("Pitch Deck URL", class_name="font-medium text-gray-700 mb-1"),
+                            rx.input(
+                                placeholder="Link to your presentation",
+                                name="pitch_deck",
+                                default_value=rx.cond(
+                                    ProjectsState.editing_project,
+                                    ProjectsState.editing_project.pitch_deck,
+                                    ""
+                                ),
+                                class_name="w-full p-3 border-2 border-gray-300 rounded-lg bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-200 text-base",
                             ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                        ),
-                        rx.input(
-                            placeholder="Website URL",
-                            name="website",
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                ProjectsState.editing_project.website,
-                                ""
-                            ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                        ),
-                        rx.input(
-                            placeholder="Investment Needed (amount)",
-                            name="investment_needed",
-                            type="number",
-                            min_value=0,
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                str(ProjectsState.editing_project.investment_needed),
-                                "0"
-                            ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
-                        ),
-                        rx.input(
-                            placeholder="Pitch Deck URL",
-                            name="pitch_deck",
-                            default_value=rx.cond(
-                                ProjectsState.editing_project,
-                                ProjectsState.editing_project.pitch_deck,
-                                ""
-                            ),
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            align_items="start",
+                            width="100%",
+                            spacing="0",
                         ),
                         
                         # Buttons
@@ -654,31 +876,33 @@ def edit_project_modal() -> rx.Component:
                             rx.button(
                                 "Cancel",
                                 on_click=ProjectsState.toggle_edit_modal,
-                                class_name="px-6 py-2 bg-red-600 hover:bg-red-700 rounded-lg",
+                                class_name="px-6 py-3 bg-gray-200 text-gray-800 hover:bg-gray-300 rounded-lg font-medium",
                             ),
                             rx.dialog.close(
                                 rx.button(
                                     "Save Changes",
                                     type="submit",
-                                    class_name="px-6 py-2 bg-sky-600 text-white hover:bg-sky-700 rounded-lg",
+                                    class_name="px-6 py-3 bg-sky-600 text-white hover:bg-sky-700 rounded-lg font-medium",
                                 ),
                             ),
                             spacing="4",
                             justify="end",
                             width="100%",
-                            margin_top="6",
+                            margin_top="8",
                         ),
                         spacing="6",
-                        padding="4",
+                        padding="6",
+                        bg="white",
+                        border_radius="lg",
                     ),
                     on_submit=ProjectsState.edit_project,
                     reset_on_submit=True,
                 ),
                 width="100%",
             ),
-            max_width="600px",
+            max_width="800px",
             width="90vw",
-            class_name="bg-white p-8 rounded-xl shadow-2xl border border-gray-200",
+            class_name="bg-gray-50 p-8 rounded-xl shadow-2xl border border-gray-200",
         ),
         open=ProjectsState.show_edit_modal,
     )
