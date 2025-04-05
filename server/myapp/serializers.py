@@ -30,10 +30,19 @@ class UserBasicSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {"profile_picture": {"write_only": True}}
 
-    def get_profile_picture_url(self, obj):
-        if obj.profile_picture:
-            return obj.profile_picture.url
-        return None
+    def get_user_profile_picture(self, obj):
+        try:
+            return obj.user.profile_picture.url
+        except ValueError as e:
+            # Configure Cloudinary if needed
+            from .utils.cloudinary_helper import CloudinaryHelper
+
+            CloudinaryHelper.configure()
+            # Try again
+            return obj.user.profile_picture.url
+        except Exception:
+            # Return a default URL or None if profile picture can't be retrieved
+            return None
 
 
 class StartupImageSerializer(serializers.ModelSerializer):
