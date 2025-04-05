@@ -112,47 +112,63 @@ class SearchState(rx.State):
                     results = data.get("results", []) if isinstance(data, dict) else data
                     print(f"Number of results: {len(results)}")
                     
-                    self.search_results = [
-                        StartupGroup(
-                            id=item["id"],
-                            username=item["username"],
-                            user_profile_picture=item["user_profile_picture"],
-                            owner=Owner(
-                                id=item["owner"]["id"],
-                                username=item["owner"]["username"],
-                                profile_picture=item["owner"]["profile_picture"]
-                            ),
-                            name=item["name"],
-                            stage=item["stage"],
-                            user_role=item["user_role"],
-                            user_role_display=item["user_role_display"],
-                            pitch=item["pitch"],
-                            description=item["description"],
-                            skills=item["skills"],
-                            skills_list=item["skills_list"],
-                            looking_for=item["looking_for"],
-                            looking_for_list=item["looking_for_list"],
-                            pitch_deck_url=item["pitch_deck_url"],
-                            images=item["images"],
-                            website=item["website"],
-                            funding_stage=item["funding_stage"],
-                            investment_needed=item["investment_needed"],
-                            members=[
-                                Member(
-                                    id=member["id"],
-                                    username=member["username"],
-                                    profile_picture_url=member["profile_picture_url"],
-                                    skills=member["skills"],
-                                    industry=member["industry"]
-                                )
-                                for member in item["members"]
-                            ],
-                            member_count=item["member_count"],
-                            created_at=item["created_at"],
-                            updated_at=item["updated_at"]
-                        )
-                        for item in results
-                    ]
+                    self.search_results = []
+                    for item in results:
+                        try:
+                            # Convert images to list of strings if needed
+                            images_list = []
+                            if "images" in item:
+                                if isinstance(item["images"], list):
+                                    images_list = [str(img) for img in item["images"]]
+                                else:
+                                    # If images is not a list, make it an empty list
+                                    images_list = []
+                            
+                            # Create StartupGroup with validated data
+                            group = StartupGroup(
+                                id=item["id"],
+                                username=item["username"],
+                                user_profile_picture=item["user_profile_picture"],
+                                owner=Owner(
+                                    id=item["owner"]["id"],
+                                    username=item["owner"]["username"],
+                                    profile_picture=item["owner"]["profile_picture"]
+                                ),
+                                name=item["name"],
+                                stage=item["stage"],
+                                user_role=item["user_role"],
+                                user_role_display=item["user_role_display"],
+                                pitch=item["pitch"],
+                                description=item["description"],
+                                skills=item["skills"],
+                                skills_list=item["skills_list"],
+                                looking_for=item["looking_for"],
+                                looking_for_list=item["looking_for_list"],
+                                pitch_deck_url=item["pitch_deck_url"],
+                                images=images_list,
+                                website=item["website"],
+                                funding_stage=item["funding_stage"],
+                                investment_needed=item["investment_needed"],
+                                members=[
+                                    Member(
+                                        id=member["id"],
+                                        username=member["username"],
+                                        profile_picture_url=member["profile_picture_url"],
+                                        skills=member["skills"],
+                                        industry=member["industry"]
+                                    )
+                                    for member in item["members"]
+                                ],
+                                member_count=item["member_count"],
+                                created_at=item["created_at"],
+                                updated_at=item["updated_at"]
+                            )
+                            self.search_results.append(group)
+                        except Exception as e:
+                            print(f"Error processing result item: {str(e)}")
+                            # Continue processing other items even if one fails
+                            continue
+                            
                     print(f"Successfully mapped {len(self.search_results)} projects")
                 elif response.status_code == 401:
                     print("Authentication failed")
@@ -284,7 +300,7 @@ def show_startup(startup: StartupGroup):
                     spacing="4",
                 ),
                 width="100%",
-                align="center",
+                align_items="center",
             ),
             spacing="4",
             height="100%",
@@ -522,41 +538,48 @@ def search_page() -> rx.Component:
                         spacing="4",
                         width="100%",
                     ),
-                    rx.cond(
-                        SearchState.is_loading,
-                        rx.spinner(),
+                    # Add a spacer here to create more vertical distance
+                    rx.box(height="24px"), 
+                    # Wrap the results in a scrollable container
+                    rx.box(
                         rx.cond(
-                            SearchState.search_results,
-                            rx.grid(
-                                rx.foreach(
-                                    SearchState.search_results,
-                                    lambda startup: rx.box(
-                                        show_startup(startup),
-                                        width="45%",
+                            SearchState.is_loading,
+                            rx.center(rx.spinner(size="3"), width="100%", padding="40px"),
+                            rx.cond(
+                                SearchState.search_results,
+                                rx.grid(
+                                    rx.foreach(
+                                        SearchState.search_results,
+                                        lambda startup: rx.box(
+                                            show_startup(startup),
+                                            width="100%",
+                                        ),
                                     ),
+                                    columns="2",
+                                    template_columns="repeat(2, 1fr)",
+                                    gap="40px",
+                                    width="100%",
                                 ),
-                                columns="2",
-                                spacing="8",
-                                width="100%",
-                                template_columns="repeat(2, 1fr)",
-                                gap="16",
-                                padding="16",
+                                rx.text("No results found. Try a different search term.", color="gray.300", padding="40px"),
                             ),
-                            rx.text("No results found. Try a different search term.", color="gray.300"),
                         ),
+                        width="100%",
+                        height="calc(100vh - 200px)",  # Fixed height with space for header and search
+                        overflow_y="auto",  # Enable vertical scrolling
+                        padding_top="10px", 
+                        padding_bottom="40px",
                     ),
-                    spacing="8",
+                    spacing="4",
                     width="100%",
+                    height="100%",
                     align="center",
-                    justify="center",
                 ),
                 py=8,
                 px="8",
                 max_width="1400px",
-                align="center",
-                justify="center",
+                height="100%",
             ),
-            class_name="flex-1 min-h-screen bg-gray-800 flex flex-col justify-center items-center px-4",
+            class_name="flex-1 min-h-screen bg-gray-800 flex flex-col items-center px-4 overflow-hidden",
         ),
         details_modal(),
         align_items="stretch",

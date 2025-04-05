@@ -126,6 +126,9 @@ class MatchState(rx.State):
     profile_data: Optional[Profile] = None
     is_profile_route: bool = False
     
+    show_profile_popup: bool = False
+    view_profile_data: Optional[Dict[str, Any]] = None
+    
     def debug_api_request(self, method: str, url: str, headers: Dict, json_data: Optional[Dict] = None):
         """Debug function to print API request details."""
         print("\n=== API Request Debug ===")
@@ -1672,6 +1675,68 @@ class MatchState(rx.State):
         import reflex as rx
         return rx.redirect(f"/chat/room/{room_id}")
 
+    @rx.event
+    async def view_user_profile(self):
+        """View the profile details of the current user."""
+        try:
+            # Get token from AuthState
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if not auth_token:
+                    self.error_message = "Authentication required. Please log in."
+                    return
+            
+            # Get current profile
+            if self.current_profile_index >= len(self.profiles):
+                self.error_message = "No profile to view."
+                return
+                
+            current_profile = self.profiles[self.current_profile_index]
+            print(f"\nViewing profile: {current_profile}")
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            # Get user profile details
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.API_BASE_URL}/auth/profile/{current_profile['username']}/",
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    profile_data = response.json()
+                    
+                    # Convert skills and past projects to string format that can be displayed safely
+                    if "skills" in profile_data and profile_data["skills"]:
+                        profile_data["skills_formatted"] = profile_data["skills"]
+                    else:
+                        profile_data["skills_formatted"] = "No skills listed"
+                        
+                    if "past_projects" in profile_data and profile_data["past_projects"]:
+                        profile_data["past_projects_formatted"] = profile_data["past_projects"]
+                    else:
+                        profile_data["past_projects_formatted"] = "No past projects listed"
+                    
+                    self.view_profile_data = profile_data
+                    self.show_profile_popup = True
+                else:
+                    self.error_message = f"Failed to load profile: {response.text}"
+        except Exception as e:
+            self.error_message = f"Error viewing profile: {str(e)}"
+            print(f"Error in view_user_profile: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def close_profile_popup(self):
+        """Close the profile popup."""
+        self.show_profile_popup = False
+
 def profile_card() -> rx.Component:
     return rx.cond(
         MatchState.loading,
@@ -1834,6 +1899,7 @@ def chat_interface() -> rx.Component:
     )
 
 def action_buttons() -> rx.Component:
+    """Action buttons for like, dislike, etc."""
     return rx.hstack(
         rx.button(
             rx.icon("arrow-left", class_name="drop-shadow-lg"),
@@ -1843,7 +1909,7 @@ def action_buttons() -> rx.Component:
         rx.button(
             rx.icon("x", class_name="drop-shadow-lg"),
             on_click=MatchState.dislike_profile,
-            class_name="rounded-full w-14 h-14 bg-[#E74C3C] text-white hover:bg-CB4335 transform transition-all hover:scale-150",
+            class_name="rounded-full w-12 h-12 bg-red-400 text-white hover:bg-red-500 transform transition-all hover:scale-110",
         ),
         rx.button(
             rx.icon("star", class_name="drop-shadow-lg"),
@@ -1856,6 +1922,11 @@ def action_buttons() -> rx.Component:
             class_name="rounded-full w-14 h-14 bg-green-400 text-white hover:bg-green-500 transform transition-all hover:scale-150",
         ),
         rx.button(
+            rx.icon("eye", class_name="drop-shadow-lg"),
+            on_click=MatchState.view_user_profile,
+            class_name="rounded-full w-12 h-12 bg-purple-400 text-white hover:bg-purple-500 transform transition-all hover:scale-110",
+        ),
+        rx.button(
             rx.icon("message-circle", class_name="drop-shadow-lg"),
             on_click=MatchState.start_chat,
             class_name="rounded-full w-12 h-12 bg-orange-400 text-white hover:bg-orange-500 transform transition-all hover:scale-110",
@@ -1863,6 +1934,201 @@ def action_buttons() -> rx.Component:
         spacing="3",
         justify="center",
         padding_y="6",
+    )
+
+def profile_popup() -> rx.Component:
+    """Profile popup to display user details."""
+    return rx.cond(
+        MatchState.show_profile_popup,
+        rx.box(
+            rx.center(
+                rx.vstack(
+                    rx.hstack(
+                        rx.heading("User Profile", size="7",class_name="text-sky-600"),
+                        rx.spacer(),
+                        rx.button(
+                            rx.icon("x"),
+                            on_click=MatchState.close_profile_popup,
+                            size="1",
+                            color="red",
+                        ),
+                        width="100%",
+                    ),
+                    rx.divider(),
+                    rx.cond(
+                        MatchState.view_profile_data is not None,
+                        rx.vstack(
+                            rx.avatar(
+                                name=f"{MatchState.view_profile_data.get('first_name', '')} {MatchState.view_profile_data.get('last_name', '')}",
+                                src=MatchState.view_profile_data.get("profile_picture_url", ""),
+                                size="8",
+                            ),
+                            rx.heading(
+                                f"{MatchState.view_profile_data.get('first_name', '')} {MatchState.view_profile_data.get('last_name', '')}",
+                                size="4",
+                                color="blue.700",
+                                margin_top="2",
+                            ),
+                            rx.text(f"@{MatchState.view_profile_data.get('username', '')}", 
+                                color="gray",
+                                font_size="1.1em",
+                                margin_bottom="2",
+                            ),
+                            
+                            rx.divider(),
+                            
+                            rx.box(
+                                rx.text("Bio:", 
+                                    font_weight="bold", 
+                                    font_size="1.2em",
+                                    color="blue",
+                                ),
+                                rx.text(
+                                    MatchState.view_profile_data.get("bio", "No bio available"),
+                                    font_size="1.1em",
+                                    color="gray",
+                                    padding="3",
+                                    bg="gray.50",
+                                    border_radius="md",
+                                    border="1px solid",
+                                    border_color="gray",
+                                ),
+                                width="100%",
+                                margin_top="3",
+                                margin_bottom="4",
+                            ),
+                            
+                            rx.hstack(
+                                rx.box(
+                                    rx.text("Industry:", 
+                                        font_weight="bold", 
+                                        font_size="1.2em",
+                                        color="blue",
+                                    ),
+                                    rx.text(
+                                        MatchState.view_profile_data.get("industry", "Not specified"),
+                                        font_size="1.1em",
+                                        color="gray",
+                                        padding="3",
+                                        bg="gray.20",
+                                        border_radius="md",
+                                        border="1px solid",
+                                        border_color="gray",
+                                        width="100%",
+                                    ),
+                                    width="50%",
+                                ),
+                                rx.box(
+                                    rx.text("Experience:", 
+                                        font_weight="bold", 
+                                        font_size="1.2em",
+                                        color="blue",
+                                    ),
+                                    rx.text(
+                                        MatchState.view_profile_data.get("experience", "Not specified"),
+                                        font_size="1.1em",
+                                        color="gray",
+                                        padding="3",
+                                        bg="gray.50",
+                                        border_radius="md",
+                                        border="1px solid",
+                                        border_color="gray",
+                                        width="100%",
+                                    ),
+                                    width="50%",
+                                ),
+                                width="100%",
+                                margin_bottom="4",
+                                spacing="4",
+                            ),
+                            
+                            rx.box(
+                                rx.text("Skills:", 
+                                    font_weight="bold", 
+                                    font_size="1.2em",
+                                    color="blue",
+                                ),
+                                rx.text(
+                                    MatchState.view_profile_data.get("skills_formatted", "No skills listed"),
+                                    font_size="1.1em",
+                                    color="gray",
+                                    padding="3",
+                                    bg="gray.50",
+                                    border_radius="md",
+                                    border="1px solid",
+                                    border_color="gray.200",
+                                ),
+                                width="100%",
+                                margin_bottom="4",
+                            ),
+                            
+                            rx.box(
+                                rx.text("Past Projects:", 
+                                    font_weight="bold", 
+                                    font_size="1.2em",
+                                    color="blue",
+                                ),
+                                rx.text(
+                                    MatchState.view_profile_data.get("past_projects_formatted", "No past projects listed"),
+                                    font_size="1.1em",
+                                    color="gray",
+                                    padding="3",
+                                    bg="gray.50",
+                                    border_radius="md",
+                                    border="1px solid",
+                                    border_color="gray",
+                                ),
+                                width="100%",
+                                margin_bottom="4",
+                            ),
+                            
+                            rx.box(
+                                rx.text("Career Summary:", 
+                                    font_weight="bold", 
+                                    font_size="1.2em",
+                                    color="blue",
+                                ),
+                                rx.text(
+                                    MatchState.view_profile_data.get("career_summary", "No career summary"),
+                                    font_size="1.1em",
+                                    color="gray",
+                                    padding="3",
+                                    bg="gray.50",
+                                    border_radius="md",
+                                    border="1px solid",
+                                    border_color="gray.200",
+                                ),
+                                width="100%",
+                            ),
+                            
+                            width="100%",
+                            align_items="center",
+                            spacing="4",
+                            padding="4",
+                        ),
+                        rx.center(
+                            rx.spinner(),
+                            height="200px",
+                        ),
+                    ),
+                    width="100%",
+                    spacing="4",
+                    padding="6",
+                    max_width="700px",
+                    bg="white",
+                    border_radius="lg",
+                    box_shadow="xl",
+                ),
+                position="fixed",
+                top="0",
+                left="0",
+                width="100%",
+                height="100%",
+                z_index="1000",
+                bg="rgba(0,0,0,0.7)",
+            ),
+        ),
+        rx.fragment(),
     )
 
 def match_page() -> rx.Component:
@@ -1922,6 +2188,7 @@ def match_page() -> rx.Component:
             class_name="flex-1 min-h-screen bg-gray-800 flex flex-col justify-center items-center",
         ),
         chat_interface(),
+        profile_popup(),  # Add the profile popup component
         spacing="0",
         width="full",
         height="100vh",
