@@ -85,16 +85,23 @@ class DirectRoomView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Get user model and validate the recipient exists
+        # Get user model
         User = get_user_model()
+
+        # Try to find the user by ID or username
         try:
-            recipient = User.objects.get(id=recipient_id)
+            # First try to convert to int and look up by ID
+            try:
+                numeric_id = int(recipient_id)
+                recipient = User.objects.get(id=numeric_id)
+            except ValueError:
+                # If conversion to int fails, try looking up by username
+                recipient = User.objects.get(username=recipient_id)
         except User.DoesNotExist:
             return Response(
-                {"error": f"User with id {recipient_id} does not exist"},
+                {"error": f"User with id or username '{recipient_id}' does not exist"},
                 status=status.HTTP_404_NOT_FOUND,
             )
-
         # Check for existing direct message room
         existing_room = (
             Room.objects.filter(
@@ -589,6 +596,7 @@ class FindDirectRoomView(APIView):
                 {"error": f"Failed to process request: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
 
 class UserRoomsView(APIView):
     """Get all rooms the user is a participant in, organized by type"""
