@@ -41,6 +41,12 @@ class ContactLinkSerializer(serializers.ModelSerializer):
         return value
 
 
+class TokenByUsernameSerializer(serializers.Serializer):
+    """Serializer for retrieving a token by username"""
+
+    username = serializers.CharField(required=True)
+
+
 class BaseUserSerializer(serializers.ModelSerializer):
     """Base serializer with common user fields"""
 

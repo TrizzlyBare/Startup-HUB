@@ -22,6 +22,7 @@ from .views import (
     PasswordResetConfirmView,
     # Token Views
     GetTokenView,
+    GetTokenByUsernameView,  # Make sure this is imported
     # Career Summary
     CareerSummaryView,
     UserContactLinksAPIView,
@@ -88,8 +89,13 @@ urlpatterns = [
         name="password-reset-confirm",
     ),
     # Token Endpoints
-    path("token/", GetTokenView.as_view(), name="get-token"),
     path("token-debug/", token_debug, name="token-debug"),
+    path("token/", GetTokenView.as_view(), name="get-token"),
+    path(
+        "token/<str:username>/",
+        GetTokenByUsernameView.as_view(),
+        name="get-token-by-username",
+    ),
     # Auth Debug Endpoint
     path("auth-debug/", AuthDebugView.as_view(), name="auth-debug"),
     # API Documentation

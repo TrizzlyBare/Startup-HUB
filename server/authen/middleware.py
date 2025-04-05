@@ -19,6 +19,8 @@ class BearerTokenAuthMiddleware(MiddlewareMixin):
                 r"^/admin/",
                 r"^/api/auth/register/",
                 r"^/api/auth/login/",
+                r"^/api/auth/token/$",  # Original token endpoint
+                r"^/api/auth/token/[^/]+/?$",  # New token endpoint with username
                 r"^/api/register/",
                 r"^/api/login/",
                 r"^/swagger/",
@@ -27,6 +29,10 @@ class BearerTokenAuthMiddleware(MiddlewareMixin):
             ]
         ):
             return None
+
+        # Rest of the middleware implementation...
+
+        # Rest of your middleware code...
 
         # Check Authorization header first (various formats)
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")

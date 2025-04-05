@@ -15,6 +15,7 @@ from django.http import Http404
 from django.db.models import Q
 from .serializers import (
     ContactLinkSerializer,
+    TokenByUsernameSerializer,
     UserSerializer,
     UserInfoSerializer,
     LoginSerializer,
@@ -464,6 +465,7 @@ class GetTokenView(generics.GenericAPIView):
 
     authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
+    serializer_class = TokenByUsernameSerializer
 
     def get(self, request, *args, **kwargs):
         """
@@ -484,8 +486,39 @@ class GetTokenView(generics.GenericAPIView):
         )
 
 
-# Get a logger for authentication debugging
-logger = logging.getLogger("auth_debug")
+class GetTokenByUsernameView(generics.GenericAPIView):
+    """Retrieve or create a token for a user by username from URL path"""
+
+    authentication_classes = []  # No authentication required for this endpoint
+    permission_classes = [AllowAny]  # Allow anyone to request a token
+    serializer_class = TokenByUsernameSerializer
+
+    def get(self, request, username, *args, **kwargs):
+        """
+        Get a token for a user by username from URL path
+        """
+        try:
+            # Get the user by username
+            user = CustomUser.objects.get(username=username)
+
+            # Get or create token
+            token, created = Token.objects.get_or_create(user=user)
+
+            return Response(
+                {
+                    "token": token.key,
+                    "token_type": "Bearer",
+                    "auth_header": f"Bearer {token.key}",
+                    "user_id": user.id,
+                    "username": user.username,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except CustomUser.DoesNotExist:
+            return Response(
+                {"error": f"User with username '{username}' not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
 
 class AuthDebugView(generics.GenericAPIView):
