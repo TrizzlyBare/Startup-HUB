@@ -39,4 +39,12 @@ urlpatterns = [
     path("find-group-rooms/", FindGroupRoomsView.as_view(), name="find-group-rooms"),
     path("find-room-by-name/", FindRoomByNameView.as_view(), name="find-room-by-name"),
     path("my-rooms/", UserRoomsView.as_view(), name="my-rooms"),
+    path(
+        "rooms/create_direct_chat/", DirectRoomView.as_view(), name="create-direct-chat"
+    ),
+    path(
+        "rooms/<uuid:room_id>/send_message/",
+        RoomMessagesView.as_view(),
+        name="send-room-message",
+    ),
 ]
