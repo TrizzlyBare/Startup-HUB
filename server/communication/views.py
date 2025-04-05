@@ -108,14 +108,14 @@ class RoomViewSet(viewsets.ModelViewSet):
     def create_direct_message(self, request):
         recipient_id = request.data.get("recipient_id")
 
-        # Add validation for recipient_id
+        # Validate recipient_id
         if not recipient_id:
             return Response(
                 {"error": "recipient_id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Validate that recipient exists
+        # Get user model and validate the recipient exists
         User = get_user_model()
         try:
             recipient = User.objects.get(id=recipient_id)
@@ -130,7 +130,7 @@ class RoomViewSet(viewsets.ModelViewSet):
             Room.objects.filter(
                 room_type="direct", communication_participants__user=request.user
             )
-            .filter(communication_participants__user_id=recipient_id)
+            .filter(communication_participants__user=recipient)
             .first()
         )
 
@@ -144,11 +144,9 @@ class RoomViewSet(viewsets.ModelViewSet):
             room_type="direct",
         )
 
-        # Add participants
+        # Add participants using actual user objects
         Participant.objects.create(user=request.user, room=room)
-        Participant.objects.create(
-            user=recipient, room=room
-        )  # Use recipient object instead of just ID
+        Participant.objects.create(user=recipient, room=room)
 
         serializer = self.get_serializer(room)
         return Response(serializer.data)
