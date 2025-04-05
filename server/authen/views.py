@@ -438,39 +438,6 @@ class GetTokenView(generics.GenericAPIView):
         )
 
 
-class GetTokenByUsernameView(generics.GenericAPIView):
-    """Retrieve a user's token by username"""
-
-    authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
-    permission_classes = [AllowAny]  # Allow without authentication for chat functionality
-
-    def get(self, request, username, *args, **kwargs):
-        """
-        Get or create an auth token for a user specified by username
-        """
-        try:
-            user = CustomUser.objects.get(username=username)
-            # Create or retrieve token
-            token, created = Token.objects.get_or_create(user=user)
-            
-            return Response(
-                {
-                    "token": token.key,
-                    "token_type": "Bearer",
-                    "auth_header": f"Bearer {token.key}",
-                    "created": created,
-                    "user_id": user.id,
-                    "username": user.username,
-                },
-                status=status.HTTP_200_OK,
-            )
-        except CustomUser.DoesNotExist:
-            return Response(
-                {"error": f"User with username '{username}' not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-
 # Get a logger for authentication debugging
 logger = logging.getLogger("auth_debug")
 
