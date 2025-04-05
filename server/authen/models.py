@@ -94,3 +94,13 @@ class CustomUser(AbstractUser):
 
     def __str__(self):
         return self.username
+
+
+class ContactLink(models.Model):
+    user = models.ForeignKey(
+        "CustomUser", related_name="contact_links", on_delete=models.CASCADE
+    )
+    title = models.CharField(
+        max_length=100, help_text="Link title (e.g., LinkedIn, GitHub)"
+    )
+    url = models.URLField(help_text="URL to contact resource")

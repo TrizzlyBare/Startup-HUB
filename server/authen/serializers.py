@@ -307,3 +307,51 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         """
         validate_password(value)
         return value
+
+
+class ContactLinkSerializer(serializers.ModelSerializer):
+    """
+    Serializer for contact links with validation
+    """
+
+    id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = ContactLink
+        fields = ["id", "title", "url"]
+        read_only_fields = ["id"]
+
+    def validate_url(self, value):
+        """
+        Validate that the URL is a valid web address
+        """
+        from django.core.validators import URLValidator
+        from django.core.exceptions import ValidationError
+
+        url_validator = URLValidator()
+        try:
+            url_validator(value)
+        except ValidationError:
+            raise serializers.ValidationError("Enter a valid URL.")
+        return value
+
+    def validate_title(self, value):
+        """
+        Validate the title
+        """
+        if not value:
+            raise serializers.ValidationError("Title cannot be empty.")
+        if len(value) > 100:
+            raise serializers.ValidationError(
+                "Title cannot be longer than 100 characters."
+            )
+        return value
+
+    def create(self, validated_data):
+        """
+        Create a new contact link with explicit user from context if not provided
+        """
+        user = validated_data.get("user")
+        if not user and "request" in self.context:
+            validated_data["user"] = self.context["request"].user
+        return super().create(validated_data)

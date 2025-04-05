@@ -809,11 +809,30 @@ class ContactLinkViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing contact links
     Provides CRUD operations for contact links
+
+    Endpoints:
+    - GET /contact-links/ - List current user's contact links
+    - POST /contact-links/ - Create a new contact link
+    - GET /contact-links/{id}/ - Get a specific contact link
+    - PUT/PATCH /contact-links/{id}/ - Update a contact link
+    - DELETE /contact-links/{id}/ - Delete a contact link
+    - GET /contact-links/my_links/ - Get current user's links (alias)
+    - GET /contact-links/user/?username=X - Get links for username X
+    - GET /contact-links/username/{username}/ - Get links for username (path-based)
     """
 
     serializer_class = ContactLinkSerializer
     authentication_classes = [BearerTokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """
+        Dynamic permissions:
+        - Public access for retrieving links by username
+        - Authentication required for all other operations
+        """
+        if self.action == "retrieve_by_username":
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def get_queryset(self):
         """
@@ -879,11 +898,17 @@ class ContactLinkViewSet(viewsets.ModelViewSet):
             )
         return super().destroy(request, *args, **kwargs)
 
-    @action(detail=False, methods=["get"], url_path="username/(?P<username>[^/.]+)")
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="username/(?P<username>[^/.]+)",
+        permission_classes=[AllowAny],
+    )
     def retrieve_by_username(self, request, username=None):
         """
         Get contact links for a specific username.
         This explicitly handles the URL path with username parameter.
+        This endpoint is public and doesn't require authentication.
         """
         try:
             user = CustomUser.objects.get(username=username)

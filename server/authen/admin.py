@@ -90,6 +90,9 @@ class CustomUserAdmin(UserAdmin):
     )
 
 
+# Only register ContactLink once
+# There seems to be a duplicate registration somewhere
+# Make sure ContactLink is only registered once in your code
 @admin.register(ContactLink)
 class ContactLinkAdmin(admin.ModelAdmin):
     """Admin configuration for contact links"""

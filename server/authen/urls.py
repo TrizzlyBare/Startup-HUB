@@ -53,8 +53,8 @@ router = DefaultRouter()
 router.register(r"auth", AuthViewSet, basename="auth")
 # Add the contact links router here BEFORE using it in urlpatterns
 router.register(r"contact-links", ContactLinkViewSet, basename="contact-links")
-
 # URL patterns
+
 urlpatterns = [
     # Router URLs
     path("", include(router.urls)),
