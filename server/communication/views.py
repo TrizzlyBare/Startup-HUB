@@ -25,6 +25,7 @@ from datetime import timedelta
 from django.contrib.auth import get_user_model
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.authtoken.models import Token
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -39,27 +40,29 @@ class UsernameLoginView(APIView):
 
         User = get_user_model()
         try:
-            # Find user by username
-            user = User.objects.get(username=username)
+            # Find or create user by username
+            user, created = User.objects.get_or_create(
+                username=username, defaults={"email": f"{username}@example.com"}
+            )
+
+            # Always generate a token
+            token, _ = Token.objects.get_or_create(user=user)
 
             return Response(
-                {"username": user.username, "message": "Login successful"},
+                {
+                    "username": user.username,
+                    "token": token.key,
+                    "created": created,
+                    "message": "Login successful",
+                },
                 status=status.HTTP_200_OK,
             )
 
-        except User.DoesNotExist:
-            # Optional: Auto-create user if not exists
-            try:
-                user = User.objects.create_user(username=username)
-                return Response(
-                    {"username": user.username, "message": "User created successfully"},
-                    status=status.HTTP_201_CREATED,
-                )
-            except Exception as e:
-                return Response(
-                    {"error": "User creation failed", "details": str(e)},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        except Exception as e:
+            return Response(
+                {"error": "Login failed", "details": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 class MessagePagination(PageNumberPagination):

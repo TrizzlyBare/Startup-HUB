@@ -11,7 +11,7 @@ websocket_urlpatterns = [
     ),
     # Existing room-based route
     re_path(
-        r"ws/communication/room/(?P<room_id>[0-9a-f-]+)/$",
+        r"ws/room/(?P<room_id>[0-9a-f-]+)/$",
         consumers.CommunicationConsumer.as_asgi(),
         name="room_communication",
     ),
