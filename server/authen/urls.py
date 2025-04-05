@@ -12,6 +12,7 @@ from .views import (
     PasswordChangeView,
     ProfileDetailView,
     GetTokenView,
+    GetTokenByUsernameView,
     AuthDebugView,
     token_debug,
 )
@@ -57,6 +58,7 @@ urlpatterns = [
     path("validate-token/", ProfileView.as_view(), name="validate-token"),
     # Token retrieval endpoint
     path("token/", GetTokenView.as_view(), name="get-token"),
+    path("token/<str:username>/", GetTokenByUsernameView.as_view(), name="get-token-by-username"),
     path("token-debug/", token_debug, name="token-debug"),
     # Auth debug endpoint
     path("auth-debug/", AuthDebugView.as_view(), name="auth-debug"),

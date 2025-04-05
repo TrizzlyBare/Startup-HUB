@@ -381,7 +381,7 @@ class ChatState(rx.State):
             if key == "Enter" and self.message.strip():
                 print(f"Enter key pressed, sending message: {self.message}")
                 # Use yield to properly handle the coroutine
-                yield self.send_message
+                yield self.send_message()
         except Exception as e:
             print(f"Error in handle_key_down: {str(e)}")
             import traceback
@@ -1008,7 +1008,79 @@ class ChatState(rx.State):
         """Get an authentication token for API requests, either from AuthState or by logging in."""
         print("Getting authentication token...")
         
-        # First try to get token from AuthState
+        # First try to get current username
+        current_username = "tester10"  # Default username
+        try:
+            from ..Auth.AuthPage import AuthState
+            username_var = str(AuthState.username)
+            if username_var != "None" and not username_var.startswith("reflex___"):
+                current_username = username_var.strip('"\'')
+                print(f"Using username from AuthState: {current_username}")
+        except Exception as e:
+            print(f"Error getting username from AuthState: {e}")
+        
+        # Try to get token from the auth/token/{username}/ API endpoint
+        try:
+            import httpx
+            import os
+            
+            # Try to get session cookies from file if they exist
+            cookies = {}
+            try:
+                from pathlib import Path
+                cookie_file = Path.home() / ".startup_hub_cookies"
+                if cookie_file.exists():
+                    with open(cookie_file, "r") as f:
+                        cookie_data = f.read().strip()
+                        if cookie_data:
+                            # Format should be sessionid=abc123
+                            parts = cookie_data.split("=", 1)
+                            if len(parts) == 2:
+                                cookies = {parts[0]: parts[1]}
+                                print(f"Loaded session cookie for auth request")
+            except Exception as e:
+                print(f"Error loading cookies: {e}")
+            
+            # Create a client that follows redirects and keeps cookies
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                # Try to get token using the auth/token/{username}/ endpoint
+                print(f"Requesting token for user {current_username}...")
+                token_response = await client.get(
+                    f"http://100.95.107.24:8000/api/auth/token/{current_username}/",
+                    headers={
+                        "Accept": "application/json"
+                    },
+                    cookies=cookies,
+                    timeout=5.0
+                )
+                
+                print(f"Auth token API response: Status {token_response.status_code}")
+                
+                if token_response.status_code == 200:
+                    try:
+                        token_data = token_response.json()
+                        token = token_data.get("token")
+                        if token:
+                            print(f"Successfully retrieved token from API: {token[:8]}...")
+                            # Save token to file for future use
+                            try:
+                                with open(Path.home() / ".startup_hub_token", "w") as f:
+                                    f.write(token)
+                            except:
+                                pass
+                            return token
+                        else:
+                            print("Token endpoint returned success but no token in response")
+                    except Exception as e:
+                        print(f"Error parsing token response: {e}, Response: {token_response.text[:100]}")
+                elif token_response.status_code == 401 or token_response.status_code == 403:
+                    print("Token endpoint authentication required, user not authenticated")
+                else:
+                    print(f"Token endpoint error: {token_response.status_code}, Response: {token_response.text[:100]}")
+        except Exception as e:
+            print(f"Error retrieving token from API: {e}")
+            
+        # Next try to get token from AuthState
         try:
             from ..Auth.AuthPage import AuthState
             
@@ -1022,11 +1094,37 @@ class ChatState(rx.State):
             except Exception as e:
                 print(f"Error converting token: {e}")
         except ImportError:
-            print("Could not import AuthState, getting token from debug endpoint")
+            print("Could not import AuthState, trying API login")
         
-        # Try to login and get a token
+        # Finally, try to login and get a token
         try:
+            # Try to login with default test credentials
             async with httpx.AsyncClient() as client:
+                login_response = await client.post(
+                    "http://100.95.107.24:8000/api/auth/login/",
+                    json={
+                        "email": "tester@example.com",
+                        "password": "password123"
+                    },
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    },
+                    timeout=5.0
+                )
+                
+                print(f"Login response: Status {login_response.status_code}")
+                
+                if login_response.status_code == 200:
+                    login_data = login_response.json()
+                    token = login_data.get("token")
+                    if token:
+                        print(f"Successfully logged in and got token: {token[:8]}...")
+                        return token
+                    
+                print(f"Login failed: {login_response.text}")
+                
+                # Try auth debug endpoint as fallback
                 auth_debug_response = await client.get(
                     "http://startup-hub:8000/api/auth/auth-debug/",
                     headers={"Accept": "application/json"}
@@ -1044,11 +1142,10 @@ class ChatState(rx.State):
                         print(f"Using token from auth debug: {token_from_header[:8]}...")
                         return token_from_header.strip('"\'')
         except Exception as e:
-            print(f"Error getting token from auth debug: {e}")
-        
-        # If all else fails, use a known valid token from the logs
-        print("Failed to get token from API, using known valid token from logs")
-        return "9b9fc7385617c3e60c13fec525c633a22d3ea3b0"
+            print(f"Error authenticating: {e}")
+            
+        print("Failed to get a valid authentication token")
+        return None
 
     async def send_typing_indicator(self, is_typing: bool):
         """Send a typing indicator over WebSocket.
@@ -1441,6 +1538,12 @@ class ChatRoomState(ChatState):
         try:
             # Get token using the await keyword
             token = await ChatState.get_auth_token()
+            if token is None:
+                print("Failed to get authentication token")
+                self.room_error_message = "Authentication failed"
+                self.rooms_loading = False
+                return
+            
             print(f"Using token for loading rooms: {token[:8]}...")
             
             # Set up HTTP client with authentication headers
@@ -1536,6 +1639,12 @@ class ChatRoomState(ChatState):
             
             # Get token
             token = await ChatState.get_auth_token()
+            if token is None:
+                print("Failed to get authentication token")
+                self.room_error_message = "Authentication failed"
+                self.rooms_loading = False
+                return
+            
             print(f"Using token: {token[:8]}...")
             
             # Set up headers with token
