@@ -9,6 +9,14 @@ from .views import (
     UsernameLoginView,
 )
 
+# Import room finding views
+from .room_finders import (
+    FindDirectRoomView,
+    FindGroupRoomsView,
+    FindRoomByNameView,
+    UserRoomsView,
+)
+
 router = DefaultRouter()
 router.register(r"rooms", RoomViewSet, basename="room")
 router.register(r"messages", MessageViewSet, basename="message")
@@ -26,4 +34,9 @@ urlpatterns = [
         RoomMessagesView.as_view(),
         name="room-messages",
     ),
+    # Room finding endpoints
+    path("find-direct-room/", FindDirectRoomView.as_view(), name="find-direct-room"),
+    path("find-group-rooms/", FindGroupRoomsView.as_view(), name="find-group-rooms"),
+    path("find-room-by-name/", FindRoomByNameView.as_view(), name="find-room-by-name"),
+    path("my-rooms/", UserRoomsView.as_view(), name="my-rooms"),
 ]
