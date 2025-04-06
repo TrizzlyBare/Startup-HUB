@@ -94,16 +94,30 @@ class ChatState(rx.State):
     @rx.event
     async def on_mount(self):
         """Initialize when the component mounts."""
+        print("\n=== ChatPage Mounted ===")
+        
         # Try to get token from local storage
-        token = rx.get_local_storage("auth_token")
-        username = rx.get_local_storage("username")
-        if token and username:
-            self.auth_token = token
-            await self.load_rooms()
-        else:
-            # Redirect to login or show login form
-            self.error_message = "Please log in to access chat"
-            
+        try:
+            token = await rx.call_script("localStorage.getItem('auth_token')")
+            if token:
+                print(f"Found auth token in localStorage: {token[:5]}...")
+                self.auth_token = token
+                await self.load_rooms()
+            else:
+                # Try alternative methods to get the token
+                token = rx.get_local_storage("auth_token")
+                if token:
+                    print(f"Found auth token via get_local_storage: {token[:5]}...")
+                    self.auth_token = token
+                    await self.load_rooms()
+                else:
+                    # Redirect to login or show login form
+                    print("No auth token found - showing login form")
+                    self.error_message = "Please log in to access chat"
+        except Exception as e:
+            print(f"Error in ChatPage on_mount: {str(e)}")
+            self.error_message = f"Error initializing chat: {str(e)}"
+
     @rx.event
     async def poll_messages(self):
         """Poll for new messages as a fallback for WebSockets."""
@@ -1565,7 +1579,17 @@ def direct_chat_room_route() -> rx.Component:
             
             try:
                 # Check authentication first
-                token = rx.get_local_storage("auth_token") 
+                token = None
+                try:
+                    token = await rx.call_script("localStorage.getItem('auth_token')")
+                    print(f"Found token in localStorage: {bool(token)}")
+                except Exception as e:
+                    print(f"Error getting token from localStorage: {str(e)}")
+                
+                if not token:
+                    token = rx.get_local_storage("auth_token")
+                    print(f"Tried get_local_storage for token: {bool(token)}")
+                    
                 if not token:
                     print("No auth token found - showing login form")
                     # Set auth token in ChatState to trigger login form
@@ -1575,7 +1599,7 @@ def direct_chat_room_route() -> rx.Component:
                     return
                 else:
                     # We have a token, set it in ChatState
-                    print(f"Found auth token: {token[:5]}...")
+                    print(f"Found auth token for direct chat: {token[:5]}...")
                     ChatState.auth_token = token
                 
                 # Validate room_id
@@ -1664,7 +1688,17 @@ def chat_room_route() -> rx.Component:
             
             try:
                 # Check authentication first
-                token = rx.get_local_storage("auth_token") 
+                token = None
+                try:
+                    token = await rx.call_script("localStorage.getItem('auth_token')")
+                    print(f"Found token in localStorage: {bool(token)}")
+                except Exception as e:
+                    print(f"Error getting token from localStorage: {str(e)}")
+                
+                if not token:
+                    token = rx.get_local_storage("auth_token")
+                    print(f"Tried get_local_storage for token: {bool(token)}")
+                
                 if not token:
                     print("No auth token found - showing login form")
                     # Set auth token in ChatState to trigger login form
@@ -1674,9 +1708,9 @@ def chat_room_route() -> rx.Component:
                     return
                 else:
                     # We have a token, set it in ChatState
-                    print(f"Found auth token: {token[:5]}...")
+                    print(f"Found auth token for chat: {token[:5]}...")
                     ChatState.auth_token = token
-                    
+                
                 # Validate room_id
                 if not room_id:
                     print("No room ID specified - redirecting to main chat")

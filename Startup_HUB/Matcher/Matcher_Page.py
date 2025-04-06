@@ -737,7 +737,10 @@ class MatchState(rx.State):
                         
                         if room_id:
                             print(f"Created room with ID {room_id} - redirecting to it")
-                            self.loading = False
+                            # Save auth token to localStorage again to ensure it's available for the chat page
+                            await rx.call_script(f"localStorage.setItem('auth_token', '{auth_token}');")
+                            print(f"Auth token saved to localStorage: {auth_token[:5]}...")
+                            print(f"REDIRECTING TO: /chat/room/{room_id}")
                             return rx.redirect(f"/chat/room/{room_id}")
                         else:
                             print("Failed to get room ID from created room")
@@ -988,7 +991,11 @@ class MatchState(rx.State):
                         room_data = create_response.json()
                         room_id = room_data.get("id")
                         if room_id:
-                            print(f"Created new room with ID: {room_id}")
+                            print(f"Created room with ID {room_id} - redirecting to it")
+                            # Save auth token to localStorage again to ensure it's available for the chat page
+                            await rx.call_script(f"localStorage.setItem('auth_token', '{auth_token}');")
+                            print(f"Auth token saved to localStorage: {auth_token[:5]}...")
+                            print(f"REDIRECTING TO: /chat/room/{room_id}")
                             return rx.redirect(f"/chat/room/{room_id}")
                         else:
                             print("No room ID returned in response")
@@ -1251,10 +1258,12 @@ class MatchState(rx.State):
         auth_token = auth_state.token
         
         if not auth_token:
-            # We cannot directly await rx.call_script
-            # Instead, use rx.get_local_storage which works better
-            # with the async context in Reflex
-            auth_token = ""  # Default to empty to avoid issues
+            # Try to get token from localStorage
+            try:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                print(f"Got token from localStorage: {bool(auth_token)}")
+            except Exception as e:
+                print(f"Error getting token from localStorage: {str(e)}")
             
             if not auth_token:
                 self.error_message = "Authentication required. Please log in."
@@ -1615,6 +1624,10 @@ class MatchState(rx.State):
                         
                         if room_id:
                             print(f"Created room with ID {room_id} - redirecting to it")
+                            # Save auth token to localStorage again to ensure it's available for the chat page
+                            await rx.call_script(f"localStorage.setItem('auth_token', '{auth_token}');")
+                            print(f"Auth token saved to localStorage: {auth_token[:5]}...")
+                            print(f"REDIRECTING TO: /chat/room/{room_id}")
                             return rx.redirect(f"/chat/room/{room_id}")
                         else:
                             print("Failed to get room ID from created room")
