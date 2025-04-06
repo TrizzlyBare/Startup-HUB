@@ -878,11 +878,7 @@ def profile_display() -> rx.Component:
                     rx.button(
                         "My Projects",
                         on_click=rx.redirect(f"/my-projects/user/{State.profile_username}"),
-<<<<<<< Updated upstream
-                        class_name="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm",
-=======
                         class_name="px-6 py-3 text-lg bg-blue-600 text-white rounded-xl bg-sky-600 hover:bg-sky-500 hover:scale-105 transition-all duration-200 font-bold",
->>>>>>> Stashed changes
                     ),
                     spacing="4"
                 ),
@@ -925,8 +921,6 @@ def profile_display() -> rx.Component:
                 padding="4",
                 class_name="bg-white rounded-lg shadow"
             ),
-<<<<<<< Updated upstream
-=======
 
             rx.box(
                 rx.hstack(
@@ -948,7 +942,6 @@ def profile_display() -> rx.Component:
                 padding="4",
                 class_name="bg-white rounded-lg shadow"
             ),
->>>>>>> Stashed changes
             
             # Online Presence Section
             rx.box(
@@ -1284,7 +1277,6 @@ def profile_page() -> rx.Component:
                     width="100%",
                 ),
                 
-<<<<<<< Updated upstream
                 # Auth Debug Information (displayed at top for easy access)
                 rx.box(
                     rx.heading("Auth Debug Info", size="6", margin_bottom="2", color="white"),
@@ -1301,8 +1293,6 @@ def profile_page() -> rx.Component:
                     class_name="bg-gray-800 rounded-lg mb-4"
                 ),
                 
-=======
->>>>>>> Stashed changes
                 # Profile content
                 profile_display(),
                 

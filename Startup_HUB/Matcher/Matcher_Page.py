@@ -1897,8 +1897,6 @@ def action_buttons() -> rx.Component:
         padding_y="6",
     )
 
-<<<<<<< Updated upstream
-=======
 def profile_popup() -> rx.Component:
     """Profile popup to display user details."""
     return rx.cond(
@@ -2070,7 +2068,6 @@ def profile_popup() -> rx.Component:
         rx.fragment(),
     )
 
->>>>>>> Stashed changes
 def match_page() -> rx.Component:
     """The match page."""
     return rx.hstack(
