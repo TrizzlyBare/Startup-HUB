@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import StartupIdea, StartupImage
+from .models import JoinRequest, StartupIdea, StartupImage
 from django.contrib.auth import get_user_model
 from dotenv import load_dotenv
 
@@ -157,3 +157,23 @@ class StartupIdeaSerializer(serializers.ModelSerializer):
         if isinstance(value, list):
             return ", ".join(value)
         return value
+
+
+class JoinRequestSerializer(serializers.ModelSerializer):
+    user = serializers.SlugRelatedField(read_only=True, slug_field="username")
+    project_name = serializers.CharField(source="project.name", read_only=True)
+
+    class Meta:
+        model = JoinRequest
+        fields = [
+            "id",
+            "project",
+            "project_name",
+            "user",
+            "message",
+            "status",
+            "response_message",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "project", "user", "created_at", "updated_at"]

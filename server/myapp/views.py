@@ -9,8 +9,9 @@ from django.db.models import Q
 import cloudinary
 from django.contrib.auth import get_user_model
 
-from .models import StartupIdea, StartupImage
+from .models import JoinRequest, StartupIdea, StartupImage
 from .serializers import (
+    JoinRequestSerializer,
     StartupIdeaSerializer,
     StartupImageSerializer,
     UserBasicSerializer,
@@ -599,4 +600,103 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
 
         # If pagination is disabled
         serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def request_to_join(self, request, pk=None):
+        """Request to join a project"""
+        startup = self.get_object()
+
+        # Check if user is already a member
+        if startup.members.filter(id=request.user.id).exists():
+            return Response(
+                {"error": "You are already a member of this project"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if user is the owner
+        if startup.user == request.user:
+            return Response(
+                {"error": "You are the owner of this project"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if a request already exists
+        existing_request = JoinRequest.objects.filter(
+            project=startup, user=request.user, status="pending"
+        ).first()
+
+        if existing_request:
+            return Response(
+                {"error": "You already have a pending request to join this project"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Create the join request
+        join_request = JoinRequest.objects.create(
+            project=startup, user=request.user, message=request.data.get("message", "")
+        )
+
+        # Send email notification to the project owner
+        send_join_request_notification(join_request)
+
+        serializer = JoinRequestSerializer(join_request)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"])
+    def my_join_requests(self, request):
+        """Get join requests made by the current user"""
+        join_requests = JoinRequest.objects.filter(user=request.user)
+        serializer = JoinRequestSerializer(join_requests, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def pending_join_requests(self, request):
+        """Get pending join requests for projects owned by the user"""
+        join_requests = JoinRequest.objects.filter(
+            project__user=request.user, status="pending"
+        )
+        serializer = JoinRequestSerializer(join_requests, many=True)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["put", "patch"],
+        url_path="join-request/(?P<request_id>[^/.]+)",
+    )
+    def handle_join_request(self, request, pk=None, request_id=None):
+        """Approve or reject a join request"""
+        startup = self.get_object()
+
+        # Check if user is the owner
+        if startup.user != request.user:
+            return Response(
+                {"error": "Only the project owner can handle join requests"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            join_request = JoinRequest.objects.get(id=request_id, project=startup)
+        except JoinRequest.DoesNotExist:
+            return Response(
+                {"error": "Join request not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Update the status
+        status_value = request.data.get("status")
+        if status_value not in ["approved", "rejected"]:
+            return Response(
+                {"error": 'Status must be either "approved" or "rejected"'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        join_request.status = status_value
+        join_request.response_message = request.data.get("response_message", "")
+        join_request.save()
+
+        # If approved, add the user as a member
+        if status_value == "approved":
+            startup.members.add(join_request.user)
+
+        serializer = JoinRequestSerializer(join_request)
         return Response(serializer.data)

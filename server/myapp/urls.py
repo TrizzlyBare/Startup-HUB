@@ -7,6 +7,30 @@ router.register(r"startup-ideas", StartupIdeaViewSet, basename="startup-idea")
 
 urlpatterns = [
     path("", include(router.urls)),
+]  # Add these to your existing StartupIdea URLs
+urlpatterns += [
+    path(
+        "startup-ideas/<pk>/request-to-join/",
+        StartupIdeaViewSet.as_view({"post": "request_to_join"}),
+        name="request-to-join",
+    ),
+    path(
+        "startup-ideas/my-join-requests/",
+        StartupIdeaViewSet.as_view({"get": "my_join_requests"}),
+        name="my-join-requests",
+    ),
+    path(
+        "startup-ideas/pending-join-requests/",
+        StartupIdeaViewSet.as_view({"get": "pending_join_requests"}),
+        name="pending-join-requests",
+    ),
+    path(
+        "startup-ideas/<pk>/join-request/<request_id>/",
+        StartupIdeaViewSet.as_view(
+            {"put": "handle_join_request", "patch": "handle_join_request"}
+        ),
+        name="handle-join-request",
+    ),
 ]
 
 # The routes generated include:

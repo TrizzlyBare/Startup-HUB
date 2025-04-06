@@ -2,6 +2,10 @@ from django.db import models
 from django.conf import settings
 from cloudinary.models import CloudinaryField
 from django.core.exceptions import ValidationError
+from django.contrib.auth import get_user_model
+
+# Get the CustomUser model dynamically
+CustomUser = get_user_model()
 
 
 class StartupIdea(models.Model):
@@ -128,3 +132,30 @@ class StartupImage(models.Model):
         if self.startup_idea:
             return f"Image for {self.startup_idea.name}"
         return "Startup Image"
+
+
+class JoinRequest(models.Model):
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("approved", "Approved"),
+        ("rejected", "Rejected"),
+    ]
+
+    project = models.ForeignKey(
+        StartupIdea, related_name="join_requests", on_delete=models.CASCADE
+    )
+    user = models.ForeignKey(
+        CustomUser, related_name="project_join_requests", on_delete=models.CASCADE
+    )
+    message = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    response_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("project", "user")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user.username} → {self.project.name} ({self.status})"
