@@ -9,11 +9,12 @@ def show_project(project: rx.Var[Project]) -> rx.Component:
         rx.vstack(
             # Project header and description section
             rx.vstack(
-                rx.heading(project.name, size="6", class_name="text-sky-600 font-bold p-2"),
+                rx.heading(project.name, size="7",border_radius="3xl" , class_name="text-sky-600 w-full font-bold p-2 bg-sky-200 round-3xl"),
                 rx.text(
-                    project.description,
+                    f"->{project.description}",
                     noOfLines=3,
-                    class_name="text-md font-small px-2 text-gray-400",
+                    size ="4",
+                    class_name="text-md px-2 text-gray-500",
                 ),
                 width="100%",
                 padding_x="12",
@@ -22,11 +23,11 @@ def show_project(project: rx.Var[Project]) -> rx.Component:
             # Project details section
             rx.vstack(
                 rx.hstack(
-                    rx.text(f"Team Size: {project.team_size}", color="black", class_name="text-md px-2"),
-                    rx.text(f"Stage: {project.funding_stage}", color="black", class_name="text-md px-2"),
+                    rx.text(f"Team Size: {project.team_size}",size = "4" ,  class_name=" px-2 text-sky-500 font-bold"),
+                    rx.text(f"Stage: {project.funding_stage}",size = "4", class_name="text-md px-2 text-sky-500 font-bold"),
                     spacing="4",
                 ),
-                rx.text("Tech Stack:", color="black", class_name="text-lg font-medium mt-2 px-2"),
+                rx.text("Tech Stack:", color="black", size = "5", class_name="font-bold mt-2 px-2"),
                 rx.hstack(
                     rx.foreach(
                         project.tech_stack,
@@ -37,7 +38,7 @@ def show_project(project: rx.Var[Project]) -> rx.Component:
                     ),
                     wrap="wrap",
                 ),
-                rx.text("Looking for:", color="black", class_name="text-lg font-medium mt-2 px-2"),
+                rx.text("Looking for:", color="black",size = "5", class_name="font-bold mt-2 px-2"),
                 rx.hstack(
                     rx.foreach(
                         project.looking_for,
@@ -94,7 +95,7 @@ def create_project_modal() -> rx.Component:
         rx.dialog.content(
             rx.dialog.title(
                 "Create New Project",
-                class_name="text-3xl font-bold mb-4 text-blue-600",
+                class_name="text-3xl font-bold mb-4 text-sky-600",
             ),
             rx.dialog.description(
                 rx.form(
@@ -103,44 +104,44 @@ def create_project_modal() -> rx.Component:
                             placeholder="Project Name",
                             name="name",
                             required=True,
-                            style={"& input::placeholder": {"color": "grey"}},
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            style={"& input::placeholder": {"color": "gray"}},
+                            class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         rx.text_area(
                             placeholder="Project Description", 
                             name="description",
                             required=True,
                             height="120px",
-                            style={"& textarea::placeholder": {"color": "grey"}},
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            style={"& textarea::placeholder": {"color": "gray"}},
+                            class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         rx.input(
                             placeholder="Tech Stack (comma-separated)",
                             name="tech_stack",
-                            style={"& input::placeholder": {"color": "grey"}},
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            style={"& input::placeholder": {"color": "gray"}},
+                            class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         rx.select(
                             ["Pre-seed", "Seed", "Early", "Growth", "Expansion", "Exit"],
                             placeholder="Funding Stage",
                             name="funding_stage",
-                            style={"& select::placeholder": {"color": "grey"}},
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            style={"& select::placeholder": {"color": "gray"}},
+                            class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         rx.input(
                             placeholder="Team Size",
                             name="team_size",
                             type="number",
                             min_value=1,
-                            style={"& input::placeholder": {"color": "grey"}},
+                            style={"& input::placeholder": {"color": "gray"}},
                             default_value="1",
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         rx.input(
                             placeholder="Looking for (comma-separated roles)",
-                            style={"& input::placeholder": {"color": "grey"}},
+                            style={"& input::placeholder": {"color": "gray"}},
                             name="looking_for",
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         
                         # Buttons
@@ -154,7 +155,7 @@ def create_project_modal() -> rx.Component:
                                 rx.button(
                                     "Create Project",
                                     type="submit",
-                                    class_name="px-6 py-2 bg-sky-600 text-white hover:bg-sky-700 rounded-lg",
+                                    class_name="px-6 py-2 bg-green-600 text-white hover:bg-green-700 rounded-lg",
                                 ),
                             ),
                             spacing="4",
@@ -202,7 +203,7 @@ def edit_project_modal() -> rx.Component:
                                 name="name",
                                 required=True,
                                 style={"& input::placeholder": {"color": "grey"}},
-                                class_name="w-full p-2 border rounded-lg bg-white",
+                                class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 default_value=rx.cond(
                                     MyProjectsState.editing_project,
                                     MyProjectsState.editing_project.name,
@@ -215,7 +216,7 @@ def edit_project_modal() -> rx.Component:
                                 required=True,
                                 height="120px",
                                 style={"& textarea::placeholder": {"color": "grey"}},
-                                class_name="w-full p-2 border rounded-lg bg-white",
+                                class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 default_value=rx.cond(
                                     MyProjectsState.editing_project,
                                     MyProjectsState.editing_project.description,
@@ -226,7 +227,7 @@ def edit_project_modal() -> rx.Component:
                                 placeholder="Tech Stack (comma-separated)",
                                 name="tech_stack",
                                 style={"& input::placeholder": {"color": "grey"}},
-                                class_name="w-full p-2 border rounded-lg bg-white",
+                                class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 default_value=MyProjectsState.formatted_tech_stack
                             ),
                             rx.select(
@@ -234,7 +235,7 @@ def edit_project_modal() -> rx.Component:
                                 placeholder="Funding Stage",
                                 name="funding_stage",
                                 style={"& input::placeholder": {"color": "grey"}},
-                                class_name="w-full p-2 border rounded-lg bg-white",
+                                class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 default_value=rx.cond(
                                     MyProjectsState.editing_project,
                                     MyProjectsState.editing_project.funding_stage,
@@ -247,14 +248,14 @@ def edit_project_modal() -> rx.Component:
                                 type="number",
                                 min_value=1,
                                 style={"& input::placeholder": {"color": "grey"}},
-                                class_name="w-full p-2 border rounded-lg bg-white",
+                                class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 default_value=MyProjectsState.formatted_team_size
                             ),
                             rx.input(
                                 placeholder="Looking for (comma-separated roles)",
                                 name="looking_for",
                                 style={"& input::placeholder": {"color": "grey"}},
-                                class_name="w-full p-2 border rounded-lg bg-white",
+                                class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 default_value=MyProjectsState.formatted_looking_for
                             ),
                             
@@ -308,18 +309,18 @@ def my_projects_page() -> rx.Component:
                     # Header section
                     rx.box(
                         rx.hstack(
-                            rx.heading("My Projects", size="9", class_name="text-sky-600 font-bold"),
+                            rx.heading("My Projects", size="9", class_name="text-sky-500 font-bold"),
                             rx.spacer(),
                             rx.button(
                                 "+ Create new",
                                 on_click=MyProjectsState.toggle_modal,
-                                class_name="bg-sky-600 text-white hover:bg-sky-500 px-8 py-4 text-xl rounded-lg font-medium"
+                                class_name="bg-sky-600 text-cyan-700 bg-cyan-500 hover:bg-cyan-300 px-8 py-4 text-2xl rounded-lg"
                             ),
                             width="100%",
                             padding_y="6",
                         ),
-                        border_bottom="1px solid",
-                        border_color="gray.200",
+                        border_bottom="3px solid",
+                        border_color="white",
                         width="100%",
                         margin_bottom="20",
                         padding_x="4",

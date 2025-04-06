@@ -1897,6 +1897,180 @@ def action_buttons() -> rx.Component:
         padding_y="6",
     )
 
+<<<<<<< Updated upstream
+=======
+def profile_popup() -> rx.Component:
+    """Profile popup to display user details."""
+    return rx.cond(
+        MatchState.show_profile_popup,
+        rx.box(
+            rx.center(
+                rx.vstack(
+                    rx.hstack(
+                        rx.spacer(),
+                        rx.button(
+                            rx.icon("x"),
+                            on_click=MatchState.close_profile_popup,
+                            size="3",
+                            color="red",
+                            class_name="bg-white hover:bg-red-100 hover:text-red-600 transition-transform transform hover:scale-105 duration-200"
+                        ),
+                        width="100%",
+                    ),
+                    rx.divider(),
+                    rx.cond(
+                        MatchState.view_profile_data is not None,
+                        rx.vstack(
+                            rx.avatar(
+                                name=f"{MatchState.view_profile_data.get('first_name', '')} {MatchState.view_profile_data.get('last_name', '')}",
+                                src=MatchState.view_profile_data.get("profile_picture_url", ""),
+                                size="8",
+                                class_name="rounded-full"
+                            ),
+                            rx.heading(
+                                f"{MatchState.view_profile_data.get('first_name', '')} {MatchState.view_profile_data.get('last_name', '')}",
+                                size="5",
+                                margin_top="2",
+                                class_name="text-sky-700 font-bold"
+                            ),
+                            rx.text(f"@{MatchState.view_profile_data.get('username', '')}", 
+                                color="gray",
+                                font_size="1em",
+                                margin_bottom="2",
+                            ),
+                            
+                            rx.divider(),
+                            
+                            rx.box(
+                                rx.text("Bio:", 
+                                    font_weight="bold", 
+                                    font_size="1.2em",
+                                    class_name="text-sky-600 ml-2"
+                                ),
+                                rx.text(
+                                    MatchState.view_profile_data.get("bio", "No bio available"),
+                                    font_size="1.1em",
+                                    padding="3",
+                                    bg="gray.50",
+                                    class_name="text-black ml-2 "
+                                ),
+                                width="100%",
+                                margin_top="3",
+                                margin_bottom="4",
+                            ),
+                            
+                            rx.hstack(
+                                rx.box(
+                                    rx.text("Industry:", 
+                                        font_weight="bold", 
+                                        font_size="1.2em",
+                                        class_name="text-sky-600 ml-2",
+                                    ),
+                                    rx.text(
+                                        MatchState.view_profile_data.get("industry", "Not specified"),
+                                        font_size="1.1em",
+                                        padding="3",
+                                        class_name="ml-2 text-sky-500"
+                                    ),
+                                    width="50%",
+                                ),
+                                rx.box(
+                                    rx.text("Experience:", 
+                                        font_weight="bold", 
+                                        font_size="1.2em",
+                                        class_name="text-sky-600 ml-2",
+                                    ),
+                                    rx.text(
+                                        MatchState.view_profile_data.get("experience", "Not specified"),
+                                        font_size="1.1em",
+                                        padding="3",
+                                        class_name="ml-2 text-sky-500"
+                                    ),
+                                    width="50%",
+                                ),
+                                width="100%",
+                                margin_bottom="4",
+                                spacing="4",
+                            ),
+                            
+                            rx.box(
+                                rx.text("Skills:", 
+                                    font_weight="bold", 
+                                    font_size="1.5em",
+                                    class_name="text-sky-700 ml-2",
+                                ),
+                                rx.text(
+                                    MatchState.view_profile_data.get("skills_formatted", "No skills listed"),
+                                    font_size="1.0em",
+                                    padding="3",
+                                    class_name="ml-2 text-black"
+                                ),
+                                width="100%",
+                                margin_bottom="4",
+                            ),
+                            
+                            rx.box(
+                                rx.text("Past Projects:", 
+                                    font_weight="bold", 
+                                    font_size="1.2em",
+                                    class_name="text-sky-700 ml-2",
+                                ),
+                                rx.text(
+                                    MatchState.view_profile_data.get("past_projects_formatted", "No past projects listed"),
+                                    font_size="1.1em",
+                                    padding="3",
+                                    class_name="ml-2 text-black"
+                                ),
+                                width="100%",
+                                margin_bottom="4",
+                            ),
+                            
+                            rx.box(
+                                rx.text("Career Summary:", 
+                                    font_weight="bold", 
+                                    font_size="1.2em",
+                                    class_name="text-sky-700 ml-2",
+                                ),
+                                rx.text(
+                                    MatchState.view_profile_data.get("career_summary", "No career summary"),
+                                    font_size="1.0em",
+                                    padding="3",
+                                    class_name="ml-2 text-black mb-2"
+                                ),
+                                width="100%",
+                            ),
+                            
+                            width="100%",
+                            align_items="center",
+                            spacing="4",
+                            padding="4",
+                        ),
+                        rx.center(
+                            rx.spinner(),
+                            height="200px",
+                        ),
+                    ),
+                    width="100%",
+                    spacing="4",
+                    padding="6",
+                    max_width="700px",
+                    bg="white",
+                    border_radius="lg",
+                    box_shadow="xl",
+                ),
+                position="fixed",
+                top="0",
+                left="0",
+                width="100%",
+                height="100%",
+                z_index="1000",
+                bg="rgba(0,0,0,0.7)",
+            ),
+        ),
+        rx.fragment(),
+    )
+
+>>>>>>> Stashed changes
 def match_page() -> rx.Component:
     """The match page."""
     return rx.hstack(

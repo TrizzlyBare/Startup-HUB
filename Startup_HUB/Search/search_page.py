@@ -221,11 +221,11 @@ def show_startup(startup: StartupGroup):
                 rx.avatar(
                     src=startup.owner.profile_picture,
                     fallback=startup.owner.username[0].upper(),
-                    size="3",
+                    size="5",
                 ),
                 rx.vstack(
-                    rx.heading(startup.name, size="5", class_name="text-sky-600 font-bold"),
-                    rx.text(f"by {startup.owner.username}", class_name="text-gray-500 text-sm"),
+                    rx.heading(startup.name, size="6", class_name="text-sky-600 font-bold"),
+                    rx.text(f"by {startup.owner.username}",size="3", class_name="text-gray-500 "),
                     align_items="start",
                 ),
                 justify="start",
@@ -234,14 +234,14 @@ def show_startup(startup: StartupGroup):
             ),
             # Description
             rx.text(
-                startup.description,
+                f"description : {startup.description}",
                 color="black",
                 noOfLines=3,
-                class_name="text-base font-small pt-2",
+                class_name="text-base font-small pt-2 pl-2",
             ),
             # Skills and Looking For
             rx.vstack(
-                rx.text("Skills Needed:", class_name="font-semibold text-gray-700"),
+                rx.text("Skills Needed:",size = "3" ,  class_name="font-bold text-sky-400 ml-2"),
                 rx.flex(
                     rx.foreach(
                         startup.skills_list,
@@ -253,7 +253,7 @@ def show_startup(startup: StartupGroup):
                     wrap="wrap",
                     spacing="1",
                 ),
-                rx.text("Looking For:", class_name="font-semibold text-gray-700 pt-2"),
+                rx.text("Looking For:",size ="3", class_name="font-bold text-sky-400 ml-2"),
                 rx.flex(
                     rx.foreach(
                         startup.looking_for_list,
@@ -271,8 +271,8 @@ def show_startup(startup: StartupGroup):
             # Footer with stats and actions
             rx.hstack(
                 rx.vstack(
-                    rx.text(f"Members: {startup.member_count}", class_name="text-gray-600"),
-                    rx.text(f"Stage: {startup.stage}", class_name="text-gray-600"),
+                    rx.text(f"Members: {startup.member_count}", class_name="font-bold text-black ml-2"),
+                    rx.text(f"Stage: {startup.stage}", class_name="font-bold text-black ml-2 mb-2"),
                     align_items="start",
                 ),
                 rx.spacer(),
@@ -284,7 +284,7 @@ def show_startup(startup: StartupGroup):
                             color_scheme="grass",
                             variant="outline",
                             is_disabled=True,
-                            class_name="bg-sky-50 text-gray-700 hover:bg-sky-100 px-6 py-2 rounded-lg font-medium",
+                            class_name="bg-green-50 text-gray-700 hover:bg-green-100 px-6 py-2 rounded-lg font-medium",
                         ),
                         rx.button(
                             "Join Group",
@@ -295,7 +295,7 @@ def show_startup(startup: StartupGroup):
                     rx.button(
                         "View Details",
                         on_click=lambda: SearchState.show_group_details(startup),
-                        class_name="bg-gray-600 text-white hover:bg-gray-700 px-6 py-2 rounded-lg font-medium",
+                        class_name="bg-gray-600 text-white hover:bg-gray-700 px-6 py-2 rounded-lg font-medium mr-3",
                     ),
                     spacing="4",
                 ),
@@ -326,7 +326,7 @@ def details_modal():
                     SearchState.selected_group.name,
                     "Group Details"
                 ),
-                class_name="text-2xl font-bold text-sky-600",
+                class_name="text-3xl font-bold w-full text-sky-600 text-center"
             ),
             rx.dialog.description(
                 rx.vstack(
@@ -343,17 +343,17 @@ def details_modal():
                                 SearchState.selected_group.owner.username[0].upper(),
                                 ""
                             ),
-                            size="4",
+                            size="5",
                         ),
                         rx.vstack(
                             rx.cond(
                                 SearchState.selected_group,
-                                rx.text(f"Created by {SearchState.selected_group.owner.username}", class_name="font-semibold"),
+                                rx.text(f"Created by {SearchState.selected_group.owner.username}", class_name="font-semibold text-gray-600"),
                                 rx.text("")
                             ),
                             rx.cond(
                                 SearchState.selected_group,
-                                rx.text(f"Role: {SearchState.selected_group.user_role_display}", class_name="text-gray-600"),
+                                rx.text(f"Role: {SearchState.selected_group.user_role_display}", class_name="text-sky-600"),
                                 rx.text("")
                             ),
                             align_items="start",
@@ -362,21 +362,21 @@ def details_modal():
                     ),
                     # Pitch and Description
                     rx.vstack(
-                        rx.text("Pitch", class_name="text-xl font-semibold text-gray-700 mb-2"),
+                        rx.text("Pitch", class_name="text-xl font-bold text-sky-600 mb-2"),
                         rx.cond(
                             SearchState.selected_group,
                             rx.text(
                                 SearchState.selected_group.pitch,
-                                class_name="text-gray-600 mb-4",
+                                class_name="text-black mb-4",
                             ),
                             rx.text("")
                         ),
-                        rx.text("Description", class_name="text-xl font-semibold text-gray-700 mb-2"),
+                        rx.text("Description", class_name="text-xl font-bold text-sky-600 mb-2"),
                         rx.cond(
                             SearchState.selected_group,
                             rx.text(
                                 SearchState.selected_group.description,
-                                class_name="text-gray-600 mb-4",
+                                class_name="text-black mb-4",
                             ),
                             rx.text("")
                         ),
@@ -384,7 +384,7 @@ def details_modal():
                     ),
                     # Skills and Looking For
                     rx.vstack(
-                        rx.text("Skills Needed", class_name="text-xl font-semibold text-gray-700 mb-2"),
+                        rx.text("Skills Needed", class_name="text-xl font-bold text-sky-600 mb-2"),
                         rx.cond(
                             SearchState.selected_group,
                             rx.flex(
@@ -400,7 +400,7 @@ def details_modal():
                             ),
                             rx.text("")
                         ),
-                        rx.text("Looking For", class_name="text-xl font-semibold text-gray-700 mb-2 mt-4"),
+                        rx.text("Looking For", class_name="text-xl font-bold text-sky-600 mb-2 mt-4"),
                         rx.cond(
                             SearchState.selected_group,
                             rx.flex(
@@ -420,10 +420,10 @@ def details_modal():
                     ),
                     # Project Details
                     rx.vstack(
-                        rx.text("Project Details", class_name="text-xl font-semibold text-gray-700 mb-2"),
+                        rx.text("Project Details", class_name="text-xl font-bold text-sky-600 mb-2"),
                         rx.hstack(
                             rx.vstack(
-                                rx.text("Stage", class_name="font-semibold text-gray-700"),
+                                rx.text("Stage", class_name="font-semibold text-black"),
                                 rx.cond(
                                     SearchState.selected_group,
                                     rx.text(
@@ -450,7 +450,7 @@ def details_modal():
                                     SearchState.selected_group,
                                     rx.text(
                                         f"${SearchState.selected_group.investment_needed}",
-                                        class_name="text-gray-600",
+                                        class_name="text-green-600",
                                     ),
                                     rx.text("")
                                 ),
@@ -461,7 +461,7 @@ def details_modal():
                     ),
                     # Members
                     rx.vstack(
-                        rx.text("Team Members", class_name="text-xl font-semibold text-gray-700 mb-2"),
+                        rx.text("Team Members", class_name="text-xl font-bold text-sky-600 mb-2"),
                         rx.cond(
                             SearchState.selected_group,
                             rx.vstack(
@@ -474,9 +474,9 @@ def details_modal():
                                             size="3",
                                         ),
                                         rx.vstack(
-                                            rx.text(member.username, class_name="font-medium"),
+                                            rx.text(member.username, class_name="font-medium text-black"),
                                             rx.text(f"Skills: {member.skills}", class_name="text-sm text-gray-600"),
-                                            rx.text(f"Industry: {member.industry}", class_name="text-sm text-gray-600"),
+                                            rx.text(f"Industry: {member.industry}", class_name="text-sm text-gray-600 mb-2"),
                                             align_items="start",
                                         ),
                                         spacing="3",
