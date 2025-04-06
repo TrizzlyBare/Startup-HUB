@@ -1,59 +1,26 @@
-import asyncio
-import json
-import os
-import re
-import subprocess
-import sys
-import time
-from datetime import datetime
-from typing import Callable, Dict, List, Optional, Tuple, Union, Any
-
-import httpx
 import reflex as rx
-import base64
+import json
+import asyncio
+from typing import List, Dict, Optional, Any
+from ..Matcher.SideBar import sidebar
 
-# Import our auth utility
-from .auth_util import get_auth_header
-
-# Import required AuthState
-from ..Auth.AuthPage import AuthState
-from ..webrtc.webrtc_state import WebRTCState
-from ..webrtc.call_utils import (
-    start_audio_call,
-    start_video_call,
-    end_call as end_webrtc_call,
-    toggle_audio,
-    toggle_video
-)
-from ..webrtc.webrtc_components import (
-    calling_popup as webrtc_calling_popup,
-    call_popup as webrtc_call_popup,
-    video_call_popup as webrtc_video_call_popup,
-    incoming_call_popup
-)
-
-try:
-    import websockets
-except ImportError:
-    print("Installing websockets package...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "websockets"])
-    import websockets
-
-# Simple comment to trigger edit capability
-# The try_all_auth_methods function has been moved into the ChatState class
-# This is a placeholder comment to replace the deleted function
-
-# Define ChatState here instead of importing it
 class ChatState(rx.State):
-    # Initialize with type annotation as required
-    chat_history: list[tuple[str, str]] = [
-        ("other", "Hello there!"),
-        ("user", "Hi, how are you?"),
-        ("other", "I'm doing great, thanks for asking!"),
-    ]
+    # API settings
+    API_BASE_URL: str = "http://startup-hub:8000/api"
+    WS_BASE_URL: str = "ws://startup-hub:8000/ws"
+    auth_token: str = ""
+    
+    # Chat data
+    chat_history: list[tuple[str, str]] = []
     message: str = ""
-    current_chat_user: str = "Andy Collins"
-    current_chat_user_id: str = "user123"
+    current_chat_user: str = ""
+    current_room_id: Optional[str] = None
+    rooms: List[Dict[str, Any]] = []
+    
+    # Typing indicator
+    typing_users: List[str] = []
+    
+    # Call related states
     show_call_popup: bool = False
     show_video_popup: bool = False
     call_duration: int = 0
@@ -61,3066 +28,652 @@ class ChatState(rx.State):
     is_camera_off: bool = False
     show_calling_popup: bool = False
     call_type: str = "audio"
-    chat_error_message: str = ""
     
-    # Direct chat room ID to store for future use
-    direct_chat_room_id: Optional[str] = None
-    active_room_id: Optional[str] = None
+    # Loading and error states
+    loading: bool = True
+    error_message: str = ""
+    success_message: str = ""
     
-    # For storing rooms data
-    rooms: list = []
-    is_loading: bool = False
+    # WebSocket connection status
+    is_connected: bool = False
+    reconnecting: bool = False
+    should_reconnect: bool = True
+    last_message_time: float = 0
     
-    # Call related attributes
-    is_receiving_call: bool = False
-    call_user: str = ""
+    # UI state
+    sidebar_visible: bool = True
     
-    # WebSocket properties
-    websocket_connected: bool = False
-    websocket_url: str = "ws://startup-hub:8000/ws/chat/"
-    ws_auth_token: str = ""
-    ws_username: str = ""
-    websocket_status: str = "Disconnected"
-    
-    # Typing indicator properties
-    is_typing: bool = False
-    other_user_typing: bool = False
-    
-    # Store active tasks (not serialized)
-    _active_tasks = {}
-    
-    # Non-serialized WebSocket connection (static class attribute, not a state var)
-    _websocket_connection = None
-    
-    @classmethod
-    def get_websocket_connection(cls):
-        """Get the current WebSocket connection"""
-        return cls._websocket_connection
+    # Login state
+    username: str = ""
+
+    @rx.var
+    def is_authenticated(self) -> bool:
+        return self.auth_token != ""
         
-    @classmethod
-    def set_websocket_connection(cls, connection):
-        """Set the WebSocket connection"""
-        cls._websocket_connection = connection
-    
-    @classmethod
-    def cleanup_task(cls, task_name):
-        """Clean up a stored task by name."""
-        if task_name in cls._active_tasks:
-            print(f"Cleaning up task: {task_name}")
-            del cls._active_tasks[task_name]
-        else:
-            print(f"No task found to clean up: {task_name}")
-    
-    @classmethod
-    def store_task(cls, task_name, task):
-        """Store a task by name for later cleanup."""
-        print(f"Storing task: {task_name}")
-        cls._active_tasks[task_name] = task
-    
     @rx.var
-    def show_typing_indicator(self) -> bool:
-        """Return whether to show the typing indicator."""
-        return self.other_user_typing
-    
+    def is_someone_typing(self) -> bool:
+        return len(self.typing_users) > 0
+        
     @rx.var
-    def route_username(self) -> str:
-        """Get username from route parameters."""
-        if hasattr(self, "router"):
-            params = getattr(self.router.page, "params", {})
-            chat_user = params.get("chat_user", "")
-            if chat_user:
-                # Update the current chat user based on the URL
-                self.current_chat_user_id = chat_user  # Use chat_user as ID
-                self.current_chat_user = chat_user     # Use chat_user directly
-            return chat_user
+    def typing_message(self) -> str:
+        if len(self.typing_users) == 1:
+            return f"{self.typing_users[0]} is typing..."
+        elif len(self.typing_users) == 2:
+            return f"{self.typing_users[0]} and {self.typing_users[1]} are typing..."
+        elif len(self.typing_users) > 2:
+            return "Several people are typing..."
         return ""
-    
+
     @rx.var
-    def route_group_id(self) -> str:
-        """Get group_id from route parameters."""
-        if hasattr(self, "router"):
-            params = getattr(self.router.page, "params", {})
-            group_id = params.get("group_id", "")
-            if group_id:
-                # Update the current chat to a group chat
-                self.current_chat_user_id = f"group_{group_id}"
-                # In a real app, you would fetch the group name based on ID
-                self.current_chat_user = f"Group {group_id}"
-            return group_id
-        return ""
-    
+    def formatted_rooms(self) -> List[Dict[str, str]]:
+        """Format rooms data for display."""
+        result = []
+        for room in self.rooms:
+            try:
+                # Extract usable data from room dict
+                room_data = {
+                    "id": str(room.get("id", "")),
+                    "name": str(room.get("name", "Unknown")),
+                    "profile_image": str(room.get("profile_image", "")),
+                }
+                
+                # Safely extract last message content
+                last_message = room.get("last_message", {})
+                if last_message and isinstance(last_message, dict):
+                    room_data["last_message"] = str(last_message.get("content", ""))
+                else:
+                    room_data["last_message"] = ""
+                    
+                result.append(room_data)
+            except Exception:
+                # Ignore malformed room data
+                pass
+                
+        return result
+
+    @rx.event
     async def on_mount(self):
-        """Called when the component is mounted."""
-        # Check for route parameters on mount
-        _ = self.route_username
-        _ = self.route_group_id
-        
-        # Connect to WebSocket if we have a valid chat user
-        if self.current_chat_user:
-            await self.connect_websocket()
+        """Initialize when the component mounts."""
+        # Try to get token from local storage
+        token = rx.get_local_storage("auth_token")
+        username = rx.get_local_storage("username")
+        if token and username:
+            self.auth_token = token
+            await self.load_rooms()
+        else:
+            # Redirect to login or show login form
+            self.error_message = "Please log in to access chat"
+            
+    @rx.event
+    async def poll_messages(self):
+        """Poll for new messages as a fallback for WebSockets."""
+        if not self.current_room_id or not self.auth_token:
+            return
+            
+        while self.should_reconnect:
+            try:
+                # Only poll if we haven't received a message recently
+                current_time = asyncio.get_event_loop().time()
+                if current_time - self.last_message_time > 2:  # If no messages in 2 seconds
+                    response = await rx.http.get(
+                        f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/messages/?since_timestamp={self.last_message_time}",
+                        headers={"Authorization": f"Token {self.auth_token}"}
+                    )
+                    
+                    data = response.json()
+                    messages = data.get("results", [])
+                    
+                    for msg in messages:
+                        sender = msg.get("sender", {}).get("username", "unknown")
+                        content = msg.get("content", "")
+                        sent_at = msg.get("sent_at", "")
+                        
+                        # Determine if the message is from the current user
+                        is_current_user = sender == rx.get_local_storage("username")
+                        
+                        # Add to chat history if not already there
+                        message_key = f"{sender}:{content}:{sent_at}"
+                        if not any(message_key in str(msg) for msg in self.chat_history[-10:]):
+                            self.chat_history.append(
+                                ("user" if is_current_user else "other", content)
+                            )
+                
+                # Update last message time
+                self.last_message_time = current_time
+            except Exception as e:
+                self.error_message = f"Error polling messages: {str(e)}"
+                
+            # Wait 2 seconds before polling again
+            await rx.utils.sleep(2)
+
+    @rx.event
+    async def login(self, username: str, password: str = ""):
+        """Login user to get authentication token."""
+        try:
+            response = await rx.http.post(
+                f"{self.API_BASE_URL}/communication/login/",
+                json={"username": username},  # Password not needed as per API description
+                headers={"Content-Type": "application/json"}
+            )
+            
+            data = response.json()
+            if "token" in data:
+                self.auth_token = data["token"]
+                rx.set_local_storage("auth_token", self.auth_token)
+                rx.set_local_storage("username", username)
+                self.success_message = "Login successful"
+                await self.load_rooms()
+            else:
+                self.error_message = "Failed to login"
+        except Exception as e:
+            self.error_message = f"Login error: {str(e)}"
+
+    @rx.event
+    async def load_rooms(self):
+        """Load all rooms for the current user."""
+        if not self.auth_token:
+            self.error_message = "Not authenticated"
+            return
+
+        try:
+            response = await rx.http.get(
+                f"{self.API_BASE_URL}/communication/my-rooms/",
+                headers={"Authorization": f"Token {self.auth_token}"}
+            )
+            
+            data = response.json()
+            self.rooms = data.get("rooms", [])
+            
+            # If we have rooms, set the first one as active
+            if self.rooms and not self.current_room_id:
+                first_room = self.rooms[0]
+                self.current_room_id = first_room.get("id")
+                self.current_chat_user = first_room.get("name", "Chat")
+                await self.load_messages()
+                
+                # Start polling for messages as WebSocket alternative
+                self.should_reconnect = True
+                self.last_message_time = asyncio.get_event_loop().time()
+                asyncio.create_task(self.poll_messages())
+        except Exception as e:
+            self.error_message = f"Error loading rooms: {str(e)}"
+
+    @rx.event
+    async def load_messages(self):
+        """Load messages for the current room."""
+        if not self.auth_token or not self.current_room_id:
+            return
+
+        try:
+            response = await rx.http.get(
+                f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/messages/",
+                headers={"Authorization": f"Token {self.auth_token}"}
+            )
+            
+            data = response.json()
+            messages = data.get("results", [])
+            
+            # Clear existing chat history
+            self.chat_history = []
+            
+            # Format messages for display
+            for msg in messages:
+                sender = msg.get("sender", {}).get("username", "unknown")
+                content = msg.get("content", "")
+                
+                # Determine if the message is from the current user
+                is_current_user = sender == rx.get_local_storage("username")
+                
+                # Add to chat history
+                self.chat_history.append(
+                    ("user" if is_current_user else "other", content)
+                )
+                
+            # Update last message time to now
+            self.last_message_time = asyncio.get_event_loop().time()
+        except Exception as e:
+            self.error_message = f"Error loading messages: {str(e)}"
 
     @rx.event
     async def send_message(self):
-        """Send a message in the current chat context."""
-        if not self.message:
-            print("Cannot send empty message")
+        """Send a message to the current room."""
+        if not self.message.strip() or not self.current_room_id:
             return
-
-        print(f"Sending message: {self.message[:20]}...")
-        message_content = self.message
-        
-        # Add message to chat history immediately for better UX
-        self.chat_history.append(("user", message_content))
-        self.message = ""  # Clear input
-        
+            
         try:
-            # Get the authentication token
-            token = await ChatState.get_auth_token()
-            if not token:
-                print("No authentication token available. Cannot send message.")
-                self.chat_history.append(("system", "Authentication error: No valid token available."))
-                return
-                
-            # Get current username
-            try:
-                from ..Auth.AuthPage import AuthState
-                current_username = str(AuthState.username)
-                if current_username == "None" or not current_username:
-                    current_username = "tester10"  # Default
-            except ImportError:
-                current_username = "tester10"  # Default
-                
-            # Set up headers with token
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Authorization": f"Token {token}"
-            }
+            # Add message to UI immediately for responsiveness
+            self.chat_history.append(("user", self.message))
+            message_to_send = self.message
+            self.message = ""
+            yield
             
-            # Get the room ID
-            room_id = None
-            
-            # First try to use the active_room_id if available
-            if hasattr(self, 'active_room_id') and self.active_room_id:
-                room_id_var = self.active_room_id
-                room_id = str(room_id_var)
-                if room_id == "None" or room_id.startswith("reflex___"):
-                    room_id = None
-            
-            # If no active_room_id, try direct_chat_room_id
-            if not room_id and hasattr(ChatState, 'direct_chat_room_id'):
-                direct_room_id_var = ChatState.direct_chat_room_id
-                direct_room_id = str(direct_room_id_var)
-                if direct_room_id != "None" and not direct_room_id.startswith("reflex___"):
-                    room_id = direct_room_id
-            
-            # If still no room ID, use a hardcoded room ID (for testing)
-            if not room_id:
-                # Create a chat room first using the direct chat API
-                target_username = str(self.current_chat_user)
-                print(f"No room ID found. Creating a direct chat room with user: {target_username}")
-                
-                # First try to create a direct chat room
-                create_room_payload = {
-                    "username": target_username
+            # Send via REST API
+            response = await rx.http.post(
+                f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/messages/",
+                json={"content": message_to_send, "message_type": "text"},
+                headers={
+                    "Authorization": f"Token {self.auth_token}",
+                    "Content-Type": "application/json"
                 }
-                
-                async with httpx.AsyncClient() as client:
-                    create_room_response = await client.post(
-                        "http://startup-hub:8000/api/communication/rooms/create_direct_message/",
-                        headers=headers,
-                        json=create_room_payload,
-                        timeout=10.0
-                    )
-                    
-                    if create_room_response.status_code in (200, 201):
-                        room_data = create_room_response.json()
-                        room_id = room_data.get("id")
-                        print(f"Created direct chat room with ID: {room_id}")
-                    else:
-                        print(f"Failed to create room: {create_room_response.status_code}")
-                        print(f"Response: {create_room_response.text}")
-                        # Use a hardcoded room ID as fallback
-                        room_id = "630037fa-b654-4786-908e-54639a7c21de"
-                        print(f"Using hardcoded room ID: {room_id}")
+            )
             
-            # Prepare message data with the room field
-            message_data = {
-                "content": message_content,
-                "message_type": "text",
-                "room": room_id
-            }
-            
-            print(f"Sending message to room ID: {room_id}")
-            
-            # Send the message using the room-specific endpoint
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"http://startup-hub:8000/api/communication/rooms/{room_id}/send_message/",
-                    headers=headers,
-                    json=message_data,
-                    timeout=10.0
-                )
-                
-                if response.status_code in (200, 201):
-                    print("Message sent successfully")
-                    response_data = response.json()
-                    print(f"Response: {response_data}")
-                    
-                    # Store the room ID for future use
-                    if hasattr(self, 'active_room_id'):
-                        self.active_room_id = room_id
-                    if hasattr(ChatState, 'direct_chat_room_id'):
-                        ChatState.direct_chat_room_id = room_id
-                else:
-                    print(f"Error sending message: {response.status_code}")
-                    print(f"Response: {response.text}")
-                    self.chat_error_message = f"Error sending message: {response.text}"
+            if response.status_code != 201:
+                # If message failed to send, show error
+                self.error_message = "Failed to send message"
+            else:
+                # Update last message time to now
+                self.last_message_time = asyncio.get_event_loop().time()
         except Exception as e:
-            print(f"Error in send_message: {str(e)}")
-            self.chat_error_message = f"Error sending message: {str(e)}"
-            import traceback
-            traceback.print_exc()
+            self.error_message = f"Error sending message: {str(e)}"
     
     @rx.event
+    async def send_typing_notification(self):
+        """Send typing notification to other users."""
+        if not self.current_room_id:
+            return
+            
+        try:
+            # Use REST API to send typing notification
+            await rx.http.post(
+                f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/typing/",
+                headers={
+                    "Authorization": f"Token {self.auth_token}",
+                    "Content-Type": "application/json"
+                }
+            )
+        except Exception:
+            # Silently fail typing notifications
+            pass
+
+    @rx.event
     async def handle_upload(self, files: list[rx.UploadFile]):
-        """Handle the upload of file(s).
-        Args:
-            files: The uploaded files.
-        """
+        """Upload media and send as a message."""
+        if not self.current_room_id:
+            self.error_message = "No active chat room"
+            return
+            
         for file in files:
-            # The file data is already in bytes format
-            upload_data = file
-            outfile = rx.get_upload_dir() / file.filename
-            # Save the file.
-            with outfile.open("wb") as file_object:
-                file_object.write(upload_data)
-            # Update the chat history with file URL
-            file_url = rx.get_upload_url(file.filename)
-            self.chat_history.append(("user", file_url))
-            yield
+            try:
+                # Save file locally first
+                upload_data = file
+                outfile = rx.get_upload_dir() / file.filename
+                with outfile.open("wb") as file_object:
+                    file_object.write(upload_data)
+                
+                # Get file URL for display
+                file_url = rx.get_upload_url(file.filename)
+                
+                # Add to UI immediately
+                self.chat_history.append(("user", file_url))
+                yield
+                
+                # Determine media type
+                file_type = "image"  # Default
+                if file.content_type.startswith("video/"):
+                    file_type = "video"
+                elif file.content_type.startswith("audio/"):
+                    file_type = "audio"
+                elif not file.content_type.startswith("image/"):
+                    file_type = "document"
+                
+                # Upload file to server
+                form_data = rx.FormData()
+                form_data.add_file("file", upload_data, filename=file.filename)
+                form_data.add_field("file_type", file_type)
+                
+                media_response = await rx.http.post(
+                    f"{self.API_BASE_URL}/communication/media/",
+                    data=form_data,
+                    headers={"Authorization": f"Token {self.auth_token}"}
+                )
+                
+                media_data = media_response.json()
+                media_id = media_data.get("id")
+                
+                # Send message with media
+                message_data = {
+                    "room_id": self.current_room_id,
+                    "message_type": file_type,
+                    f"{file_type}": media_id
+                }
+                
+                await rx.http.post(
+                    f"{self.API_BASE_URL}/communication/messages/",
+                    json=message_data,
+                    headers={
+                        "Authorization": f"Token {self.auth_token}",
+                        "Content-Type": "application/json"
+                    }
+                )
+                
+                # Update last message time
+                self.last_message_time = asyncio.get_event_loop().time()
+            except Exception as e:
+                self.error_message = f"Error uploading file: {str(e)}"
 
     @rx.event
-    async def audio_call(self):
-        """Start a WebRTC audio call"""
-        print("Starting audio call from ChatState")
-        # Use WebRTC for audio call
-        webrtc_state = WebRTCState.get_state()
-        webrtc_state.start_call(self.current_chat_user_id, is_video=False)
-        webrtc_state.add_participant(self.current_chat_user_id, self.current_chat_user)
-        webrtc_state.is_call_initiator = True
-        await webrtc_state.initialize_webrtc()
-        await webrtc_state.connect_to_signaling_server()
-        yield
+    async def open_room(self, room_id: str, room_name: str = None):
+        """Open a chat room by ID and load messages."""
+        print(f"\n===== Opening room: {room_id}, name: {room_name} =====")
         
-    @rx.event
-    async def video_call(self):
-        """Start a WebRTC video call"""
-        print("Starting video call from ChatState")
-        # Use WebRTC for video call
-        webrtc_state = WebRTCState.get_state()
-        webrtc_state.start_call(self.current_chat_user_id, is_video=True)
-        webrtc_state.add_participant(self.current_chat_user_id, self.current_chat_user)
-        webrtc_state.is_call_initiator = True
-        await webrtc_state.initialize_webrtc()
-        await webrtc_state.connect_to_signaling_server()
-        yield
+        if not room_id:
+            print("No room ID provided to open_room method")
+            return
+            
+        if not self.auth_token:
+            print("Not authenticated - cannot open room")
+            return
+
+        # Set the room details
+        self.current_room_id = room_id
+        
+        # Set room name if provided
+        if room_name:
+            self.current_chat_user = room_name
+        else:
+            # Try to find room name in the rooms list
+            for room in self.rooms:
+                if str(room.get("id", "")) == str(room_id):
+                    self.current_chat_user = room.get("name", "Chat Room")
+                    print(f"Found room name: {self.current_chat_user}")
+                    break
+            else:
+                # Set a default name if not found
+                self.current_chat_user = "Chat Room"
+                print("Room not found in rooms list, using default name")
+                
+        print(f"Set current_room_id to {self.current_room_id} and current_chat_user to {self.current_chat_user}")
+        
+        # Load messages for this room
+        try:
+            await self.load_messages()
+        except Exception as e:
+            print(f"Error loading messages: {str(e)}")
+            self.error_message = f"Failed to load messages: {str(e)}"
 
     @rx.event
-    async def toggle_mute(self):
-        # Use WebRTC to toggle audio
-        await WebRTCState.toggle_audio()
-        # Update local state for UI
-        self.is_muted = not self.is_muted
-        yield
+    async def create_direct_chat(self, username: str):
+        """Create or open a direct chat with a user."""
+        print(f"\n===== Creating direct chat with user: {username} =====")
+        
+        if not self.auth_token:
+            print("Not authenticated - cannot create chat")
+            self.error_message = "Not authenticated"
+            return
+            
+        try:
+            print(f"Checking if direct room already exists with {username}")
+            # Check if room already exists
+            response = await rx.http.get(
+                f"{self.API_BASE_URL}/communication/find-direct-room/?username={username}",
+                headers={"Authorization": f"Token {self.auth_token}"}
+            )
+            
+            print(f"Find room response status: {response.status}") 
+            data = response.json()
+            print(f"Find room response data: {data}")
+            
+            if "room" in data and data["room"]:
+                # Room exists, open it
+                room = data["room"]
+                room_id = room.get("id")
+                print(f"Found existing room: {room_id}")
+                await self.open_room(room_id, username)
+            else:
+                # Create new direct room
+                print(f"No existing room found, creating new one with {username}")
+                create_response = await rx.http.post(
+                    f"{self.API_BASE_URL}/communication/room/direct/",
+                    json={"username": username},
+                    headers={
+                        "Authorization": f"Token {self.auth_token}",
+                        "Content-Type": "application/json"
+                    }
+                )
+                
+                print(f"Create room response status: {create_response.status}")
+                room_data = create_response.json()
+                print(f"Create room response data: {room_data}")
+                
+                room_id = room_data.get("id")
+                if not room_id:
+                    print("No room ID returned in response")
+                    self.error_message = "Failed to create chat room - no room ID returned"
+                    return
+                    
+                print(f"Created new room with ID: {room_id}")
+                # Ensure current_room_id is set before loading messages
+                self.current_room_id = room_id
+                await self.open_room(room_id, username)
+                
+            # Reload rooms list
+            await self.load_rooms()
+        except Exception as e:
+            print(f"Error creating direct chat: {str(e)}")
+            self.error_message = f"Error creating direct chat: {str(e)}"
 
     @rx.event
-    async def toggle_camera(self):
-        # Use WebRTC to toggle video
-        await WebRTCState.toggle_video()
-        # Update local state for UI
-        self.is_camera_off = not self.is_camera_off
-        yield
+    async def start_call(self):
+        """Start an audio call in the current room."""
+        if not self.current_room_id:
+            self.error_message = "No active chat room"
+            return
+            
+        try:
+            # Notify server about call start
+            response = await rx.http.post(
+                f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/start_call/",
+                json={"call_type": "audio"},
+                headers={
+                    "Authorization": f"Token {self.auth_token}",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+            if response.status_code == 200:
+                self.show_call_popup = True
+                self.call_duration = 0
+                self.show_calling_popup = True
+                self.call_type = "audio"
+                asyncio.create_task(self.increment_call_duration())
+            else:
+                self.error_message = "Failed to start call"
+        except Exception as e:
+            self.error_message = f"Error starting call: {str(e)}"
 
     @rx.event
-    async def increment_call_duration(self):
-        while self.show_call_popup:
-            self.call_duration += 1
-            yield rx.utils.sleep(1)
+    async def start_video_call(self):
+        """Start a video call in the current room."""
+        if not self.current_room_id:
+            self.error_message = "No active chat room"
+            return
+            
+        try:
+            # Notify server about call start
+            response = await rx.http.post(
+                f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/start_call/",
+                json={"call_type": "video"},
+                headers={
+                    "Authorization": f"Token {self.auth_token}",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+            if response.status_code == 200:
+                self.show_video_popup = True
+                self.show_calling_popup = True
+                self.call_type = "video"
+                asyncio.create_task(self.increment_call_duration())
+            else:
+                self.error_message = "Failed to start video call"
+        except Exception as e:
+            self.error_message = f"Error starting video call: {str(e)}"
 
     @rx.event
     async def end_call(self):
         self.show_call_popup = False
         self.show_calling_popup = False
+        
+        # Notify server about call end
+        if self.current_room_id:
+            try:
+                await rx.http.post(
+                    f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/end_call/",
+                    headers={"Authorization": f"Token {self.auth_token}"}
+                )
+            except Exception:
+                pass  # Silently fail
+        yield
+
+    @rx.event
+    async def end_video_call(self):
+        self.show_video_popup = False
+        self.show_calling_popup = False
+        
+        # Notify server about call end
+        if self.current_room_id:
+            try:
+                await rx.http.post(
+                    f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/end_call/",
+                    headers={"Authorization": f"Token {self.auth_token}"}
+                )
+            except Exception:
+                pass  # Silently fail
+        yield
+
+    @rx.event
+    async def toggle_mute(self):
+        self.is_muted = not self.is_muted
+        yield
+
+    @rx.event
+    async def toggle_camera(self):
+        self.is_camera_off = not self.is_camera_off
+        yield
+
+    @rx.event
+    async def increment_call_duration(self):
+        while self.show_call_popup or self.show_video_popup:
+            self.call_duration += 1
+            yield rx.utils.sleep(1)
+
+    @rx.event
+    async def clear_error_message(self):
+        self.error_message = ""
+        yield
+
+    @rx.event
+    async def clear_success_message(self):
+        self.success_message = ""
         yield
         
     @rx.event
-    async def handle_key_down(self, key_event):
-        """Handle key down events in message input.
-        
-        Args:
-            key_event: The key event data (string or dict)
-        """
-        try:
-            print(f"Key event received: {key_event}")
-            
-            # Handle cases where key_event is a string
-            if isinstance(key_event, str):
-                key = key_event
-            else:
-                # Try to get the key from a dictionary structure
-                try:
-                    key = key_event.get("key", "")
-                except AttributeError:
-                    # If key_event doesn't have a get method, try direct access
-                    key = getattr(key_event, "key", key_event)
-                    
-            # Check if the key is Enter and message is not empty
-            if key == "Enter" and self.message.strip():
-                print(f"Enter key pressed, sending message: {self.message}")
-                # Use yield to properly handle the coroutine
-                yield self.send_message()
-        except Exception as e:
-            print(f"Error in handle_key_down: {str(e)}")
-            import traceback
-            traceback.print_exc()
-        
+    async def cleanup(self):
+        """Clean up resources when component unmounts."""
+        self.should_reconnect = False  # Stop polling
+        yield
+
     @rx.event
-    async def set_message(self, value: str):
-        """Set the message value and update typing state as needed.
-        
-        Args:
-            value: The new message value
-        """
-        # Update the message
-        self.message = value
-        
-        # If message is empty, clear typing state
-        if not value:
-            # Send typing: false
-            if self.is_typing:
-                self.is_typing = False
-                await self.send_typing_indicator(False)
-            return
-        
-        # Start typing detection after a brief delay
-        # Only send typing indicator if we haven't already
-        if not self.is_typing:
-            self.is_typing = True
-            # Send typing indicator to other user via websocket
-            await self.send_typing_indicator(True)
-            
-            # Schedule task to reset the typing indicator after a timeout
-            asyncio.create_task(self.typing_timeout())
-    
-    async def typing_timeout(self):
-        """Reset the typing indicator after a timeout period."""
-        print("Starting typing timeout task")
-        await asyncio.sleep(3)  # 3 seconds without typing
-        
-        # Only update if we were typing
-        if self.is_typing:
-            self.is_typing = False
-            try:
-                # Send typing indicator false
-                await self.send_typing_indicator(False)
-            except Exception as e:
-                print(f"Error in typing_timeout when sending indicator: {e}")
-        print("Typing timeout task completed")
+    async def handle_room_click(self):
+        """Handle click on a room - no-argument version needed by Reflex."""
+        # We'll use a different approach without needing event data
+        # We'll rely on the JavaScript to call our open_room method directly
+        pass
+
+    @rx.event
+    async def open_room_1(self):
+        """Open room 1."""
+        # Open the first room in the formatted rooms list
+        if self.formatted_rooms and len(self.formatted_rooms) > 0:
+            room = self.formatted_rooms[0]
+            await self.open_room(
+                room.get("id", ""), 
+                room.get("name", "Unknown Room")
+            )
     
     @rx.event
-    async def connect_websocket(self):
-        """Connect to the WebSocket server for real-time messaging"""
-        print("\n=== Connecting to WebSocket ===")
-        
-        # Get the token for authentication
-        auth_token = await ChatState.get_auth_token()
-        if not auth_token:
-            print("No auth token available, cannot connect to WebSocket")
-            return
-        
-        # Get username (try AuthState or use default)
-        try:
-            from ..Auth.AuthPage import AuthState
-            username = str(AuthState.username)
-            if username == "None" or not username or username.startswith("reflex___"):
-                username = "tester10"  # Fallback for testing
-        except ImportError:
-            username = "tester10"  # Default username for testing
-            
-        print(f"Username for WebSocket: {username}")
-        print(f"Token for WebSocket: {auth_token[:8]}...")
-        
-        # Clean up any existing WebSocket connection
-        if hasattr(self, 'websocket_connected') and self.websocket_connected:
-            await self.disconnect_websocket()
-            
-        # Build WebSocket URL based on whether we're in a room chat or direct chat
-        current_room_id = getattr(self, 'active_room_id', None)
-        if current_room_id:
-            # Room-specific WebSocket connection
-            self.websocket_url = f"ws://100.95.107.24:8000/ws/communication/{current_room_id}/"
-            print(f"Connecting to room-specific WebSocket: {self.websocket_url}")
-        else:
-            # General communication WebSocket
-            self.websocket_url = f"ws://100.95.107.24:8000/ws/communication/"
-            print(f"Connecting to general WebSocket: {self.websocket_url}")
-        
-        # Store auth info for WebSocket
-        self._ws_auth_token = auth_token
-        self._ws_username = username
-        
-        # Start the WebSocket connection task
-        self.start_websocket_task()
-        return
-    
-    def start_websocket_task(self):
-        """Start the WebSocket connection as a background task"""
-        print("Starting WebSocket background task")
-        # Create and store the background task
-        task = asyncio.create_task(self.websocket_listener())
-        ChatState.store_task("websocket_listener", task)
-        return
-    
-    async def websocket_listener(self):
-        """Listen for messages from the WebSocket
-        This runs as a background task
-        """
-        print("\n=== Starting WebSocket listener ===")
-        
-        # Get auth token and username from stored values
-        auth_token = getattr(self, '_ws_auth_token', ChatState.get_auth_token())
-        username = getattr(self, '_ws_username', str(AuthState.username))
-        
-        if not auth_token:
-            print("No auth token available, cannot connect to WebSocket")
-            return
-            
-        if username == "None" or not username:
-            username = "Tester"  # Fallback
-            
-        print(f"Auth username: {username}")
-        print(f"Using auth token: {auth_token[:8]}...")
-        
-        # Set up authorization headers
-        extra_headers = {
-            "Authorization": f"Token {auth_token}"
-        }
-        
-        try:
-            # Import websockets
-            import websockets
-            
-            # Set up a WebSocket connection
-            print(f"Connecting to WebSocket URL: {self.websocket_url}")
-            
-            # Try multiple times to connect
-            for attempt in range(3):
-                try:
-                    # Connect to WebSocket with auth headers
-                    async with websockets.connect(
-                        self.websocket_url,
-                        headers=extra_headers
-                    ) as websocket:
-                        print("WebSocket connection established!")
-                        self.websocket_connected = True
-                        
-                        # Send initial authentication message
-                        auth_message = {
-                            "type": "authenticate",
-                            "token": auth_token,
-                            "username": username
-                        }
-                        await websocket.send(json.dumps(auth_message))
-                        print(f"Sent authentication message with token: {auth_token[:8]}...")
-                        
-                        # Wait for auth confirmation
-                        try:
-                            auth_response = await asyncio.wait_for(websocket.recv(), timeout=3.0)
-                            print(f"Auth response: {auth_response}")
-                            
-                            # Process auth response
-                            try:
-                                auth_data = json.loads(auth_response)
-                                if "error" in auth_data:
-                                    print(f"Authentication error: {auth_data['error']}")
-                                    self.websocket_connected = False
-                                    return
-                            except json.JSONDecodeError:
-                                print("Invalid JSON in auth response")
-                        except asyncio.TimeoutError:
-                            print("Timed out waiting for auth confirmation")
-                        except Exception as e:
-                            print(f"Error receiving auth confirmation: {str(e)}")
-                        
-                        # Listen for messages in a loop
-                        while True:
-                            try:
-                                message = await websocket.recv()
-                                print(f"Received WebSocket message: {message[:100]}...")
-                                
-                                # Parse the JSON message
-                                try:
-                                    data = json.loads(message)
-                                    message_type = data.get("type", "")
-                                    
-                                    # Handle different message types
-                                    if message_type == "text_message":
-                                        # Regular chat message
-                                        sender = data.get("sender", "")
-                                        content = data.get("content", "")
-                                        
-                                        # Add to chat history
-                                        if sender == username:
-                                            # Our own message (from another device)
-                                            self.chat_history.append(("user", content))
-                                        else:
-                                            # Message from another user
-                                            self.chat_history.append(("other", content))
-                                            
-                                    elif message_type == "image_message":
-                                        # Image message
-                                        sender = data.get("sender", "")
-                                        image_url = data.get("image", "")
-                                        
-                                        # Add to chat history
-                                        if sender == username:
-                                            # Our own message (from another device)
-                                            self.chat_history.append(("user", image_url))
-                                        else:
-                                            # Message from another user
-                                            self.chat_history.append(("other", image_url))
-                                            
-                                    elif message_type == "video_message":
-                                        # Video message
-                                        sender = data.get("sender", "")
-                                        video_url = data.get("video", "")
-                                        
-                                        # Add to chat history
-                                        if sender == username:
-                                            # Our own message (from another device)
-                                            self.chat_history.append(("user", video_url))
-                                        else:
-                                            # Message from another user
-                                            self.chat_history.append(("other", video_url))
-                                            
-                                    elif message_type == "audio_message":
-                                        # Audio message
-                                        sender = data.get("sender", "")
-                                        audio_url = data.get("audio", "")
-                                        
-                                        # Add to chat history
-                                        if sender == username:
-                                            # Our own message (from another device)
-                                            self.chat_history.append(("user", audio_url))
-                                        else:
-                                            # Message from another user
-                                            self.chat_history.append(("other", audio_url))
-                                    
-                                    elif message_type == "start_call":
-                                        # Handle call invitation
-                                        caller = data.get("caller", "")
-                                        call_type = data.get("call_type", "audio")
-                                        print(f"Received call invitation from {caller}")
-                                        
-                                        # Set call data and show incoming call popup
-                                        self.call_user = caller
-                                        self.call_type = call_type
-                                        self.is_receiving_call = True
-                                        
-                                    elif message_type == "call_response":
-                                        # Handle response to a call invitation
-                                        response = data.get("response", "")
-                                        responder = data.get("responder", "")
-                                        print(f"Call response from {responder}: {response}")
-                                        
-                                        # Handle accepted/rejected call
-                                        if response == "accepted":
-                                            # Show call UI
-                                            if data.get("call_type", "audio") == "video":
-                                                self.show_video_popup = True
-                                            else:
-                                                self.show_call_popup = True
-                                        else:
-                                            # Show rejection message
-                                            self.chat_history.append(("system", f"{responder} declined the call"))
-                                            
-                                    elif message_type == "typing":
-                                        # Typing indicator
-                                        is_typing = data.get("is_typing", False)
-                                        typing_user = data.get("username", "")
-                                        
-                                        # Only update if it's from the other user
-                                        if typing_user != username:
-                                            print(f"User {typing_user} is " + ("typing" if is_typing else "not typing"))
-                                            self.other_user_typing = is_typing
-                                    
-                                    elif message_type == "error":
-                                        # Error message
-                                        error = data.get("error", "Unknown error")
-                                        print(f"WebSocket error: {error}")
-                                        
-                                        # Add to chat history as a system message
-                                        self.chat_history.append(("system", f"Error: {error}"))
-                                    
-                                    # WebRTC specific message types
-                                    elif message_type in ["webrtc_offer", "webrtc_answer", "ice_candidate"]:
-                                        # Pass to WebRTC state handler
-                                        try:
-                                            webrtc_state = WebRTCState.get_state()
-                                            await webrtc_state.handle_signaling_message(data)
-                                        except Exception as e:
-                                            print(f"Error handling WebRTC message: {str(e)}")
-                                    
-                                    else:
-                                        print(f"Unknown message type: {message_type}")
-                                except json.JSONDecodeError:
-                                    print(f"Invalid JSON received: {message[:100]}...")
-                                except Exception as e:
-                                    print(f"Error processing message: {str(e)}")
-                                    
-                            except websockets.exceptions.ConnectionClosed:
-                                print("WebSocket connection closed")
-                                self.websocket_connected = False
-                                break
-                    
-                    # If we reach here, the connection closed normally
-                    break
-                    
-                except (websockets.exceptions.InvalidStatusCode, 
-                        websockets.exceptions.InvalidURI,
-                        websockets.exceptions.InvalidHandshake) as e:
-                    print(f"WebSocket connection error (attempt {attempt+1}/3): {e}")
-                    self.websocket_connected = False
-                    # Wait before retry
-                    await asyncio.sleep(1)
-                    
-            # If we reach here and websocket_connected is still False, all attempts failed
-            if not self.websocket_connected:
-                print("Failed to connect to WebSocket after multiple attempts")
-                
-        except Exception as e:
-            print(f"Error in websocket_listener: {str(e)}")
-            self.websocket_connected = False
-            import traceback
-            traceback.print_exc()
-        
-        print("WebSocket listener task ended")
-        return
+    async def open_room_2(self):
+        """Open room 2."""
+        # Open the second room in the formatted rooms list
+        if self.formatted_rooms and len(self.formatted_rooms) > 1:
+            room = self.formatted_rooms[1]
+            await self.open_room(
+                room.get("id", ""), 
+                room.get("name", "Unknown Room")
+            )
     
     @rx.event
-    async def disconnect_websocket(self):
-        """Disconnect from the WebSocket server"""
-        print("Disconnecting from WebSocket")
-        self.websocket_connected = False
-        # Cleanup the websocket task
-        ChatState.cleanup_task("websocket_listener")
-    
+    async def open_room_3(self):
+        """Open room 3."""
+        # Open the third room in the formatted rooms list
+        if self.formatted_rooms and len(self.formatted_rooms) > 2:
+            room = self.formatted_rooms[2]
+            await self.open_room(
+                room.get("id", ""), 
+                room.get("name", "Unknown Room")
+            )
+
     @rx.event
-    async def send_websocket_message(self, message: str):
-        """Send a message via WebSocket
-        
-        Args:
-            message: The message content to send
-        """
-        if not message.strip():
-            print("Message is empty, not sending")
-            return
-            
-        # Check if WebSocket is connected
-        if not hasattr(self, 'websocket_connected') or not self.websocket_connected:
-            print("WebSocket not connected, falling back to HTTP")
-            # Fall back to HTTP API
+    async def keypress_handler(self, key: str):
+        """Handle keypress events in the message input."""
+        # Only send typing notification for non-Enter keys
+        if key != "Enter":
+            await self.send_typing_notification()
+        # Send message when Enter is pressed
+        elif key == "Enter":
             await self.send_message()
-            return
-            
-        print(f"Sending message via WebSocket: {message}")
+
+    @rx.event
+    async def show_error(self):
+        """Show error message in a browser alert."""
+        if self.error_message:
+            await rx.window_alert(self.error_message)
+        yield
         
-        # Import websockets
-        try:
-            import websockets
-        except ImportError:
-            print("Websockets package not available, installing...")
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "websockets"])
-            import websockets
-            
-        try:
-            # Get username (try AuthState or use default)
-            try:
-                from ..Auth.AuthPage import AuthState
-                username = str(AuthState.username)
-                if username == "None" or not username or username.startswith("reflex___"):
-                    username = "tester10"  # Fallback for testing
-            except ImportError:
-                username = "tester10"  # Default username for testing
-                
-            if not username or username == "None":
-                username = "tester10"  # Default
-            
-            # Get token directly from our API call
-            token = await ChatState.get_auth_token()
-                
-            if not token:
-                print("No auth token available, cannot send message")
-                self.chat_history.append(("system", "Authentication error: No token available"))
-                return
-                
-            print(f"Using auth token for WebSocket: {token[:8]}...")
-            
-            # Format message based on type (direct vs room chat)
-            if hasattr(self, 'active_room_id') and self.active_room_id and getattr(self, 'current_room_type', 'direct') != 'direct':
-                # Room chat (only for group rooms, not direct messages)
-                message_data = {
-                    "type": "text_message", 
-                    "room_id": self.active_room_id,
-                    "content": message,
-                    "sender": username,
-                    "token": token
-                }
-            else:
-                # Direct chat - always use receiver, never use room_id
-                message_data = {
-                    "type": "text_message",
-                    "receiver": self.current_chat_user, 
-                    "content": message,
-                    "sender": username,
-                    "token": token
-                }
-                
-            # Add authorization header for websocket connection
-            extra_headers = {
-                "Authorization": f"Token {token}"
-            }
-                
-            # Convert message data to JSON
-            message_json = json.dumps(message_data)
-            
-            # Add message to chat history optimistically
-            print("Adding message to chat history")
-            self.chat_history.append(("user", message))
-            
-            # Clear input immediately for better UX
-            self.message = ""
-            
-            # Send the message
-            async with websockets.connect(
-                self.websocket_url,
-                headers=extra_headers
-            ) as ws:
-                await ws.send(message_json)
-                print(f"Message sent via WebSocket: {message[:20]}...")
-                
-                # Wait for confirmation
-                try:
-                    # Wait for confirmation with a timeout
-                    confirmation = await asyncio.wait_for(ws.recv(), timeout=2.0)
-                    print(f"Received confirmation: {confirmation}")
-                    
-                    try:
-                        confirm_data = json.loads(confirmation)
-                        if "error" in confirm_data:
-                            print(f"Error sending message: {confirm_data['error']}")
-                            # Add error to chat history
-                            self.chat_error_message = f"Error: {confirm_data['error']}"
-                            # Try HTTP fallback
-                            print("Falling back to HTTP API...")
-                            await self.send_message()
-                    except json.JSONDecodeError:
-                        print("Invalid JSON response from server")
-                except asyncio.TimeoutError:
-                    print("Timed out waiting for confirmation")
-                    # Fall back to HTTP
-                    print("Falling back to HTTP API...")
-                    await self.send_message()
-                except Exception as e:
-                    print(f"Error receiving confirmation: {str(e)}")
-                    # Fall back to HTTP
-                    print("Falling back to HTTP API due to error...")
-                    await self.send_message()
-                
-        except Exception as e:
-            print(f"Error sending message via WebSocket: {str(e)}")
-            # Don't call send_message again to avoid infinite recursion
-            self.chat_error_message = f"Error sending message: {str(e)}"
-            import traceback
-            traceback.print_exc()
-    
-    @staticmethod
-    async def extract_auth_data_from_debug():
-        """Get authentication data from the auth debug endpoint.
+    @rx.event
+    async def show_success(self):
+        """Show success message in a browser alert."""
+        if self.success_message:
+            await rx.window_alert(self.success_message)
+        yield
+
+    @rx.event
+    async def find_existing_room(self, current_username, target_username):
+        """Find an existing direct chat room between two users.
         
-        This is a helper method to get a working token from the server's debug endpoint.
-        
-        Returns:
-            str: Authentication token if available, None otherwise
+        Returns the room ID if found, otherwise None.
         """
+        print(f"\n===== Finding existing room between {current_username} and {target_username} =====")
+        
+        if not self.auth_token:
+            print("Not authenticated - cannot find room")
+            return None
+        
         try:
-            import httpx
-            # Try to get auth data from the debug endpoint
+            print(f"Making API request to find direct room with {target_username}")
+            # Call the API to find an existing direct room
+            response = await rx.http.get(
+                f"{self.API_BASE_URL}/communication/find-direct-room/?username={target_username}",
+                headers={"Authorization": f"Token {self.auth_token}"}
+            )
             
-            # First try without a token
-            async with httpx.AsyncClient() as client:
-                debug_url = "http://100.95.107.24:8000/api/auth/auth-debug/"
-                response = await client.get(
-                    debug_url,
-                    headers={
-                        "Accept": "application/json"
-                    }
-                )
-                
-                print(f"Auth debug response: Status {response.status_code}")
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    print(f"Auth debug data: {data}")
-                    
-                    # Try to find a token in the response
-                    if data.get("token_from_header"):
-                        token = data.get("token_from_header")
-                        print(f"Found token in auth debug: {token[:8]}...")
-                        return token
-                    
-                    # Try to extract from auth_header
-                    auth_header = data.get("auth_header", "")
-                    if auth_header and auth_header.startswith("Token "):
-                        token = auth_header.replace("Token ", "").strip()
-                        print(f"Extracted token from auth header: {token[:8]}...")
-                        return token
-                        
-                    # Try with the tokens found in the logs
-                    hardcoded_tokens = [
-                        "bf78920338b6fcf1f98f7297567cb8f7df3ba512",  # From logs
-                        "4975e49d78d7f739093774363433279398fe3397"   # From logs
-                    ]
-                    
-                    for token in hardcoded_tokens:
-                        # Try each hardcoded token
-                        token_response = await client.get(
-                            debug_url,
-                            headers={
-                                "Accept": "application/json",
-                                "Authorization": f"Token {token}"
-                            }
-                        )
-                        
-                        if token_response.status_code == 200:
-                            data = token_response.json()
-                            if data.get("token_valid") == True:
-                                print(f"Found working token: {token[:8]}...")
-                                return token
+            print(f"Find room response status: {response.status}")
+            data = response.json()
+            print(f"Find room response data: {data}")
             
-            print("Could not find a valid token from auth debug")
+            # Check if a room was found
+            if "room" in data and data["room"]:
+                # Return the room ID
+                room_id = data["room"].get("id")
+                print(f"Found existing room: {room_id}")
+                return room_id
+            
+            # No room found
+            print("No existing room found")
             return None
         except Exception as e:
-            print(f"Error extracting auth data: {str(e)}")
+            print(f"Error finding existing room: {str(e)}")
             return None
-    
-    @staticmethod
-    def route_username():
-        """Get username from route parameters.
-        Returns a string username or None if not found.
-        """
-        # Attempt to get router and parameters from a live instance
-        try:
-            # Get states collection
-            all_states = rx.State.get_states()
-            
-            # Find any chat state instance to get router
-            for state_name, state_obj in all_states.items():
-                if hasattr(state_obj, "router") and hasattr(state_obj.router, "page"):
-                    params = getattr(state_obj.router.page, "params", {})
-                    chat_user = params.get("chat_user")
-                    if chat_user:
-                        print(f"Found chat_user in router params: {chat_user}")
-                    return chat_user
-            
-            return None
-        except Exception as e:
-            print(f"Error getting username from route: {e}")
-            return None
-    
-    @staticmethod
-    async def get_api_token(username="Tester", password="password123", email="tester@gmail.com"):
-        """Get a token from the API by logging in.
-        
-        Args:
-            username: Username to login with (default is "Tester" which has a working token)
-            password: Password to login with
-            email: Email to login with (required by the API)
-            
-        Returns:
-            str: Authentication token if successful, None otherwise
-        """
-        try:
-            import httpx
-            
-            print(f"Getting API token for user: {username}")
-            
-            async with httpx.AsyncClient() as client:
-                login_response = await client.post(
-                    "http://100.95.107.24:8000/api/auth/login/",
-                    json={
-                        "username": username,
-                        "password": password,
-                        "email": email
-                    },
-                    headers={
-                        "Content-Type": "application/json",
-                        "Accept": "application/json"
-                    },
-                    timeout=10.0
-                )
-                
-                print(f"Login API Response: {login_response.status_code}")
-                
-                if login_response.status_code == 200:
-                    # Parse the token from response
-                    data = login_response.json()
-                    token = data.get("token", None)
-                    
-                    if token:
-                        print(f"Got token from API: {token[:8]}...")
-                        return token
-                    else:
-                        print("No token in API response")
-                        return None
-                else:
-                    print(f"Login failed: {login_response.status_code}")
-                    print(f"Response: {login_response.text}")
-                    
-                    # Try the auth debug endpoint to get a token
-                    print("Trying auth debug endpoint to get token...")
-                    auth_token = await ChatState.extract_auth_data_from_debug()
-                    if auth_token:
-                        return auth_token
-                        
-                    return None
-        except Exception as e:
-            print(f"Error getting API token: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    @staticmethod
-    async def get_auth_token():
-        """Get an authentication token for API requests, either from AuthState or by logging in."""
-        print("Getting authentication token...")
-        
-        # First try to get current username
-        current_username = "tester10"  # Default username
-        try:
-            from ..Auth.AuthPage import AuthState
-            username_var = str(AuthState.username)
-            if username_var != "None" and not username_var.startswith("reflex___"):
-                current_username = username_var.strip('"\'')
-                print(f"Using username from AuthState: {current_username}")
-        except Exception as e:
-            print(f"Error getting username from AuthState: {e}")
-        
-        # Try to get token from the auth/token/{username}/ API endpoint
-        try:
-            import httpx
-            import os
-            
-            # Try to get session cookies from file if they exist
-            cookies = {}
-            try:
-                from pathlib import Path
-                cookie_file = Path.home() / ".startup_hub_cookies"
-                if cookie_file.exists():
-                    with open(cookie_file, "r") as f:
-                        cookie_data = f.read().strip()
-                        if cookie_data:
-                            # Format should be sessionid=abc123
-                            parts = cookie_data.split("=", 1)
-                            if len(parts) == 2:
-                                cookies = {parts[0]: parts[1]}
-                                print(f"Loaded session cookie for auth request")
-            except Exception as e:
-                print(f"Error loading cookies: {e}")
-            
-            # Create a client that follows redirects and keeps cookies
-            async with httpx.AsyncClient(follow_redirects=True) as client:
-                # Try to get token using the auth/token/{username}/ endpoint
-                print(f"Requesting token for user {current_username}...")
-                token_response = await client.get(
-                    f"http://100.95.107.24:8000/api/auth/token/{current_username}/",
-                    headers={
-                        "Accept": "application/json"
-                    },
-                    cookies=cookies,
-                    timeout=5.0
-                )
-                
-                print(f"Auth token API response: Status {token_response.status_code}")
-                
-                if token_response.status_code == 200:
-                    try:
-                        token_data = token_response.json()
-                        token = token_data.get("token")
-                        if token:
-                            print(f"Successfully retrieved token from API: {token[:8]}...")
-                            # Save token to file for future use
-                            try:
-                                with open(Path.home() / ".startup_hub_token", "w") as f:
-                                    f.write(token)
-                            except:
-                                pass
-                            return token
-                        else:
-                            print("Token endpoint returned success but no token in response")
-                    except Exception as e:
-                        print(f"Error parsing token response: {e}, Response: {token_response.text[:100]}")
-                elif token_response.status_code == 401 or token_response.status_code == 403:
-                    print("Token endpoint authentication required, user not authenticated")
-                else:
-                    print(f"Token endpoint error: {token_response.status_code}, Response: {token_response.text[:100]}")
-        except Exception as e:
-            print(f"Error retrieving token from API: {e}")
-            
-        # Next try to get token from AuthState
-        try:
-            from ..Auth.AuthPage import AuthState
-            
-            # Convert the Var to a string value
-            try:
-                stored_token = str(AuthState.token)
-                # Check if token is valid using string comparison
-                if stored_token != "None" and not stored_token.startswith("reflex___"):
-                    print(f"Retrieved auth token from AuthState: {stored_token[:8]}...")
-                    return stored_token.strip('"\'')
-            except Exception as e:
-                print(f"Error converting token: {e}")
-        except ImportError:
-            print("Could not import AuthState, trying API login")
-        
-        # Finally, try to login and get a token
-        try:
-            # Try to login with default test credentials
-            async with httpx.AsyncClient() as client:
-                login_response = await client.post(
-                    "http://100.95.107.24:8000/api/auth/login/",
-                    json={
-                        "email": "tester@example.com",
-                        "password": "password123"
-                    },
-                    headers={
-                        "Content-Type": "application/json",
-                        "Accept": "application/json"
-                    },
-                    timeout=5.0
-                )
-                
-                print(f"Login response: Status {login_response.status_code}")
-                
-                if login_response.status_code == 200:
-                    login_data = login_response.json()
-                    token = login_data.get("token")
-                    if token:
-                        print(f"Successfully logged in and got token: {token[:8]}...")
-                        return token
-                    
-                print(f"Login failed: {login_response.text}")
-                
-                # Try auth debug endpoint as fallback
-                auth_debug_response = await client.get(
-                    "http://startup-hub:8000/api/auth/auth-debug/",
-                    headers={"Accept": "application/json"}
-                )
-                
-                print(f"Auth debug response: Status {auth_debug_response.status_code}")
-                
-                if auth_debug_response.status_code == 200:
-                    auth_debug_data = auth_debug_response.json()
-                    print(f"Auth debug data: {auth_debug_data}")
-                    
-                    # Try to extract token from response
-                    token_from_header = auth_debug_data.get("token_from_header")
-                    if token_from_header and token_from_header != "None":
-                        print(f"Using token from auth debug: {token_from_header[:8]}...")
-                        return token_from_header.strip('"\'')
-        except Exception as e:
-            print(f"Error authenticating: {e}")
-            
-        print("Failed to get a valid authentication token")
-        return None
-
-    async def send_typing_indicator(self, is_typing: bool):
-        """Send a typing indicator over WebSocket.
-        
-        Args:
-            is_typing: Whether the user is currently typing
-        """
-        print(f"Sending typing indicator: {is_typing}")
-        
-        try:
-            # Get authentication token
-            auth_token = await ChatState.get_auth_token()
-            if not auth_token:
-                print("No auth token available, cannot send typing indicator")
-                return
-                
-            # Get username (try AuthState or use default)
-            try:
-                from ..Auth.AuthPage import AuthState
-                username = str(AuthState.username)
-                if username == "None" or not username or username.startswith("reflex___"):
-                    username = "tester10"  # Fallback for testing
-            except ImportError:
-                username = "tester10"  # Default username for testing
-                
-            # Set up auth headers for WebSocket
-            extra_headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Authorization": f"Token {auth_token}"
-            }
-            
-            # Format message based on type (direct vs room chat)
-            if hasattr(self, 'active_room_id') and self.active_room_id and getattr(self, 'current_room_type', 'direct') != 'direct':
-                # Room chat (only for group rooms, not direct messages)
-                message_data = {
-                    "type": "typing", 
-                    "room_id": self.active_room_id,
-                    "is_typing": is_typing,
-                    "username": username
-                }
-            else:
-                # Direct chat
-                target_username = self.current_chat_user
-                message_data = {
-                    "type": "typing",
-                    "target": target_username,
-                    "is_typing": is_typing,
-                    "username": username
-                }
-                
-            # Serialize the message data
-            message_json = json.dumps(message_data)
-            
-            # Try to use existing WebSocket if available
-            websocket = ChatState.get_websocket_connection()
-            if websocket and getattr(websocket, 'open', False):
-                print(f"Sending typing indicator via existing WebSocket: {message_json}")
-                await websocket.send(message_json)
-                return
-                
-            # Otherwise, create a new WebSocket connection just for this message
-            try:
-                async with websockets.connect(
-                    f"ws://startup-hub:8000/ws/chat/",
-                    headers=extra_headers
-                ) as websocket:
-                    await websocket.send(message_json)
-                    print(f"Sent typing indicator: {is_typing}")
-            except Exception as e:
-                print(f"WebSocket error when sending typing indicator: {e}")
-        except Exception as e:
-            print(f"Error sending typing indicator: {e}")
-            import traceback
-            traceback.print_exc()
-
-    @rx.event
-    async def respond_to_call(self, accept: bool):
-        """Respond to a call invitation
-        
-        Args:
-            accept: Whether to accept the call
-        """
-        try:
-            # Get auth token
-            auth_token = ChatState.get_auth_token()
-            if not auth_token:
-                print("No auth token available, cannot respond to call")
-                return
-            
-            # Get username
-            username = str(AuthState.username)
-            if username == "None" or not username:
-                username = "Tester"
-            
-            # Get caller information
-            caller = getattr(self, 'call_user', None)
-            if not caller:
-                print("No caller information available")
-                return
-            
-            # Create response message
-            response_message = {
-                "type": "call_response",
-                "receiver": caller,
-                "response": "accepted" if accept else "rejected",
-                "responder": username,
-                "call_type": getattr(self, 'call_type', 'audio')
-            }
-            
-            # Send via WebSocket if available
-            if self.websocket_connected:
-                try:
-                    import websockets
-                    
-                    # Add authorization header
-                    extra_headers = {
-                        "Authorization": f"Token {auth_token}"
-                    }
-                    
-                    # Send response
-                    async with websockets.connect(
-                        self.websocket_url,
-                        headers=extra_headers
-                    ) as ws:
-                        await ws.send(json.dumps(response_message))
-                        print(f"Sent call response ({response_message['response']}) to {caller}")
-                        
-                        # Handle accepted call
-                        if accept:
-                            # Show call UI based on call type
-                            if response_message['call_type'] == 'video':
-                                self.show_video_popup = True
-                            else:
-                                self.show_call_popup = True
-                                
-                            # Initialize WebRTC
-                            webrtc_state = WebRTCState.get_state()
-                            webrtc_state.start_call(caller, is_video=(response_message['call_type'] == 'video'))
-                            webrtc_state.add_participant(caller, caller)
-                            webrtc_state.is_call_initiator = False
-                            await webrtc_state.initialize_webrtc()
-                            await webrtc_state.connect_to_signaling_server()
-                        
-                        # Clear incoming call UI
-                        self.is_receiving_call = False
-                        
-                except Exception as e:
-                    print(f"Error sending call response: {str(e)}")
-            else:
-                # Use HTTP API
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"http://startup-hub:8000/api/communication/messages/",
-                        headers=get_auth_header(username, auth_token),
-                        json={
-                            "receiver": caller,
-                            "message_type": "call_response",
-                            "response": "accepted" if accept else "rejected",
-                            "call_type": getattr(self, 'call_type', 'audio')
-                        }
-                    )
-                    
-                    if response.status_code in (200, 201):
-                        print(f"Call response sent via HTTP API: {response.status_code}")
-                        
-                        # Handle accepted call
-                        if accept:
-                            # Show call UI based on call type
-                            if getattr(self, 'call_type', 'audio') == 'video':
-                                self.show_video_popup = True
-                            else:
-                                self.show_call_popup = True
-                                
-                            # Initialize WebRTC
-                            if getattr(self, 'call_type', 'audio') == 'video':
-                                await self.video_call()
-                            else:
-                                await self.audio_call()
-                        
-                        # Clear incoming call UI
-                        self.is_receiving_call = False
-                    else:
-                        print(f"Error sending call response: {response.status_code} {response.text}")
-        
-        except Exception as e:
-            print(f"Error responding to call: {str(e)}")
-            import traceback
-            traceback.print_exc()
-
-    @rx.event
-    async def accept_call(self):
-        """Accept an incoming call"""
-        await self.respond_to_call(True)
-        
-    @rx.event
-    async def reject_call(self):
-        """Reject an incoming call"""
-        await self.respond_to_call(False)
-
-    @rx.event
-    async def fetch_room_messages(self, room_id: str):
-        """
-        Fetch and display messages for a specific chat room using the API endpoint.
-        This method can be called directly to refresh messages in the UI.
-        
-        Args:
-            room_id: The ID of the room to fetch messages for
-        """
-        print(f"Fetching messages for room {room_id}...")
-        self.is_loading = True
-        
-        try:
-            # Clear existing messages
-            self.chat_history = []
-            
-            # Get authentication token
-            token = await ChatState.get_auth_token()
-            if not token:
-                self.chat_error_message = "Authentication failed - no token available"
-                self.is_loading = False
-                return
-            
-            # Store the room ID for future use
-            self.active_room_id = room_id
-            
-            # Set up HTTP client headers for the request
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Authorization": f"Token {token}"
-            }
-            
-            # Send request to get room messages
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"http://startup-hub:8000/api/communication/rooms/{room_id}/messages/",
-                    headers=headers,
-                    timeout=10.0
-                )
-                
-                if response.status_code == 200:
-                    # Parse the response data
-                    response_data = response.json()
-                    
-                    # Check if the response is paginated
-                    if isinstance(response_data, dict) and "results" in response_data:
-                        messages = response_data.get("results", [])
-                        total_count = response_data.get("count", 0)
-                        print(f"Received {len(messages)} messages out of {total_count} total")
-                    else:
-                        # Handle non-paginated response (just in case)
-                        messages = response_data if isinstance(response_data, list) else []
-                        print(f"Received {len(messages)} messages (non-paginated)")
-                    
-                    # Get current username for message sender identification
-                    current_username = str(AuthState.username)
-                    if current_username == "None" or not current_username:
-                        current_username = "Tester"
-                    
-                    print(f"Current user: {current_username}")
-                    
-                    # Process messages in reverse order (oldest first)
-                    for msg in reversed(messages):
-                        # Get the sender username from the message
-                        sender_username = msg["sender"]["username"]
-                        
-                        # If sender is current_username, then it's a message from the current user
-                        # Otherwise, it's a message from the other user
-                        sender_type = "user" if sender_username == current_username else "other"
-                        
-                        content = msg["content"]
-                        
-                        # Debug log to confirm sender identification
-                        print(f"Message from {sender_username} ({sender_type}): {content[:20]}...")
-                        
-                        # Handle different message types
-                        if msg["message_type"] != "text":
-                            if msg["image"]:
-                                content = f"[Image] {msg['image']}"
-                            elif msg["video"]:
-                                content = f"[Video] {msg['video']}"
-                            elif msg["audio"]:
-                                content = f"[Audio] {msg['audio']}"
-                            elif msg["document"]:
-                                content = f"[Document] {msg['document']}"
-                            elif msg["call_type"]:
-                                if msg["call_status"] == "missed":
-                                    content = f"[Missed {msg['call_type']} call]"
-                                elif msg["call_status"] == "ended":
-                                    duration = msg["call_duration"] or 0
-                                    content = f"[{msg['call_type'].capitalize()} call ended - Duration: {duration}s]"
-                                else:
-                                    content = f"[{msg['call_type'].capitalize()} call: {msg['call_status']}]"
-                        
-                        # Add the message to chat history
-                        self.chat_history.append((sender_type, content))
-                    
-                    print(f"Successfully loaded {len(messages)} messages for room {room_id}")
-                else:
-                    error_message = f"Failed to load messages: {response.status_code}"
-                    print(f"{error_message} - {response.text}")
-                    self.chat_error_message = error_message
-                    
-                    # If unauthorized, try to refresh token and retry
-                    if response.status_code == 401:
-                        print("Unauthorized. Attempting to refresh token...")
-                        new_token = await ChatState.get_auth_token(force_refresh=True)
-                        if new_token:
-                            print("Token refreshed. Retrying...")
-                            await self.fetch_room_messages(room_id)
-        except Exception as e:
-            error_message = f"Error loading messages: {str(e)}"
-            print(error_message)
-            self.chat_error_message = error_message
-            
-            import traceback
-            traceback.print_exc()
-        finally:
-            self.is_loading = False
-
-# Define model classes outside of ChatRoomState to avoid nesting issues
-class RoomParticipantUser(rx.Base):
-    username: str
-    
-class RoomParticipant(rx.Base):
-    user: RoomParticipantUser
-    
-class RoomLastMessage(rx.Base):
-    content: str
-
-class Room(rx.Base):
-    id: str
-    name: str
-    room_type: str
-    profile_image: Optional[str] = None
-    last_message: Optional[RoomLastMessage] = None
-    participants: List[RoomParticipant]
-
-class ChatRoomState(ChatState):
-    """Extended chat state for handling room data from API"""
-    rooms_data: List[Room] = []
-    current_room_id: Optional[str] = None
-    current_room_type: str = "direct"  # "direct" or "group"
-    rooms_loading: bool = False
-    room_error_message: str = ""
-    show_create_group_modal: bool = False
-    selected_participants: List[str] = []
-    group_name: str = ""
-    max_participants: int = 10
-    
-    @staticmethod
-    def get_current_room():
-        """Get the current room data based on room_id."""
-        room_state = ChatRoomState.get_state()
-        if not room_state.current_room_id:
-            return None
-            
-        for room in room_state.rooms_data:
-            if room.id == room_state.current_room_id:
-                return room
-                
-        return None
-    
-    @rx.event
-    async def room_audio_call(self):
-        """Start an audio call in the current room"""
-        await self.initiate_call(False)
-        
-    @rx.event
-    async def room_video_call(self):
-        """Start a video call in the current room"""
-        await self.initiate_call(True)
-        
-    def reset_state(self, preserve_username=False):
-        """Reset the chat state."""
-        # Store username if needed
-        current_user = ""
-        current_user_id = ""
-        if preserve_username:
-            current_user = self.current_chat_user
-            current_user_id = self.current_chat_user_id
-        
-        # Reset message state
-        self.chat_history = []
-        self.message = ""
-        self.room_error_message = ""
-        self.rooms_loading = False
-        
-        # Reset room state but preserve user info if needed
-        if preserve_username:
-            self.current_chat_user = current_user
-            self.current_chat_user_id = current_user_id
-        else:
-            self.current_chat_user = ""
-            self.current_chat_user_id = ""
-            self.current_room_id = None
-            
-        self.current_room_type = "direct"  # Default to direct messages
-    
-    def toggle_create_group_modal(self):
-        """Toggle the create group modal"""
-        self.show_create_group_modal = not self.show_create_group_modal
-        
-    def is_participant_selected(self, username: str) -> bool:
-        """Check if a participant is selected for group chat"""
-        for participant in self.selected_participants:
-            if participant == username:
-                return True
-        return False
-        
-    @rx.event
-    def toggle_participant(self, username: str):
-        """Toggle a user in the selected participants list."""
-        is_selected = False
-        for participant in self.selected_participants:
-            if participant == username:
-                is_selected = True
-                break
-            
-        if is_selected:
-            # Remove the user from selected participants
-            self.selected_participants = [p for p in self.selected_participants if p != username]
-        else:
-            # Add the user to selected participants
-            self.selected_participants.append(username)
-        
-        return is_selected
-    
-    def set_group_name(self, name: str):
-        """Set the group name"""
-        self.group_name = name
-        
-    def set_max_participants(self, max_participants: str):
-        """Set the maximum participants"""
-        try:
-            self.max_participants = int(max_participants)
-        except ValueError:
-            self.max_participants = 10
-    
-    @rx.var
-    def chat_route_username(self) -> str:
-        """Get username from route parameters."""
-        if hasattr(self, "router"):
-            params = getattr(self.router.page, "params", {})
-            chat_user = params.get("chat_user", "")
-            if chat_user:
-                # Update the current chat user based on the URL
-                self.current_chat_user_id = chat_user  # Use chat_user as ID
-                self.current_chat_user = chat_user     # Use chat_user directly
-                self.current_room_type = "direct"
-                # We'll load messages in initialize_chat
-            return chat_user
-        return ""
-    
-    @rx.var
-    def chat_route_room_id(self) -> str:
-        """Get room_id from route parameters."""
-        if hasattr(self, "router"):
-            params = getattr(self.router.page, "params", {})
-            room_id = params.get("room_id", "")
-            if room_id:
-                # Update the current chat to a room chat
-                self.current_room_id = room_id
-                self.current_room_type = "group"
-                # Find room name from rooms_data
-                for room in self.rooms_data:
-                    if room.id == room_id:
-                        self.current_chat_user = room.name
-                        break
-                else:
-                    # If room not found in data, set a default name and load data
-                    self.current_chat_user = f"Group Chat"
-                # We'll load messages in initialize_chat
-            return room_id
-        return ""
-    
-    async def on_mount(self):
-        """Called when the component is mounted."""
-        # Load rooms data on mount
-        await self.load_rooms()
-        # Check for route parameters on mount and initialize the chat
-        await self.initialize_chat()
-    
-    @rx.event
-    async def initialize_chat(self):
-        """Initialize the chat based on route parameters."""
-        try:
-            # Get route parameters
-            chat_user = self.chat_route_username
-            room_id = self.chat_route_room_id
-            
-            # Load messages based on route parameters
-            if chat_user:
-                print(f"Initializing direct chat with user: {chat_user}")
-                await self.load_direct_chat_messages(chat_user)
-            elif room_id:
-                print(f"Initializing room chat with ID: {room_id}")
-                await self.load_room_messages(room_id)
-        except Exception as e:
-            self.room_error_message = f"Error initializing chat: {str(e)}"
-            print(f"Error initializing chat: {str(e)}")
-            
-        return
-    
-    async def load_rooms(self):
-        """Load the list of chat rooms from the API."""
-        print("Loading rooms data...")
-        self.rooms_loading = True
-        
-        try:
-            # Get token using the await keyword
-            token = await ChatState.get_auth_token()
-            if token is None:
-                print("Failed to get authentication token")
-                self.room_error_message = "Authentication failed"
-                self.rooms_loading = False
-                return
-            
-            print(f"Using token for loading rooms: {token[:8]}...")
-            
-            # Set up HTTP client with authentication headers
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Authorization": f"Token {token}"
-            }
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    "http://startup-hub:8000/api/communication/rooms/",
-                    headers=headers
-                )
-                
-                if response.status_code == 200:
-                    try:
-                        raw_data = response.json()
-                        # Check if raw_data is a list
-                        if isinstance(raw_data, list):
-                            print(f"Got list of {len(raw_data)} rooms")
-                            
-                            # Handle each room individually to avoid errors
-                            rooms = []
-                            for room_data in raw_data:
-                                try:
-                                    # Create a Room object manually
-                                    room = Room(
-                                        id=room_data.get("id", ""),
-                                        name=room_data.get("name", ""),
-                                        room_type=room_data.get("room_type", ""),
-                                        profile_image=room_data.get("profile_image"),
-                                        # Build participants manually
-                                        participants=[
-                                            RoomParticipant(
-                                                user=RoomParticipantUser(
-                                                    username=p.get("user", {}).get("username", "")
-                                                )
-                                            )
-                                            for p in room_data.get("participants", [])
-                                        ]
-                                    )
-                                    # Add last_message if it exists
-                                    if room_data.get("last_message"):
-                                        room.last_message = RoomLastMessage(
-                                            content=room_data.get("last_message", {}).get("content", "")
-                                        )
-                                    rooms.append(room)
-                                except Exception as e:
-                                    print(f"Error creating room object: {str(e)}")
-                            
-                            self.rooms_data = rooms
-                            print(f"Successfully loaded {len(rooms)} rooms")
-                        else:
-                            print(f"API returned unexpected format: {raw_data}")
-                            self.rooms_data = []
-                    except Exception as e:
-                        print(f"Error parsing rooms data: {str(e)}")
-                        self.rooms_data = []
-                else:
-                    print(f"Error loading rooms: {response.status_code}")
-                    print(f"Response: {response.text}")
-                    self.room_error_message = f"Error loading rooms: {response.status_code}"
-                    
-        except Exception as e:
-            print(f"Error loading rooms: {str(e)}")
-            self.room_error_message = f"Error loading rooms: {str(e)}"
-            import traceback
-            traceback.print_exc()
-            
-        finally:
-            self.rooms_loading = False
-    
-    async def load_direct_chat_messages(self, username: str):
-        """Load direct chat messages for a specific user.
-        
-        Args:
-            username: The username to load chat messages for
-        """
-        print(f"load_direct_chat_messages called with username: {username}")
-        self.rooms_loading = True
-        
-        try:
-            # Store the target username
-            target_username = username
-            print(f"Setting up direct chat with user: {target_username}")
-            
-            # Set the current chat user for UI
-            self.current_chat_user = target_username
-            self.current_room_type = "direct"
-            # Explicitly reset room_id for direct chats to avoid using it
-            self.current_room_id = None
-            
-            # Get token
-            token = await ChatState.get_auth_token()
-            if token is None:
-                print("Failed to get authentication token")
-                self.room_error_message = "Authentication failed"
-                self.rooms_loading = False
-                return
-            
-            print(f"Using token: {token[:8]}...")
-            
-            # Set up headers with token
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Authorization": f"Token {token}"
-            }
-            
-            # Get messages directly with the receiver parameter
-            async with httpx.AsyncClient() as client:
-                messages_response = await client.get(
-                    f"http://startup-hub:8000/api/communication/messages/",
-                    headers=headers,
-                    params={"receiver": target_username},
-                    timeout=10.0
-                )
-                
-                if messages_response.status_code == 200:
-                    try:
-                        messages_data = messages_response.json()
-                        print(f"Got {len(messages_data) if isinstance(messages_data, list) else 'unknown'} messages")
-                        
-                        # Clear current chat history
-                        self.chat_history = []
-                        
-                        # Process messages if we got a list
-                        if isinstance(messages_data, list):
-                            # Sort messages by timestamp if available
-                            try:
-                                sorted_messages = sorted(
-                                    messages_data, 
-                                    key=lambda x: x.get("timestamp", "")
-                                )
-                            except:
-                                sorted_messages = messages_data
-                            
-                            # Get current username
-                            try:
-                                from ..Auth.AuthPage import AuthState
-                                current_username = str(AuthState.username)
-                                if current_username == "None" or not current_username:
-                                    current_username = "Tester"  # Default
-                            except ImportError:
-                                current_username = "Tester"  # Default
-                                
-                            # Add messages to chat history
-                            for message in sorted_messages:
-                                sender = message.get("sender", {}).get("username", "")
-                                content = message.get("content", "")
-                                
-                                # Add to chat history (user is the current user, other is the chat partner)
-                                if sender == current_username:
-                                    self.chat_history.append(("user", content))
-                                else:
-                                    self.chat_history.append(("other", content))
-                        
-                        print(f"Loaded {len(self.chat_history)} messages for direct chat")
-                    except Exception as e:
-                        print(f"Error parsing messages: {str(e)}")
-                        import traceback
-                        traceback.print_exc()
-                else:
-                    print(f"Error loading messages: {messages_response.status_code}")
-                    print(f"Response: {messages_response.text}")
-            
-            print(f"Direct chat setup complete for user: {target_username}")
-                
-        except Exception as e:
-            print(f"Error in load_direct_chat_messages: {str(e)}")
-            self.chat_error_message = f"Error loading messages: {str(e)}"
-            import traceback
-            traceback.print_exc()
-            
-        finally:
-            self.rooms_loading = False
-    
-    async def load_room_messages_for_direct_chat(self, room_id: str, username: str):
-        """Load messages for a specific room while preserving the direct chat username"""
-        self.chat_history = []
-        self.is_loading = True
-        auth_token = await ChatState.get_auth_token()
-        
-        # Set the username directly - don't rely on saved state
-        self.current_chat_user = username
-        self.current_chat_user_id = username
-        self.current_room_id = room_id
-        
-        print(f"Loading messages for direct chat room: {room_id}, user: {self.current_chat_user}")
-        
-        try:
-            # Check if token is valid
-            if not auth_token:
-                print("Auth token is empty or None")
-                self.chat_error_message = "Authentication token missing"
-                self.is_loading = False
-                return
-            
-            async with httpx.AsyncClient() as client:
-                # Using the rooms/messages endpoint with room_id in URL path
-                response = await client.get(
-                    f"http://startup-hub:8000/api/communication/rooms/{room_id}/messages/",
-                    headers=get_auth_header(token=auth_token)
-                )
-                
-                if response.status_code == 200:
-                    response_data = response.json()
-                    messages = response_data.get("results", [])
-                    
-                    # Get current username for comparison
-                    current_username = str(AuthState.username)
-                    if current_username == "None" or not current_username:
-                        current_username = "Tester"
-                    
-                    # Process messages in reverse order (oldest first)
-                    for msg in reversed(messages):
-                        # Get the sender username from the message
-                        sender_username = msg["sender"]["username"]
-                        
-                        # If sender is current_username, then it's a message from the current user
-                        # Otherwise, it's a message from the other user
-                        sender_type = "user" if sender_username == current_username else "other"
-                        
-                        content = msg["content"]
-                        
-                        # Handle different message types
-                        if msg["message_type"] != "text":
-                            if msg["image"]:
-                                content = f"[Image] {msg['image']}"
-                            elif msg["video"]:
-                                content = f"[Video] {msg['video']}"
-                            elif msg["audio"]:
-                                content = f"[Audio] {msg['audio']}"
-                            elif msg["document"]:
-                                content = f"[Document] {msg['document']}"
-                            elif msg["call_type"]:
-                                if msg["call_status"] == "missed":
-                                    content = f"[Missed {msg['call_type']} call]"
-                                elif msg["call_status"] == "ended":
-                                    duration = msg["call_duration"] or 0
-                                    content = f"[{msg['call_type'].capitalize()} call ended - Duration: {duration}s]"
-                                else:
-                                    content = f"[{msg['call_type'].capitalize()} call: {msg['call_status']}]"
-                                
-                        self.chat_history.append((sender_type, content))
-                        
-                    print(f"Loaded {len(messages)} messages for direct chat room {room_id}")
-                else:
-                    self.chat_error_message = f"Failed to load messages: {response.status_code} {response.text}"
-        except Exception as e:
-            self.chat_error_message = f"Error loading messages: {str(e)}"
-            print(f"Error loading direct chat room messages: {str(e)}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            self.is_loading = False
-            # Reaffirm the username one more time just to be safe
-            self.current_chat_user = username
-    
-    async def load_room_messages(self, room_id: str):
-        """
-        Load messages for a specific chat room.
-        
-        Args:
-            room_id: The ID of the room to load messages for
-        """
-        print(f"Loading messages for room {room_id}...")
-        self.is_loading = True
-        self.chat_history = []  # Clear existing messages
-        
-        try:
-            # Get authentication token
-            token = await ChatState.get_auth_token()
-            
-            # Store the current room ID
-            self.active_room_id = room_id
-            
-            # Set up HTTP client headers for the request
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Authorization": f"Token {token}"
-            }
-            
-            # Send request to get room messages
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"http://startup-hub:8000/api/communication/rooms/{room_id}/messages/",
-                    headers=headers,
-                    timeout=10.0
-                )
-                
-                if response.status_code == 200:
-                    # Parse the response data
-                    response_data = response.json()
-                    
-                    # Check if the response is paginated
-                    if isinstance(response_data, dict) and "results" in response_data:
-                        messages = response_data.get("results", [])
-                        total_count = response_data.get("count", 0)
-                        print(f"Received {len(messages)} messages out of {total_count} total")
-                    else:
-                        # Handle non-paginated response (just in case)
-                        messages = response_data if isinstance(response_data, list) else []
-                        print(f"Received {len(messages)} messages (non-paginated)")
-                    
-                    # Get current username for message sender identification
-                    current_username = str(AuthState.username)
-                    if current_username == "None" or not current_username:
-                        current_username = "Tester"
-                    
-                    print(f"Current user: {current_username}")
-                    
-                    # Process messages in reverse order (oldest first)
-                    for msg in reversed(messages):
-                        # Get the sender username from the message
-                        sender_username = msg["sender"]["username"]
-                        
-                        # If sender is current_username, then it's a message from the current user
-                        # Otherwise, it's a message from the other user
-                        sender_type = "user" if sender_username == current_username else "other"
-                        
-                        content = msg["content"]
-                        
-                        # Debug log to confirm sender identification
-                        print(f"Message from {sender_username} ({sender_type}): {content[:20]}...")
-                        
-                        # Handle different message types
-                        if msg["message_type"] != "text":
-                            if msg["image"]:
-                                content = f"[Image] {msg['image']}"
-                            elif msg["video"]:
-                                content = f"[Video] {msg['video']}"
-                            elif msg["audio"]:
-                                content = f"[Audio] {msg['audio']}"
-                            elif msg["document"]:
-                                content = f"[Document] {msg['document']}"
-                            elif msg["call_type"]:
-                                if msg["call_status"] == "missed":
-                                    content = f"[Missed {msg['call_type']} call]"
-                                elif msg["call_status"] == "ended":
-                                    duration = msg["call_duration"] or 0
-                                    content = f"[{msg['call_type'].capitalize()} call ended - Duration: {duration}s]"
-                                else:
-                                    content = f"[{msg['call_type'].capitalize()} call: {msg['call_status']}]"
-                        
-                        # Add the message to chat history
-                        self.chat_history.append((sender_type, content))
-                    
-                    print(f"Successfully loaded {len(messages)} messages for room {room_id}")
-                else:
-                    error_message = f"Failed to load messages: {response.status_code}"
-                    print(f"{error_message} - {response.text}")
-                    self.chat_error_message = error_message
-                    
-                    # If unauthorized, try to refresh token and retry
-                    if response.status_code == 401:
-                        print("Unauthorized. Attempting to refresh token...")
-                        new_token = await ChatState.get_auth_token(force_refresh=True)
-                        if new_token:
-                            print("Token refreshed. Retrying...")
-                            await self.fetch_room_messages(room_id)
-        except Exception as e:
-            error_message = f"Error loading messages: {str(e)}"
-            print(error_message)
-            self.chat_error_message = error_message
-            
-            # If unauthorized, try to refresh token and retry
-            if response.status_code == 401:
-                print("Unauthorized. Attempting to refresh token...")
-                new_token = await ChatState.get_auth_token(force_refresh=True)
-                if new_token:
-                    print("Token refreshed. Retrying...")
-                    await self.fetch_room_messages(room_id)
-            
-            # Show the error in the chat
-            self.chat_history.append(("system", f"Error: {error_message}"))
-            
-            import traceback
-            traceback.print_exc()
-        finally:
-            self.is_loading = False
-    
-    @rx.event
-    async def create_direct_chat(self, username: str):
-        """Create a direct message chat with a user"""
-        try:
-            auth_token = await ChatState.get_auth_token()
-            
-            # Check if token is valid
-            if not auth_token:
-                self.chat_error_message = "Authentication token missing"
-                return
-            
-            async with httpx.AsyncClient() as client:
-                # Use the create_direct_message endpoint
-                response = await client.post(
-                    "http://startup-hub:8000/api/communication/rooms/create_direct_message/",
-                    headers=get_auth_header(token=auth_token),
-                    json={
-                        "username": username
-                    }
-                )
-                
-                if response.status_code in (200, 201):
-                    room_data = response.json()
-                    room_id = room_data.get("id")
-                    
-                    # Store the room ID
-                    self.direct_chat_room_id = room_id
-                    self.active_room_id = room_id
-                    
-                    # Reload rooms to get the new room
-                    await self.load_rooms()
-                    
-                    # Redirect to the new URL format with both username and room_id
-                    yield rx.redirect(f"/chat/user/{username}/{room_id}")
-                else:
-                    raise ValueError(f"Failed to create direct chat: {response.status_code} {response.text}")
-        except Exception as e:
-            self.chat_error_message = f"Error creating direct chat: {str(e)}"
-            print(f"Error in create_direct_chat: {str(e)}")
-            import traceback
-            traceback.print_exc()
-
-    @rx.event
-    async def create_group_chat(self, name: str, max_participants: int = 10, participants: List[str] = None):
-        """Create a new group chat room"""
-        try:
-            auth_token = ChatState.get_auth_token()
-            
-            # Check if token is valid
-            if not auth_token:
-                self.room_error_message = "Authentication token missing"
-                return
-            
-            if participants is None or len(participants) == 0:
-                raise ValueError("No participants selected for group chat")
-            
-            async with httpx.AsyncClient() as client:
-                # Use the rooms endpoint to create a new group chat
-                response = await client.post(
-                    "http://startup-hub:8000/api/communication/rooms/",
-                    headers=get_auth_header(token=auth_token),
-                    json={
-                        "name": name,
-                        "room_type": "group",
-                        "max_participants": max_participants,
-                        "participants": participants
-                    }
-                )
-                
-                if response.status_code in (200, 201):
-                    room_data = response.json()
-                    # Reload rooms to get the new room
-                    await self.load_rooms()
-                    # Yield the redirect instead of returning it
-                    yield rx.redirect(f"/chat/room/{room_data['id']}")
-                else:
-                    raise ValueError(f"Failed to create group chat: {response.status_code} {response.text}")
-        except Exception as e:
-            self.room_error_message = f"Error creating group chat: {str(e)}"
-
-    @rx.event
-    async def handle_route_change(self, route: str):
-        """Handle route changes to reload the chat data."""
-        print(f"Route changed to: {route}")
-        await self.initialize_chat()
-        return
-
-    @rx.event
-    async def setup_room_chat(self):
-        """Set up room chat from URL parameters"""
-        try:
-            # Get the room_id parameter directly from the router's page params
-            room_id = None
-            if hasattr(self, "router") and hasattr(self.router, "page"):
-                page = self.router.page
-                if hasattr(page, "params"):
-                    params = page.params
-                    if isinstance(params, dict):
-                        room_id = params.get("room_id")
-                    else:
-                        # Handle case where params is not a dict
-                        for key, value in params:
-                            if key == "room_id":
-                                room_id = value
-                                break
-            
-            print(f"Room chat setup - room_id: {room_id}")
-            
-            if not room_id:
-                print("No room_id found in URL parameters")
-                self.chat_error_message = "No room ID found in URL"
-                yield
-                return
-            
-            # Update the current room ID and type
-            self.current_room_id = str(room_id)
-            self.current_room_type = "group"
-            
-            # Reset the state but preserve room ID
-            self.reset_state(preserve_username=False)
-            self.current_room_id = str(room_id)
-            
-            # Set a default room name (we'll try to update it in load_room_messages)
-            self.current_chat_user = f"Group Chat"
-            
-            # Load the room messages using the dedicated method
-            print(f"Loading messages for room ID: {self.current_room_id}")
-            await self.fetch_room_messages(str(room_id))
-            
-            print(f"Room chat setup complete for room: {room_id}")
-            yield
-        except Exception as e:
-            print(f"Error in setup_room_chat: {str(e)}")
-            self.chat_error_message = f"Error setting up room chat: {str(e)}"
-            yield
-    
-    @rx.event
-    async def setup_direct_chat(self):
-        """Set up direct chat from URL parameters"""
-        try:
-            # Get the chat_user parameter directly from the router's page params
-            chat_user = None
-            if hasattr(self, "router") and hasattr(self.router, "page"):
-                page = self.router.page
-                if hasattr(page, "params"):
-                    params = page.params
-                    if isinstance(params, dict):
-                        chat_user = params.get("chat_user")
-                    else:
-                        # Handle case where params is not a dict
-                        for key, value in params:
-                            if key == "chat_user":
-                                chat_user = value
-                                break
-            
-            print(f"Direct chat setup - chat_user: {chat_user}")
-            
-            if not chat_user:
-                print("No chat_user found in URL parameters")
-                self.chat_error_message = "No chat user found in URL"
-                yield
-                return
-            
-            # Reset the state
-            self.reset_state(preserve_username=False)
-            
-            # Explicitly set the current chat user
-            self.current_chat_user = str(chat_user)
-            self.current_chat_user_id = str(chat_user)
-            self.current_room_type = "direct"
-            
-            # Debug output
-            print(f"DIRECT CHAT DEBUG - User set to: {self.current_chat_user}")
-            
-            # Find or create a direct chat room first
-            token = await ChatState.get_auth_token()
-            if not token:
-                self.chat_error_message = "Authentication failed - no token available"
-                yield
-                return
-            
-            # Set up headers with token
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Authorization": f"Token {token}"
-            }
-            
-            # First, find or create the direct chat room
-            room_id = None
-            
-            try:
-                async with httpx.AsyncClient() as client:
-                    # Try to find existing room first by listing all direct rooms
-                    rooms_response = await client.get(
-                        "http://startup-hub:8000/api/communication/rooms/",
-                        headers=headers,
-                        params={"room_type": "direct"},
-                        timeout=10.0
-                    )
-                    
-                    if rooms_response.status_code == 200:
-                        rooms_data = rooms_response.json()
-                        rooms = rooms_data.get("results", [])
-                        
-                        # Get current username for comparison
-                        current_username = str(AuthState.username)
-                        if current_username == "None" or not current_username:
-                            current_username = "Tester"
-                        
-                        # Find the direct room with the target user
-                        for room in rooms:
-                            if room["room_type"] == "direct":
-                                # Check if this room has exactly 2 participants
-                                if len(room["participants"]) == 2:
-                                    # Check if the participants are the current user and the target user
-                                    usernames = [p["user"]["username"] for p in room["participants"]]
-                                    if current_username in usernames and str(chat_user) in usernames:
-                                        room_id = room["id"]
-                                        self.direct_chat_room_id = room_id
-                                        print(f"Found existing direct chat room: {room_id}")
-                                        break
-                    
-                    # If no room found, create a new direct chat room
-                    if not room_id:
-                        print(f"No existing direct chat room found with {chat_user}, creating new one")
-                        create_response = await client.post(
-                            "http://startup-hub:8000/api/communication/rooms/create_direct_message/",
-                            headers=headers,
-                            json={"username": str(chat_user)},
-                            timeout=10.0
-                        )
-                        
-                        if create_response.status_code in (200, 201):
-                            room_data = create_response.json()
-                            room_id = room_data.get("id")
-                            self.direct_chat_room_id = room_id
-                            print(f"Created new direct chat room: {room_id}")
-                        else:
-                            print(f"Failed to create direct chat room: {create_response.status_code} {create_response.text}")
-                            self.chat_error_message = f"Failed to create chat room: {create_response.status_code}"
-                            yield
-                            return
-            except Exception as e:
-                print(f"Error finding/creating direct chat room: {str(e)}")
-                self.chat_error_message = f"Error setting up direct chat: {str(e)}"
-                yield
-                return
-            
-            # Now that we have the room ID, load the messages
-            if room_id:
-                print(f"Loading messages for direct chat room: {room_id}")
-                self.active_room_id = room_id
-                await self.fetch_room_messages(room_id)
-            else:
-                self.chat_error_message = "Could not find or create direct chat room"
-                self.chat_history.append(("system", "Error: Could not find or create direct chat room"))
-            
-            print(f"Direct chat setup complete for user: {chat_user}")
-            yield
-        except Exception as e:
-            print(f"Error in setup_direct_chat: {str(e)}")
-            self.chat_error_message = f"Error setting up direct chat: {str(e)}"
-            yield
-
-    @rx.event
-    async def load_messages_event(self, identifier: str, chat_type: str):
-        """Event handler for loading messages.
-        
-        Args:
-            identifier: Either username or room_id based on chat_type
-            chat_type: Either "direct" or "room"
-        """
-        if chat_type == "direct":
-            await self.load_direct_chat_messages(identifier)
-        else:
-            await self.load_room_messages(identifier)
-            
-    @rx.event
-    async def initiate_call(self, is_video: bool = False):
-        """Start a call in the current room via API"""
-        try:
-            auth_token = ChatState.get_auth_token()
-            
-            # Check if token is valid
-            if not auth_token:
-                self.room_error_message = "Authentication token missing"
-                return
-            
-            room_id = self.current_room_id
-            if not room_id:
-                # This is a direct chat, use different approach
-                target_username = self.current_chat_user
-                if not target_username:
-                    raise ValueError("Cannot start call: No target user")
-                
-                # Get current username
-                username = str(AuthState.username)
-                if username == "None" or not username:
-                    username = "Tester"  # Fallback
-                
-                # Send call invitation via WebSocket if available
-                if self.websocket_connected:
-                    # Create call invitation message
-                    call_message = {
-                        "type": "start_call",
-                        "receiver": target_username,
-                        "call_type": "video" if is_video else "audio",
-                        "caller": username
-                    }
-                    
-                    # Set up WS connection
-                    try:
-                        import websockets
-                        
-                        # Add authorization header
-                        extra_headers = {
-                            "Authorization": f"Token {auth_token}"
-                        }
-                        
-                        # Send call invitation
-                        async with websockets.connect(
-                            self.websocket_url,
-                            headers=extra_headers
-                        ) as ws:
-                            await ws.send(json.dumps(call_message))
-                            print(f"Sent call invitation to {target_username}")
-                            
-                            # Show calling UI
-                            self.show_calling_popup = True
-                            self.call_type = "video" if is_video else "audio"
-                            
-                            # Initialize WebRTC
-                            webrtc_state = WebRTCState.get_state()
-                            webrtc_state.start_call(target_username, is_video=is_video)
-                            webrtc_state.add_participant(target_username, target_username)
-                            webrtc_state.is_call_initiator = True
-                            await webrtc_state.initialize_webrtc()
-                            await webrtc_state.connect_to_signaling_server()
-                            
-                    except Exception as e:
-                        print(f"Error sending call invitation: {str(e)}")
-                        self.room_error_message = f"Error starting call: {str(e)}"
-                        self.show_calling_popup = False
-                else:
-                    # Use HTTP API to create call invitation
-                    async with httpx.AsyncClient() as client:
-                        response = await client.post(
-                            f"http://startup-hub:8000/api/communication/messages/",
-                            headers=get_auth_header(username, auth_token),
-                            json={
-                                "receiver": target_username,
-                                "message_type": "call_invitation",
-                                "call_type": "video" if is_video else "audio"
-                            }
-                        )
-                        
-                        if response.status_code in (200, 201):
-                            # Show calling UI
-                            self.show_calling_popup = True
-                            self.call_type = "video" if is_video else "audio"
-                            
-                            # Initialize WebRTC
-                            if is_video:
-                                await self.video_call()
-                            else:
-                                await self.audio_call()
-                        else:
-                            raise ValueError(f"Failed to send call invitation: {response.status_code} {response.text}")
-                
-                return
-            
-            # This is a room chat
-            async with httpx.AsyncClient() as client:
-                # Use the start_call endpoint
-                response = await client.post(
-                    f"http://startup-hub:8000/api/communication/rooms/{room_id}/start_call/",
-                    headers=get_auth_header(token=auth_token),
-                    json={
-                        "is_video": is_video
-                    }
-                )
-                
-                if response.status_code in (200, 201):
-                    call_data = response.json()
-                    # Handle call UI display
-                    if is_video:
-                        await self.video_call()
-                    else:
-                        await self.audio_call()
-                else:
-                    raise ValueError(f"Failed to start call: {response.status_code} {response.text}")
-                    
-        except Exception as e:
-            self.room_error_message = f"Error starting call: {str(e)}"
-
-    @rx.event
-    async def refresh_messages(self):
-        """Refresh the chat messages from the server."""
-        print("Refreshing messages...")
-        
-        try:
-            # Handle different chat types
-            if self.current_room_type == "direct":
-                # For direct chats we need the room ID
-                room_id = self.direct_chat_room_id or self.active_room_id
-                if room_id:
-                    await self.fetch_room_messages(room_id)
-                else:
-                    # If no room ID found, we need to set up the direct chat again
-                    username = self.current_chat_user
-                    if username:
-                        await self.setup_direct_chat()
-                    else:
-                        self.chat_history.append(("system", "Error: No chat user set"))
-            else:
-                # For group chats we use the current room ID
-                room_id = self.current_room_id or self.active_room_id
-                if room_id:
-                    await self.fetch_room_messages(room_id)
-                else:
-                    self.chat_history.append(("system", "Error: No active room selected"))
-        except Exception as e:
-            error_message = f"Error refreshing messages: {str(e)}"
-            print(error_message)
-            self.chat_error_message = error_message
-            self.chat_history.append(("system", f"Error: {error_message}"))
-            import traceback
-            traceback.print_exc()
-            
-        return
-
-    @rx.event
-    async def setup_direct_chat_with_room(self):
-        """Set up direct chat from URL parameters including the room_id"""
-        try:
-            # Get both the chat_user and room_id parameters from the router's page params
-            chat_user = None
-            room_id = None
-            
-            if hasattr(self, "router") and hasattr(self.router, "page"):
-                page = self.router.page
-                if hasattr(page, "params"):
-                    params = page.params
-                    if isinstance(params, dict):
-                        chat_user = params.get("chat_user")
-                        room_id = params.get("room_id")
-                    else:
-                        # Handle case where params is not a dict
-                        for key, value in params:
-                            if key == "chat_user":
-                                chat_user = value
-                            elif key == "room_id":
-                                room_id = value
-            
-            print(f"Direct chat with room setup - chat_user: {chat_user}, room_id: {room_id}")
-            
-            if not chat_user:
-                print("No chat_user found in URL parameters")
-                self.chat_error_message = "No chat user found in URL"
-                yield
-                return
-                
-            if not room_id:
-                print("No room_id found in URL parameters")
-                self.chat_error_message = "No room ID found in URL"
-                yield
-                return
-            
-            # Reset the state
-            self.reset_state(preserve_username=False)
-            
-            # Set chat properties
-            self.current_chat_user = str(chat_user)
-            self.current_chat_user_id = str(chat_user)
-            self.current_room_type = "direct"
-            self.active_room_id = str(room_id)
-            self.direct_chat_room_id = str(room_id)
-            self.current_room_id = str(room_id)
-            
-            print(f"Loading messages for direct chat room: {room_id}, user: {chat_user}")
-            
-            # Load messages using the existing fetch_room_messages method
-            await self.fetch_room_messages(room_id)
-            
-            print(f"Direct chat with room setup complete for user: {chat_user}, room: {room_id}")
-            yield
-        except Exception as e:
-            print(f"Error in setup_direct_chat_with_room: {str(e)}")
-            self.chat_error_message = f"Error setting up direct chat: {str(e)}"
-            import traceback
-            traceback.print_exc()
-            yield
-
-def create_group_modal() -> rx.Component:
-    """Modal for creating a new group chat."""
-    return rx.dialog.root(
-        rx.dialog.trigger(
-            rx.button(
-                rx.icon("plus"),
-                variant="ghost",
-                color="white",
-                size="1",
-            ),
-        ),
-        rx.dialog.content(
-            rx.dialog.title("Create New Group Chat"),
-            rx.dialog.description(
-                rx.vstack(
-                    rx.input(
-                        placeholder="Group Name",
-                        value=ChatRoomState.group_name,
-                        on_change=ChatRoomState.set_group_name,
-                        width="100%",
-                    ),
-                    rx.input(
-                        placeholder="Max Participants (default: 10)",
-                        type_="number",
-                        value=str(ChatRoomState.max_participants),
-                        on_change=ChatRoomState.set_max_participants,
-                        width="100%",
-                    ),
-                    rx.divider(),
-                    rx.text("Select Participants:", font_weight="bold"),
-                    rx.cond(
-                        len(ChatRoomState.rooms_data) > 0,
-                        rx.vstack(
-                            rx.foreach(
-                                ChatRoomState.rooms_data,
-                                lambda room: rx.cond(
-                                    room.room_type == "direct",
-                                    rx.hstack(
-                                        rx.avatar(
-                                            name=room.name,
-                                            size="3",
-                                        ),
-                                        rx.text(room.name),
-                                        # Checkbox for selecting participants
-                                        rx.checkbox(
-                                            on_change=lambda checked, name=room.name: ChatRoomState.toggle_participant(name),
-                                        ),
-                                    ),
-                                    rx.box()  # Empty box for non-direct chats
-                                )
-                            ),
-                        ),
-                        rx.text("No users available to add", color="gray.500"),
-                    ),
-                    rx.hstack(
-                        rx.dialog.close(
-                            rx.button(
-                                "Cancel",
-                                variant="outline",
-                            ),
-                        ),
-                        rx.dialog.close(
-                            rx.button(
-                                "Create Group",
-                                on_click=lambda: ChatRoomState.create_group_chat(
-                                    ChatRoomState.group_name, 
-                                    ChatRoomState.max_participants,
-                                    ChatRoomState.selected_participants
-                                ),
-                                is_disabled=rx.cond(
-                                    (ChatRoomState.group_name == "") | (len(ChatRoomState.selected_participants) == 0),
-                                    True,
-                                    False,
-                                ),
-                            ),
-                        ),
-                        justify="between",
-                        width="100%",
-                    ),
-                    spacing="4",
-                    width="100%",
-                ),
-            ),
-            bg="#2a2a2a",
-            color="white",
-            border_radius="md",
-            padding="15px",
-            width="90%",
-            max_width="500px",
-        ),
-        open=ChatRoomState.show_create_group_modal,
-        on_open_change=ChatRoomState.toggle_create_group_modal,
-    )
-
-def room_list() -> rx.Component:
-    """Display a list of available chat rooms."""
-    return rx.vstack(
-        rx.hstack(
-            rx.heading("Chat Rooms", size="3", color="white"),
-            rx.spacer(),
-            create_group_modal(),  # Now this has its own button in the dialog trigger
-            width="100%",
-            padding="10px",
-        ),
-        rx.cond(
-            ChatRoomState.rooms_loading,
-            rx.spinner(),
-            rx.cond(
-                len(ChatRoomState.rooms_data) > 0,
-                rx.vstack(
-                    rx.foreach(
-                        ChatRoomState.rooms_data,
-                        lambda room: rx.hstack(
-                            rx.avatar(
-                                name=room.name,
-                                size="5",
-                                border="2px solid white",
-                                margin_right="10px",
-                            ),
-                            rx.vstack(
-                                rx.text(
-                                    room.name, 
-                                    font_weight="bold", 
-                                    color="white"
-                                ),
-                                rx.text(
-                                    rx.cond(
-                                        room.last_message != None,
-                                        rx.cond(
-                                            room.last_message.content != "",
-                                            room.last_message.content,
-                                            "Media message"
-                                        ),
-                                        "No messages yet"
-                                    ),
-                                    color="gray.300",
-                                    font_size="sm",
-                                    css={"textOverflow": "ellipsis", "overflow": "hidden", "whiteSpace": "nowrap", "maxWidth": "150px"}
-                                ),
-                                align_items="start",
-                                spacing="0",
-                            ),
-                            spacing="4",
-                            padding="10px",
-                            border_radius="md",
-                            width="100%",
-                            _hover={"bg": "rgba(255, 255, 255, 0.1)"},
-                            cursor="pointer",
-                            transition="all 0.2s ease-in-out",
-                            # Determine URL based on room type
-                            on_click=rx.cond(
-                                room.room_type == "direct",
-                                # For direct chats, use the new URL format with user and room_id
-                                rx.redirect(f"/chat/user/{room.name}/{room.id}"),
-                                # For group chats, use the room route
-                                rx.redirect(f"/chat/room/{room.id}"),
-                            ),
-                        ),
-                    ),
-                    overflow="auto",
-                    height="100%",
-                    width="100%",
-                    spacing="1",
-                ),
-                rx.vstack(
-                    rx.icon("mail", color="gray.400", font_size="4xl"),
-                    rx.text("No chat rooms available", color="gray.400"),
-                    rx.text(
-                        "Connect with others to start chatting",
-                        color="gray.500",
-                        font_size="sm",
-                    ),
-                    justify="center",
-                    align="center",
-                    height="100%",
-                    spacing="4",
-                ),
-            ),
-        ),
-        height="100%",
-        width="250px",
-        bg="#1e1e1e",
-        border_right="1px solid #333",
-        overflow="auto",
-    )
-
-@rx.page
-def chatroom_page():
-    """Main chat room page that integrates the room list and chat interface."""
-    return rx.vstack(
-        rx.heading("Chat Room", size="3", color="white"),
-        rx.text("This is a minimal chat page to help diagnose issues", color="white"),
-        rx.button(
-            "Refresh",
-            on_click=ChatRoomState.load_rooms,
-            color_scheme="blue",
-        ),
-        padding="20px",
-        spacing="4",
-        bg="#2d2d2d",
-        width="100%",
-        height="100vh",
-    )
-
-@rx.page(route="/chat/room/[room_id]")
-def chat_room_route():
-    """Route for /chat/room/{room_id}"""
-    return rx.box(
-        rx.hstack(
-            sidebar(),
-            rx.vstack(
-                user_header(),
-                chat(),
-                message_input(),
-                height="100vh",
-                width="100%",
-                spacing="0",
-                bg="#2d2d2d",
-            ),
-            spacing="0",
-            width="100%",
-            height="100vh",
-            overflow="hidden",
-        ),
-        # WebRTC call components
-        webrtc_calling_popup(),
-        webrtc_call_popup(),
-        webrtc_video_call_popup(),
-        incoming_call_popup(),
-        on_mount=ChatRoomState.setup_room_chat,
-    )
-
-@rx.page(route="/chat/user/[chat_user]/[room_id]")
-def direct_chat_room_route():
-    """Route for /chat/user/{chat_user}/{room_id} - Direct access to a room with a specific user"""
-    return rx.box(
-        rx.hstack(
-            sidebar(),
-            rx.vstack(
-                user_header(),
-                chat(),
-                message_input(),
-                height="100vh",
-                width="100%",
-                spacing="0",
-                bg="#2d2d2d",
-            ),
-            spacing="0",
-            width="100%",
-            height="100vh",
-            overflow="hidden",
-        ),
-        # WebRTC call components
-        webrtc_calling_popup(),
-        webrtc_call_popup(),
-        webrtc_video_call_popup(),
-        incoming_call_popup(),
-        on_mount=ChatRoomState.setup_direct_chat_with_room,
-    )
-
-@rx.page(route="/chat/user/[chat_user]")
-def direct_chat_route():
-    """Route for /chat/user/{chat_user} (legacy route)"""
-    return rx.box(
-        rx.hstack(
-            sidebar(),
-            rx.vstack(
-                user_header(),
-                chat(),
-                message_input(),
-                height="100vh",
-                width="100%",
-                spacing="0",
-                bg="#2d2d2d",
-            ),
-            spacing="0",
-            width="100%",
-            height="100vh",
-            overflow="hidden",
-        ),
-        # WebRTC call components
-        webrtc_calling_popup(),
-        webrtc_call_popup(),
-        webrtc_video_call_popup(),
-        incoming_call_popup(),
-        on_mount=ChatRoomState.setup_direct_chat,
-    )
-
-# Define the UI components from Chat_Page.py
-
-def sidebar() -> rx.Component:
-    return rx.vstack(
-        rx.hstack(
-            rx.heading("Startup HUB", size="3", color="white"),
-            rx.spacer(),
-            width="100%",
-            padding="10px",
-        ),
-        rx.vstack(
-            rx.hstack(
-                rx.icon("message-square", color="white", font_size="18px"),
-                rx.text("Chat", color="white", font_size="16px"),
-                width="100%",
-                padding="10px",
-                bg="rgba(255, 255, 255, 0.1)",  # Active item
-                border_radius="md",
-            ),
-            rx.hstack(
-                rx.icon("users", color="white", font_size="18px"),
-                rx.text("Contacts", color="white", font_size="16px"),
-                width="100%",
-                padding="10px",
-                _hover={"bg": "rgba(255, 255, 255, 0.1)"},
-                border_radius="md",
-                cursor="pointer",
-            ),
-            rx.hstack(
-                rx.icon("phone", color="white", font_size="18px"),
-                rx.text("Calls", color="white", font_size="16px"),
-                width="100%",
-                padding="10px",
-                _hover={"bg": "rgba(255, 255, 255, 0.1)"},
-                border_radius="md",
-                cursor="pointer",
-            ),
-            rx.hstack(
-                rx.icon("settings", color="white", font_size="18px"),
-                rx.text("Settings", color="white", font_size="16px"),
-                width="100%",
-                padding="10px",
-                _hover={"bg": "rgba(255, 255, 255, 0.1)"},
-                border_radius="md",
-                cursor="pointer",
-            ),
-            width="100%",
-            spacing="2",
-            align_items="start",
-        ),
-        rx.spacer(),
-        rx.hstack(
-            rx.avatar(name="User", size="2"),
-            rx.text("Your Profile", color="white", font_size="14px"),
-            width="100%",
-            padding="10px",
-            _hover={"bg": "rgba(255, 255, 255, 0.1)"},
-            border_radius="md",
-            cursor="pointer",
-        ),
-        height="100vh",
-        width="200px",
-        bg="#1e1e1e",
-        border_right="1px solid #444",
-        padding="10px",
-    )
-
-def user_header() -> rx.Component:
-    """The header component for the chat interface, showing the current user info."""
-    return rx.hstack(
-        rx.avatar(src="/logo.png", size="4"),
-        rx.vstack(
-            rx.heading(
-                ChatRoomState.current_chat_user,
-                size="4",
-                align="left",
-                width="100%",
-            ),
-            rx.cond(
-                ChatRoomState.other_user_typing,
-                rx.text("typing...", color="gray", font_size="xs", align="left"),
-                rx.text("", height="1em"),
-            ),
-            align_items="flex-start",
-            spacing="0",
-            width="100%",
-        ),
-        rx.spacer(),
-        rx.tooltip(
-            rx.icon_button(
-                rx.icon("refresh"),
-                size="1",
-                variant="ghost",
-                on_click=ChatRoomState.refresh_messages,
-                is_loading=ChatRoomState.is_loading,
-            ),
-            content="Refresh messages"
-        ),
-        rx.tooltip(
-            rx.icon_button(
-                rx.icon("phone"),
-                size="1",
-                variant="ghost",
-                on_click=ChatRoomState.audio_call,
-            ),
-            content="Audio call"
-        ),
-        rx.tooltip(
-            rx.icon_button(
-                rx.icon("video"),
-                size="1",
-                variant="ghost",
-                on_click=ChatRoomState.video_call,
-            ),
-            content="Video call"
-        ),
-        width="100%",
-        padding="1em",
-        border_bottom="1px solid #eaeaea",
-        bg_color="rgba(255, 255, 255, 0.95)",
-        backdrop_filter="blur(10px)",
-        style={"position": "sticky", "top": "0", "z-index": "100"},
-    )
-
-def message_display(sender: str, message: str) -> rx.Component:
-    is_upload = isinstance(message, str) and message.startswith("/_upload")
-    
-    return rx.hstack(
-        rx.cond(
-            sender == "user",
-            rx.spacer(),
-            rx.box(),
-        ),
-        rx.box(
-            rx.cond(
-                is_upload,
-                rx.image(
-                    src=message,
-                    max_width="200px",
-                    border_radius="15px"
-                ),
-                rx.text(message, color="#333333")
-            ),
-            padding="10px 15px",
-            border_radius="15px",
-            max_width="70%",
-            bg=rx.cond(
-                sender == "user",
-                "#80d0ea",
-                "white"
-            ),
-            margin_left=rx.cond(
-                sender == "user",
-                "auto",
-                "0"
-            ),
-            margin_right=rx.cond(
-                sender == "user",
-                "0",
-                "auto"
-            ),
-            box_shadow="0px 1px 2px rgba(0, 0, 0, 0.1)",
-        ),
-        width="100%",
-        margin_y="10px",
-        padding_x="15px",
-    )
-
-def chat() -> rx.Component:
-    return rx.box(
-        rx.vstack(
-            # No error messages displayed
-            rx.foreach(
-                ChatState.chat_history,
-                lambda messages: message_display(messages[0], messages[1])
-            ),
-            width="100%",
-            align_items="stretch",
-            spacing="0",
-        ),
-        padding="10px 0",
-        overflow="auto",
-        flex="1",
-        width="100%",
-        height="calc(100vh - 130px)",
-        bg="#2d2d2d",
-    )
-
-def message_input() -> rx.Component:
-    return rx.hstack(
-        rx.hstack(
-            rx.input(
-                value=ChatState.message,
-                placeholder="Type a message...",
-                on_change=ChatState.set_message,
-                on_key_down=ChatState.handle_key_down,  # Handle Enter key
-                _placeholder={"color": "#AAAAAA"},
-                border_radius="20px",
-                border="none",
-                width="100%",
-                bg="white",
-                padding="10px 15px",
-                height="40px",
-                _focus={
-                    "outline": "none",
-                    "box_shadow": "0 0 0 2px rgba(128, 208, 234, 0.3)",
-                },
-                _hover={
-                    "bg": "#f8f8f8",
-                },
-            ),
-            bg="white",
-            border_radius="20px",
-            padding_left="10px",
-            width="100%",
-            box_shadow="0 2px 4px rgba(0, 0, 0, 0.05)",
-        ),
-        rx.upload(
-            rx.button(
-                rx.icon("paperclip"),
-                border_radius="50%",
-                bg="#80d0ea",
-                color="white", 
-                width="40px",
-                height="40px",
-                padding="0",
-                _hover={
-                    "bg": "#6bc0d9",
-                    "transform": "scale(1.05)",
-                },
-                transition="all 0.2s ease-in-out",
-            ),
-            id="chat_upload",
-            accept={
-                "image/png": [".png"],
-                "image/jpeg": [".jpg", ".jpeg"],
-                "image/gif": [".gif"],
-                "image/webp": [".webp"],
-            },
-            max_files=1,
-            on_drop=ChatState.handle_upload(rx.upload_files(upload_id="chat_upload")),
-            border="none",
-        ),
-        rx.button(
-            rx.icon("arrow-right"),
-            on_click=ChatState.send_message,
-            border_radius="50%",
-            bg="#80d0ea",
-            color="white",
-            width="40px",
-            height="40px",
-            padding="0",
-            margin_left="10px",
-            _hover={
-                "bg": "#6bc0d9",
-                "transform": "scale(1.05)",
-            },
-            transition="all 0.2s ease-in-out",
-        ),
-        padding="15px",
-        bg="#2d2d2d",
-        border_top="1px solid #444",
-        width="100%",
-        height="70px",
-        align_items="center",
-    )
-
-def chat_page() -> rx.Component:
-    """The original chat page from Chat_Page.py"""
-    return rx.box(
-        rx.hstack(
-            sidebar(),
-            rx.vstack(
-                user_header(),
-                chat(),
-                message_input(),
-                height="100vh",
-                width="100%",
-                spacing="0",
-                bg="#2d2d2d",
-            ),
-            spacing="0",
-            width="100%",
-            height="100vh",
-            overflow="hidden",
-        ),
-        # WebRTC call components
-        webrtc_calling_popup(),
-        webrtc_call_popup(),
-        webrtc_video_call_popup(),
-        incoming_call_popup(),
-    )
 
 def calling_popup() -> rx.Component:
     return rx.cond(
@@ -3328,7 +881,7 @@ def video_call_popup() -> rx.Component:
                         ),
                         rx.button(
                             rx.icon("phone-off"),
-                            on_click=ChatState.end_call,
+                            on_click=ChatState.end_video_call,
                             border_radius="50%",
                             bg="#ff4444",
                             color="gray",
@@ -3378,109 +931,1010 @@ def video_call_popup() -> rx.Component:
                 z_index="1000",
             ),
         ),
-    ) 
+    )
 
-def incoming_call_popup() -> rx.Component:
-    """Display a popup for incoming calls."""
+def rooms_list() -> rx.Component:
+    """Render a list of room buttons with dynamic URLs."""
+    return rx.box(
+        rx.vstack(
+            rx.heading("Your Chats", size="2", color="white", padding="3", bg="#444444"),
+            rx.divider(),
+            rx.vstack(
+                # Dynamic Room buttons based on formatted_rooms 
+                rx.cond(
+                    ChatState.formatted_rooms.length() > 0,
+                    rx.vstack(
+                        rx.foreach(
+                            ChatState.formatted_rooms,
+                            lambda room, index: rx.button(
+                                rx.hstack(
+                                    rx.avatar(name=room.get("name", f"Room {index+1}"), size="2"),
+                                    rx.vstack(
+                                        rx.text(room.get("name", f"Room {index+1}"), font_weight="bold", color="white"),
+                                        rx.text(
+                                            rx.cond(
+                                                room.get("last_message", "") != "",
+                                                room.get("last_message", ""),
+                                                "No messages yet"
+                                            ),
+                                            color="#cccccc", 
+                                            font_size="12px"
+                                        ),
+                                        align_items="start",
+                                        spacing="0",
+                                    ),
+                                    width="100%",
+                                ),
+                                # Now use a direct URL instead of an event handler
+                                on_click=rx.redirect(f"/chat/room/{room.get('id', '')}"),
+                                width="100%",
+                                justify_content="flex-start",
+                                bg="transparent",
+                                _hover={"bg": "#444444"},
+                                border_radius="md",
+                                padding="2",
+                                variant="ghost",
+                            )
+                        ),
+                        # Static fallback buttons (can be removed in production)
+                        rx.button(
+                            rx.hstack(
+                                rx.avatar(name="Create New Chat", size="2"),
+                                rx.vstack(
+                                    rx.text("Create New Chat", font_weight="bold", color="white"),
+                                    rx.text("Start a new conversation", color="#cccccc", font_size="12px"),
+                                    align_items="start",
+                                    spacing="0",
+                                ),
+                                width="100%",
+                            ),
+                            width="100%",
+                            justify_content="flex-start",
+                            bg="transparent",
+                            _hover={"bg": "#444444"},
+                            border_radius="md",
+                            padding="2",
+                            variant="ghost",
+                            # This would open a "create chat" dialog in a future implementation
+                            on_click=rx.window_alert("Create chat feature coming soon!"),
+                        ),
+                        width="100%",
+                    ),
+                    # Show when no rooms are available
+                    rx.vstack(
+                        rx.text(
+                            "No chat rooms available", 
+                            color="gray.400",
+                            font_style="italic",
+                            padding="10px",
+                        ),
+                        rx.button(
+                            "Create New Chat",
+                            on_click=rx.window_alert("Create chat feature coming soon!"),
+                            bg="#80d0ea",
+                            color="white",
+                            _hover={"bg": "#6bc0d9"},
+                            border_radius="md",
+                            padding="2",
+                            margin_top="4",
+                        ),
+                        width="100%",
+                        padding="4",
+                    ),
+                ),
+                # Status text - will be updated by JavaScript
+                rx.text(
+                    rx.cond(
+                        ChatState.formatted_rooms.length() > 0,
+                        f"{ChatState.formatted_rooms.length()} rooms available",
+                        "No chat rooms available yet"
+                    ),
+                    color="#80d0ea",
+                    font_style="italic",
+                    padding="10px",
+                    id="room-status",
+                ),
+                # Simple script to update the status text with real-time data
+                rx.script("""
+                    function updateRoomStatus() {
+                        // Try to access the formatted_rooms in the state
+                        if (window._state && window._state.formatted_rooms) {
+                            const roomCount = window._state.formatted_rooms.length;
+                            const statusEl = document.getElementById('room-status');
+                            
+                            if (statusEl) {
+                                if (roomCount > 0) {
+                                    statusEl.innerText = `${roomCount} chat room${roomCount > 1 ? 's' : ''} available`;
+                                    statusEl.style.color = '#80d0ea';
+                                } else {
+                                    statusEl.innerText = 'No chat rooms available';
+                                    statusEl.style.color = '#aaaaaa';
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Update initially and periodically
+                    document.addEventListener('DOMContentLoaded', () => {
+                        setInterval(updateRoomStatus, 1000);
+                    });
+                """),
+                width="100%",
+            ),
+            width="100%",
+            overflow_y="auto",
+            height="calc(100vh - 60px)",
+        ),
+        width="280px",
+        height="100vh",
+        bg="#2d2d2d",
+        border_right="1px solid #444",
+    )
+
+def login_form() -> rx.Component:
+    return rx.box(
+        rx.vstack(
+            rx.heading("Login to Chat", size="3", color="white", margin_bottom="4"),
+            rx.input(
+                placeholder="Username",
+                value=ChatState.username,
+                on_change=ChatState.set_username,
+                margin_bottom="3",
+                bg="white",
+                border="1px solid #80d0ea",
+                border_radius="md",
+                padding="2",
+            ),
+            rx.button(
+                "Login",
+                on_click=lambda: ChatState.login(ChatState.username),
+                bg="#80d0ea",
+                color="white",
+                width="100%",
+                _hover={"bg": "#6bc0d9"},
+                padding_y="2",
+                border_radius="md",
+                margin_top="2",
+            ),
+            width="300px",
+            padding="5",
+            bg="#2d2d2d",
+            border_radius="md",
+            border="1px solid #444",
+            margin="auto",
+        ),
+        width="100%",
+        height="100vh",
+        display="flex",
+        justify_content="center",
+        align_items="center",
+        bg="#1e1e1e",
+    )
+
+def error_alert() -> rx.Component:
+    """Error notification component."""
     return rx.cond(
-        WebRTCState.is_receiving_call | ChatState.is_receiving_call,
+        ChatState.error_message != "",
         rx.box(
-            rx.center(
-                rx.vstack(
-                    rx.avatar(
-                        name=rx.cond(
-                            WebRTCState.is_receiving_call,
-                            WebRTCState.incoming_caller_name,
-                            ChatState.call_user
-                        ),
-                        size="9",
-                        border="4px solid #80d0ea",
-                        margin_bottom="20px",
+            rx.vstack(
+                rx.text(
+                    "Error",
+                    font_size="lg",
+                    font_weight="bold",
+                    color="white",
+                ),
+                rx.text(
+                    ChatState.error_message,
+                    color="white",
+                ),
+                rx.button(
+                    "Close",
+                    on_click=ChatState.clear_error_message,
+                    bg="#ff4444",
+                    color="white",
+                    border_radius="md",
+                    _hover={"bg": "#ff3333"},
+                ),
+                spacing="2",
+                align_items="start",
+                padding="4",
+            ),
+            bg="#ff4444",
+            border_radius="md",
+            position="fixed",
+            bottom="4",
+            right="4",
+            width="300px",
+            z_index="1000",
+            box_shadow="0 4px 8px rgba(0,0,0,0.2)",
+            # Don't use if/else with Var objects
+            on_mount=ChatState.show_error,
+        ),
+        rx.fragment(),
+    )
+
+def success_alert() -> rx.Component:
+    """Success notification component."""
+    return rx.cond(
+        ChatState.success_message != "",
+        rx.box(
+            rx.vstack(
+                rx.text(
+                    "Success",
+                    font_size="lg",
+                    font_weight="bold",
+                    color="white",
+                ),
+                rx.text(
+                    ChatState.success_message,
+                    color="white",
+                ),
+                rx.button(
+                    "Close",
+                    on_click=ChatState.clear_success_message,
+                    bg="#4CAF50",
+                    color="white",
+                    border_radius="md",
+                    _hover={"bg": "#45a049"},
+                ),
+                spacing="2",
+                align_items="start",
+                padding="4",
+            ),
+            bg="#4CAF50",
+            border_radius="md",
+            position="fixed",
+            bottom="4",
+            right="4",
+            width="300px",
+            z_index="1000",
+            box_shadow="0 4px 8px rgba(0,0,0,0.2)",
+            # Don't use if/else with Var objects
+            on_mount=ChatState.show_success,
+        ),
+        rx.fragment(),
+    )
+
+def user_header() -> rx.Component:
+    return rx.hstack(
+        # Back button - only show when in a chat
+        rx.cond(
+            ChatState.current_room_id != "",
+            rx.button(
+                rx.icon("arrow-left", color="white", font_size="18px"),
+                on_click=rx.redirect("/chat"),
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.1)",
+                },
+                transition="all 0.2s ease-in-out",
+                title="Back to Chats List",
+            ),
+            rx.box(width="32px", height="32px"),  # Placeholder
+        ),
+        rx.cond(
+            ChatState.current_chat_user != "",
+            rx.avatar(
+                name=rx.cond(
+                    ChatState.current_chat_user != "", 
+                    ChatState.current_chat_user, 
+                    "Chat"
+                ), 
+                size="2", 
+                border="2px solid white"
+            ),
+            rx.box(width="32px", height="32px"),
+        ),
+        rx.text(
+            rx.cond(
+                ChatState.current_chat_user != "",
+                ChatState.current_chat_user,
+                "Chat"
+            ), 
+            font_weight="bold", 
+            color="white", 
+            font_size="16px"
+        ),
+        rx.spacer(),
+        rx.hstack(
+            rx.button(
+                rx.icon("phone", color="white", font_size="18px"),
+                on_click=ChatState.start_call,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+                disabled=ChatState.current_room_id == "",
+            ),
+            rx.button(
+                rx.icon("video", color="white", font_size="18px"),
+                on_click=ChatState.start_video_call,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+                disabled=ChatState.current_room_id == "",
+            ),
+            rx.button(
+                rx.icon("info", color="white", font_size="18px"),
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
+            spacing="4",
+        ),
+        width="100%",
+        padding="10px 15px",
+        bg="#80d0ea",
+        border_radius="0",
+        height="60px",
+    )
+
+def message_display(sender: str, message: str) -> rx.Component:
+    # Just check if the message string starts with "/_upload"
+    # Without using rx.is_instance since it doesn't exist in this Reflex version
+    is_upload = rx.cond(
+        message.startswith("/_upload"),
+        True,
+        False
+    )
+    
+    return rx.hstack(
+        rx.cond(
+            sender == "user",
+            rx.spacer(),
+            rx.box(),
+        ),
+        rx.box(
+            rx.cond(
+                is_upload,
+                rx.image(
+                    src=rx.cond(message != "", message, ""),
+                    max_width="200px",
+                    border_radius="15px"
+                ),
+                rx.text(rx.cond(message != "", message, ""), color="#333333")
+            ),
+            padding="10px 15px",
+            border_radius="15px",
+            max_width="70%",
+            bg=rx.cond(
+                sender == "user",
+                "#80d0ea",
+                "white"
+            ),
+            margin_left=rx.cond(
+                sender == "user",
+                "auto",
+                "0"
+            ),
+            margin_right=rx.cond(
+                sender == "user",
+                "0",
+                "auto"
+            ),
+            box_shadow="0px 1px 2px rgba(0, 0, 0, 0.1)",
+        ),
+        width="100%",
+        margin_y="10px",
+        padding_x="15px",
+    )
+
+def typing_indicator() -> rx.Component:
+    return rx.cond(
+        ChatState.is_someone_typing,
+        rx.box(
+            rx.hstack(
+                rx.flex(
+                    rx.box(
+                        height="8px",
+                        width="8px",
                         border_radius="50%",
-                        width="120px",
-                        height="120px",
+                        bg="#80d0ea",
+                        margin_right="3px",
+                        animation="typing-dot 1.4s infinite ease-in-out",
+                        animation_delay="0s",
                     ),
-                    rx.text(
+                    rx.box(
+                        height="8px",
+                        width="8px",
+                        border_radius="50%",
+                        bg="#80d0ea",
+                        margin_right="3px",
+                        animation="typing-dot 1.4s infinite ease-in-out",
+                        animation_delay="0.2s",
+                    ),
+                    rx.box(
+                        height="8px",
+                        width="8px",
+                        border_radius="50%",
+                        bg="#80d0ea",
+                        animation="typing-dot 1.4s infinite ease-in-out",
+                        animation_delay="0.4s",
+                    ),
+                    direction="row",
+                    align="center",
+                ),
+                rx.text(
+                    ChatState.typing_message,
+                    color="#AAAAAA",
+                    font_size="12px",
+                    margin_left="8px",
+                ),
+                padding="5px 15px",
+                bg="#333333",
+                border_radius="15px",
+            ),
+            padding="0 15px 5px 15px",
+        ),
+        rx.box(),
+    )
+
+def chat() -> rx.Component:
+    return rx.box(
+        rx.vstack(
+            rx.foreach(
+                ChatState.chat_history,
+                lambda msg: message_display(msg[0], msg[1])
+            ),
+            typing_indicator(),
+            width="100%",
+            align_items="stretch",
+            spacing="0",
+        ),
+        padding="10px 0",
+        overflow="auto",
+        flex="1",
+        width="100%",
+        height="calc(100vh - 130px)",
+        bg="#2d2d2d",
+    )
+
+def message_input() -> rx.Component:
+    """Message input component for the chat interface."""
+    return rx.hstack(
+        rx.hstack(
+            rx.input(
+                value=ChatState.message,
+                placeholder="Type a message...",
+                on_change=ChatState.set_message,
+                # Use our keypress_handler for key events
+                on_key_down=ChatState.keypress_handler,
+                _placeholder={"color": "#AAAAAA"},
+                border_radius="20px",
+                border="none",
+                width="100%",
+                bg="white",
+                padding="10px 15px",
+                height="40px",
+                _focus={
+                    "outline": "none",
+                    "box_shadow": "0 0 0 2px rgba(128, 208, 234, 0.3)",
+                },
+                _hover={
+                    "bg": "#f8f8f8",
+                },
+            ),
+            bg="white",
+            border_radius="20px",
+            padding_left="10px",
+            width="100%",
+            box_shadow="0 2px 4px rgba(0, 0, 0, 0.05)",
+        ),
+        rx.upload(
+            rx.button(
+                rx.icon("paperclip"),
+                border_radius="50%",
+                bg="#80d0ea",
+                color="white", 
+                width="40px",
+                height="40px",
+                padding="0",
+                _hover={
+                    "bg": "#6bc0d9",
+                    "transform": "scale(1.05)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
+            id="chat_upload",
+            accept={
+                "image/png": [".png"],
+                "image/jpeg": [".jpg", ".jpeg"],
+                "image/gif": [".gif"],
+                "image/webp": [".webp"],
+                "video/mp4": [".mp4"],
+                "video/quicktime": [".mov"],
+                "audio/mpeg": [".mp3"],
+                "audio/wav": [".wav"],
+                "application/pdf": [".pdf"],
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"]
+            },
+            max_files=1,
+            on_drop=ChatState.handle_upload(rx.upload_files(upload_id="chat_upload")),
+            border="none",
+        ),
+        rx.button(
+            rx.icon("arrow-right"),
+            on_click=ChatState.send_message,
+            border_radius="50%",
+            bg="#80d0ea",
+            color="white",
+            width="40px",
+            height="40px",
+            padding="0",
+            margin_left="10px",
+            _hover={
+                "bg": "#6bc0d9",
+                "transform": "scale(1.05)",
+            },
+            transition="all 0.2s ease-in-out",
+        ),
+        padding="15px",
+        bg="#2d2d2d",
+        border_top="1px solid #444",
+        width="100%",
+        height="70px",
+        align_items="center",
+    )
+
+def chat_page() -> rx.Component:
+    return rx.box(
+        rx.cond(
+            ChatState.is_authenticated,
+            rx.hstack(
+                rx.cond(
+                    ChatState.sidebar_visible,
+                    sidebar(),
+                    rx.fragment()
+                ),
+                rooms_list(),
+                rx.vstack(
+                    user_header(),
+                    chat(),
+                    message_input(),
+                    height="100vh",
+                    width="100%",
+                    spacing="0",
+                    bg="#2d2d2d",
+                ),
+                spacing="0",
+                width="100%",
+                height="100vh",
+                overflow="hidden",
+            ),
+            login_form(),
+        ),
+        calling_popup(),
+        call_popup(),
+        video_call_popup(),
+        error_alert(),
+        success_alert(),
+        on_mount=ChatState.on_mount,
+        on_unmount=ChatState.cleanup,
+        style={
+            "@keyframes typing-dot": {
+                "0%, 60%, 100%": {
+                    "opacity": "0.4",
+                    "transform": "scale(0.8)"
+                },
+                "30%": {
+                    "opacity": "1",
+                    "transform": "scale(1)"
+                }
+            }
+        },
+    )
+
+def direct_chat_room_route() -> rx.Component:
+    """Route handler for direct chat room with specific user.
+    
+    This route now just extracts the user info and passes to the room-based implementation.
+    The room_id is always the primary identifier.
+    """
+    # Get URL parameters
+    chat_user = rx.State.router.page.params.get("chat_user", "")
+    room_id = rx.State.router.page.params.get("room_id", "")
+    
+    # This is useful for debugging
+    print(f"Opening direct chat with user: {chat_user}, room_id: {room_id}")
+    
+    # Create a wrapper component with its own state
+    class DirectChatWrapper(rx.Component):
+        # Show loading state
+        loading: bool = True
+        error: str = ""
+        
+        def on_mount(self):
+            """Called when the component mounts."""
+            return self.on_direct_chat_load
+            
+        # Define the on_mount event without parameters
+        @rx.event
+        async def on_direct_chat_load(self):
+            """Load the direct chat room when mounted."""
+            print(f"Starting direct_chat_room_route on_mount handler for {chat_user}, {room_id}")
+            
+            try:
+                # Check authentication first
+                token = rx.get_local_storage("auth_token") 
+                if not token:
+                    print("No auth token found - showing login form")
+                    # Set auth token in ChatState to trigger login form
+                    ChatState.auth_token = ""
+                    self.error = "Please log in to use chat"
+                    self.loading = False
+                    return
+                else:
+                    # We have a token, set it in ChatState
+                    print(f"Found auth token: {token[:5]}...")
+                    ChatState.auth_token = token
+                
+                # Validate room_id
+                if not room_id:
+                    print("No room ID specified")
+                    self.error = "No room ID specified"
+                    self.loading = False
+                    return
+                
+                # Set the room details using ChatState
+                ChatState.current_room_id = room_id
+                ChatState.current_chat_user = chat_user
+                
+                # Load messages
+                try:
+                    await ChatState.load_messages()
+                    print(f"Loaded messages for room {room_id}")
+                except Exception as e:
+                    print(f"Error loading messages: {str(e)}")
+                    self.error = f"Error loading messages: {str(e)}"
+                
+                # Loading complete
+                self.loading = False
+            except Exception as e:
+                print(f"Unexpected exception in direct_chat_room_route: {str(e)}")
+                self.error = f"Error: {str(e)}"
+                self.loading = False
+        
+        def build(self):
+            """Build the component."""
+            # Add a loading and error state
+            return rx.cond(
+                self.loading, 
+                # Loading state
+                rx.center(
+                    rx.vstack(
+                        rx.heading("Opening Chat...", size="lg"),
+                        rx.spinner(size="xl", color="#80d0ea", thickness="4px"),
+                        rx.text(f"Loading chat with {chat_user}..."),
                         rx.cond(
-                            WebRTCState.is_receiving_call,
-                            WebRTCState.incoming_caller_name,
-                            ChatState.call_user
-                        ),
-                        font_size="24px",
-                        font_weight="bold",
-                        color="#333333",
-                        margin_bottom="20px",
-                    ),
-                    rx.text(
-                        rx.cond(
-                            rx.cond(
-                                WebRTCState.is_receiving_call,
-                                WebRTCState.incoming_call_type,
-                                ChatState.call_type
-                            ) == "video",
-                            "Incoming Video Call...",
-                            "Incoming Call..."
-                        ),
-                        font_size="18px",
-                        color="#666666",
-                        margin_bottom="20px",
-                    ),
-                    rx.hstack(
-                        rx.button(
-                            rx.icon("phone-call"),
-                            on_click=rx.cond(
-                                WebRTCState.is_receiving_call,
-                                WebRTCState.accept_call,
-                                ChatState.accept_call
-                            ),
-                            border_radius="50%",
-                            bg="#4CAF50",
-                            color="white",
-                            width="60px",
-                            height="60px",
-                            padding="0",
-                            _hover={
-                                "bg": "#45a049",
-                                "transform": "scale(1.1)",
-                            },
-                            transition="all 0.2s ease-in-out",
-                        ),
-                        rx.button(
-                            rx.icon("phone-off"),
-                            on_click=rx.cond(
-                                WebRTCState.is_receiving_call,
-                                WebRTCState.reject_call,
-                                ChatState.reject_call
-                            ),
-                            border_radius="50%",
-                            bg="#ff4444",
-                            color="white",
-                            width="60px",
-                            height="60px",
-                            padding="0",
-                            _hover={
-                                "bg": "#ff3333",
-                                "transform": "scale(1.1)",
-                            },
-                            transition="all 0.2s ease-in-out",
+                            self.error != "",
+                            rx.text(self.error, color="red"),
+                            rx.text("", height="0px"), # Empty placeholder
                         ),
                         spacing="4",
+                        padding="8",
                     ),
-                    align_items="center",
-                    justify_content="center",
+                    height="100vh",
+                    width="100%",
                 ),
-                width="350px",
-                height="400px",
-                bg="white",
-                border_radius="20px",
-                padding="30px",
-                position="fixed",
-                top="50%",
-                left="50%",
-                transform="translate(-50%, -50%)",
-                box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
-                z_index="1000",
-            ),
-        ),
-        rx.fragment()
-    ) 
+                # Regular chat page
+                rx.box(
+                    chat_page(),
+                )
+            )
+    
+    # Return the wrapper component
+    return DirectChatWrapper()
+
+def chat_room_route() -> rx.Component:
+    """Route handler for any chat room by ID.
+    
+    This is the primary route for all chat types - direct or group.
+    """
+    # Get URL parameters
+    room_id = rx.State.router.page.params.get("room_id", "")
+    
+    # This is useful for debugging
+    print(f"Opening chat room: {room_id}")
+    
+    # Create a wrapper component with its own state
+    class ChatRoomWrapper(rx.Component):
+        # Show loading state
+        loading: bool = True
+        error: str = ""
+        
+        def on_mount(self):
+            """Called when the component mounts."""
+            return self.on_room_load
+            
+        # Define the on_mount event without parameters
+        @rx.event
+        async def on_room_load(self):
+            """Load the chat room when mounted."""
+            print(f"Starting chat_room_route on_mount handler for room {room_id}")
+            
+            try:
+                # Check authentication first
+                token = rx.get_local_storage("auth_token") 
+                if not token:
+                    print("No auth token found - showing login form")
+                    # Set auth token in ChatState to trigger login form
+                    ChatState.auth_token = ""
+                    self.error = "Please log in to use chat"
+                    self.loading = False
+                    return
+                else:
+                    # We have a token, set it in ChatState
+                    print(f"Found auth token: {token[:5]}...")
+                    ChatState.auth_token = token
+                    
+                # Validate room_id
+                if not room_id:
+                    print("No room ID specified - redirecting to main chat")
+                    self.loading = False
+                    return rx.redirect("/chat")
+                
+                # Load rooms first to make sure we have the latest data
+                try:
+                    await ChatState.load_rooms()
+                    print(f"Loaded {len(ChatState.rooms)} rooms")
+                except Exception as e:
+                    print(f"Error loading rooms: {str(e)}")
+                
+                # Try to find room details in available rooms
+                found_room = False
+                for room in ChatState.rooms:
+                    if str(room.get("id", "")) == room_id:
+                        room_name = room.get("name", "Chat Room")
+                        # Set the room info
+                        ChatState.current_room_id = room_id
+                        ChatState.current_chat_user = room_name
+                        found_room = True
+                        print(f"Found room in room list: {room_name}")
+                        break
+                        
+                # If not found but we have a room ID, try to load it directly
+                if not found_room and room_id:
+                    # Set default name temporarily
+                    ChatState.current_room_id = room_id
+                    ChatState.current_chat_user = "Chat Room"
+                    print(f"Room {room_id} not found in room list, using default name")
+                    
+                # Load the messages for this room
+                try:
+                    await ChatState.load_messages()
+                    print(f"Loaded messages for room {room_id}")
+                except Exception as e:
+                    print(f"Error loading messages: {str(e)}")
+                    self.error = f"Error loading messages: {str(e)}"
+                
+                # Loading complete
+                self.loading = False
+            except Exception as e:
+                print(f"Unexpected exception in chat_room_route: {str(e)}")
+                self.error = f"Error: {str(e)}"
+                self.loading = False
+        
+        def build(self):
+            """Build the component."""
+            # Add a loading and error state
+            return rx.cond(
+                self.loading, 
+                # Loading state
+                rx.center(
+                    rx.vstack(
+                        rx.heading("Opening Chat Room...", size="lg"),
+                        rx.spinner(size="xl", color="#80d0ea", thickness="4px"),
+                        rx.text(f"Loading chat room {room_id}..."),
+                        rx.cond(
+                            self.error != "",
+                            rx.text(self.error, color="red"),
+                            rx.text("", height="0px"), # Empty placeholder
+                        ),
+                        spacing="4",
+                        padding="8",
+                    ),
+                    height="100vh",
+                    width="100%",
+                ),
+                # Regular chat page
+                rx.box(
+                    chat_page(),
+                )
+            )
+    
+    # Return the wrapper component
+    return ChatRoomWrapper()
+
+def chat_user_route() -> rx.Component:
+    """Route handler for chat with a user by username only (without room ID).
+    
+    This will find or create a direct chat room with the specified user.
+    """
+    # Get URL parameters
+    chat_user = rx.State.router.page.params.get("chat_user", "")
+    
+    # This is useful for debugging
+    print(f"\n===== DEBUG: Finding or creating direct chat with user: {chat_user} =====")
+    
+    # Create a wrapper component with its own state
+    class ChatUserWrapper(rx.Component):
+        # Show loading state
+        loading: bool = True
+        error: str = ""
+        
+        def on_mount(self):
+            """Called when the component mounts."""
+            print(f"MOUNT: ChatUserWrapper for user {chat_user}")
+            return self.on_chat_user_load
+            
+        # Define the on_mount event without parameters
+        @rx.event
+        async def on_chat_user_load(self):
+            """Find or create a chat room with this user when mounted."""
+            print(f"\n===== Starting chat_user_route on_mount handler for {chat_user} =====")
+            
+            try:
+                # Check authentication first
+                token = None
+                try:
+                    token = rx.get_local_storage("auth_token")
+                    print(f"Token from local storage: {bool(token)}")
+                except Exception as e:
+                    print(f"Error getting token from local storage: {str(e)}")
+                    
+                if not token:
+                    print("No auth token found - showing login form")
+                    # Set auth token in ChatState to empty to show login form
+                    ChatState.auth_token = ""
+                    self.error = "Please log in to use chat"
+                    self.loading = False
+                    return
+                else:
+                    # We have a token, set it in ChatState
+                    print(f"Found auth token: {token[:5]}...")
+                    ChatState.auth_token = token
+                
+                # Continue with user check
+                if not chat_user:
+                    print("No chat user specified - showing main chat")
+                    self.loading = False
+                    return rx.redirect("/chat")
+                    
+                # Try to find existing room first
+                current_username = None
+                try:
+                    current_username = rx.get_local_storage("username")
+                    print(f"Current user: {current_username}, target: {chat_user}")
+                except Exception as e:
+                    print(f"Error getting username from local storage: {str(e)}")
+                    current_username = "unknown"
+                    
+                if not current_username:
+                    self.error = "Could not determine current user"
+                    self.loading = False
+                    return
+                
+                # First try loading rooms to ensure we have the latest data
+                try:
+                    await ChatState.load_rooms()
+                except Exception as e:
+                    print(f"Error loading rooms: {str(e)}")
+                    self.error = f"Error loading rooms: {str(e)}"
+                    self.loading = False
+                    return
+                
+                # Now check for existing room
+                existing_room = None
+                try:
+                    existing_room = await ChatState.find_existing_room(current_username, chat_user)
+                    print(f"Existing room check result: {existing_room}")
+                except Exception as e:
+                    print(f"Error finding existing room: {str(e)}")
+                    self.error = f"Error finding room: {str(e)}"
+                    self.loading = False
+                    return
+                
+                if existing_room:
+                    # Room exists, redirect to it
+                    print(f"Found existing room: {existing_room}")
+                    self.loading = False
+                    # Extract room_id properly whether it's just an ID or a full room object
+                    room_id = existing_room
+                    if isinstance(existing_room, dict):
+                        room_id = existing_room.get("id")
+                    return rx.redirect(f"/chat/room/{room_id}")
+                else:
+                    # Create new direct room
+                    print(f"No existing room found, creating new chat with {chat_user}")
+                    
+                    try:
+                        # Create a direct chat room
+                        print(f"Calling ChatState.create_direct_chat with {chat_user}")
+                        await ChatState.create_direct_chat(chat_user)
+                        
+                        # Check if room was created successfully
+                        if ChatState.current_room_id:
+                            room_id = ChatState.current_room_id
+                            print(f"Created room successfully: {room_id}")
+                            self.loading = False
+                            return rx.redirect(f"/chat/room/{room_id}")
+                        else:
+                            # Show an error with more context
+                            print("Room creation failed - no room ID set in ChatState")
+                            self.error = f"Could not create chat with {chat_user} (no room ID returned)"
+                            self.loading = False
+                    except Exception as e:
+                        # Show error with more details
+                        print(f"Exception creating chat: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
+                        self.error = f"Error creating chat: {str(e)}"
+                        self.loading = False
+            except Exception as e:
+                print(f"Unexpected exception in chat_user_route: {str(e)}")
+                self.error = f"Error: {str(e)}"
+                self.loading = False
+        
+        def build(self):
+            """Build the component."""
+            # Always show some UI even in error states
+            return rx.cond(
+                self.loading, 
+                # Loading state
+                rx.center(
+                    rx.vstack(
+                        rx.heading("Opening Chat...", size="lg"),
+                        rx.spinner(size="xl", color="#80d0ea", thickness="4px"),
+                        rx.text(f"Finding or creating chat with {chat_user}..."),
+                        rx.cond(
+                            self.error != "",
+                            rx.text(self.error, color="red"),
+                            rx.text("", height="0px"), # Empty placeholder
+                        ),
+                        spacing="4",
+                        padding="8",
+                    ),
+                    height="100vh",
+                    width="100%",
+                ),
+                # Either error or chat page
+                rx.cond(
+                    self.error != "",
+                    # Error state - show a friendly error
+                    rx.center(
+                        rx.vstack(
+                            rx.heading("Chat Error", size="lg"),
+                            rx.text(self.error, color="red"),
+                            rx.button(
+                                "Return to Chat", 
+                                on_click=rx.redirect("/chat"),
+                                color_scheme="blue",
+                            ),
+                            spacing="4",
+                            padding="8",
+                            bg="white",
+                            border_radius="md",
+                            box_shadow="lg",
+                        ),
+                        height="100vh",
+                        width="100%",
+                    ),
+                    # Regular chat page - don't add on_mount here to avoid recursion
+                    rx.box(
+                        chat_page(),
+                    )
+                )
+            )
+    
+    # Return the wrapper component
+    return ChatUserWrapper()

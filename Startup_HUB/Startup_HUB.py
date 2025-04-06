@@ -2,8 +2,7 @@ import reflex as rx
 import reflex_chakra as rc
 from Startup_HUB.webrtc.webrtc_state import WebRTCState
 from .Auth.AuthPage import login_page, AuthState
-from .chat.Chat_Page import chat_page
-from .chat.ChatPage import direct_chat_route, chat_room_route, direct_chat_room_route
+from .chat.ChatPage import chat_page, direct_chat_room_route, chat_room_route, chat_user_route
 from .Profile.ProfilePage import profile_page
 from .Matcher.Matcher_Page import match_page, MatchState
 from .Search.search_page import search_page
@@ -143,7 +142,7 @@ app.add_page(match_page, route="/match/from-profile/[user_profile]")
 
 # Chat pages
 app.add_page(chat_page, route="/chat")
-app.add_page(direct_chat_route, route="/chat/user/[chat_user]")
+app.add_page(chat_user_route, route="/chat/user/[chat_user]")
 app.add_page(direct_chat_room_route, route="/chat/user/[chat_user]/[room_id]")  
 app.add_page(chat_room_route, route="/chat/room/[room_id]")
 

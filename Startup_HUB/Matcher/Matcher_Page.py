@@ -670,10 +670,21 @@ class MatchState(rx.State):
             print("=== Finished Loading Users ===\n")
 
     async def start_chat(self):
-        """Start a chat with the current profile."""
+        """Start a chat with the current profile.
+        
+        Checks if a room exists with this user, and if not, creates one.
+        Then redirects directly to the chat room.
+        """
         self.loading = True
         try:
-            # Get token from AuthState
+            # Get target user's username from the current profile
+            target_username = self.profiles[self.current_profile_index]["username"]
+            
+            # Debug the chat start
+            print("\n=== Starting Chat ===")
+            print(f"Target User: {target_username}")
+            
+            # Get token and current username
             auth_state = await self.get_state(AuthState)
             auth_token = auth_state.token
             
@@ -681,92 +692,67 @@ class MatchState(rx.State):
                 auth_token = await rx.call_script("localStorage.getItem('auth_token')")
                 if not auth_token:
                     self.error_message = "Authentication required. Please log in."
+                    self.loading = False
                     return
+            
+            # Get current user's username
+            current_username = self.get_username
+            
+            if not current_username:
+                self.error_message = "Could not get current user's username"
+                self.loading = False
+                return
             
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Token {auth_token}"
             }
             
-            # Get current user's username from route parameters
-            current_username = self.get_username
-            
-            if not current_username:
-                self.error_message = "Could not get current user's username"
-                return
-            
-            # Get target user's username from the current profile
-            target_username = self.profiles[self.current_profile_index]["username"]
-            
-            # Debug the chat start
-            print("\n=== Starting Chat ===")
-            print(f"Current User: {current_username}")
-            print(f"Target User: {target_username}")
-            
-            # Find existing room or create a new one
+            # Check if room already exists
             existing_room = await self.find_existing_room(current_username, target_username)
             
             if existing_room:
-                # Use existing room
-                print(f"\n=== Using Existing Room ===")
-                print(f"Room ID: {existing_room['id']}")
-                self.current_chat_room = existing_room["id"]
-                self.show_chat = True
-                self.messages = []
-                await self.load_messages()
+                # Room exists, redirect directly to it
+                room_id = existing_room.get("id")
+                print(f"Found existing room {room_id} - redirecting to it")
+                self.loading = False
+                return rx.redirect(f"/chat/room/{room_id}")
             else:
                 # Create new room
-                print("\n=== Creating New Room ===")
+                print(f"No existing room found - creating a new one with {target_username}")
+                
                 async with httpx.AsyncClient() as client:
-                    room_name = f"chat_{current_username}_{target_username}"
-                    response = await client.post(
-                        f"{self.API_BASE_URL}/communication/rooms/",
-                        headers=headers,
-                        json={
-                            "name": room_name,
-                            "room_type": "direct",
-                            "max_participants": 2
-                            # Removed participants from initial creation
-                        }
+                    # Use the direct room creation endpoint
+                    create_response = await client.post(
+                        f"{self.API_BASE_URL}/communication/room/direct/",
+                        json={"username": target_username},
+                        headers=headers
                     )
                     
-                    print(f"Create Room Status Code: {response.status_code}")
-                    print(f"Create Room Response: {response.text}")
+                    print(f"Create room response status: {create_response.status_code}")
                     
-                    if response.status_code == 201:
-                        room_data = response.json()
-                        room_id = room_data["id"]
-                        print(f"\n=== Room Created Successfully ===")
-                        print(f"Room ID: {room_id}")
+                    if create_response.status_code == 201 or create_response.status_code == 200:
+                        room_data = create_response.json()
+                        room_id = room_data.get("id")
                         
-                        # Add participants to the room
-                        for username in [current_username, target_username]:
-                            add_participant_response = await client.post(
-                                f"{self.API_BASE_URL}/communication/rooms/{room_id}/add_participant/",
-                                headers=headers,
-                                json={"username": username}
-                            )
-                            print(f"\n=== Adding Participant {username} ===")
-                            print(f"Status Code: {add_participant_response.status_code}")
-                            print(f"Response: {add_participant_response.text}")
-                            
-                            if add_participant_response.status_code != 200 and add_participant_response.status_code != 201:
-                                print(f"Failed to add {username}: {add_participant_response.text}")
-                        
-                        self.current_chat_room = room_id
-                        self.show_chat = True
-                        self.messages = []
-                        await self.load_messages()
+                        if room_id:
+                            print(f"Created room with ID {room_id} - redirecting to it")
+                            self.loading = False
+                            return rx.redirect(f"/chat/room/{room_id}")
+                        else:
+                            print("Failed to get room ID from created room")
+                            self.error_message = "Could not create chat room"
                     else:
-                        self.error_message = f"Failed to create chat room: {response.text}"
+                        print(f"Failed to create room: {create_response.text}")
+                        self.error_message = f"Failed to create chat room: {create_response.status_code}"
                 
         except Exception as e:
             self.error_message = f"Error starting chat: {str(e)}"
             print(f"\n=== Error Debug ===")
             print(f"Error: {str(e)}")
             print("==================\n")
-        finally:
-            self.loading = False
+        
+        self.loading = False
 
     async def load_messages(self):
         """Load messages for the current chat room."""
@@ -875,14 +861,21 @@ class MatchState(rx.State):
             print("==================\n")
 
     def close_chat(self):
-        """Close the chat interface."""
-        self.show_chat = False
+        """Reset chat-related state variables.
+        
+        This is now only used to clean up state, since the chat UI 
+        is handled by the dedicated ChatPage component.
+        """
         self.current_chat_room = None
         self.messages = []
         self.new_message = ""
+        # Note: We don't need to set show_chat=False anymore since we don't use the embedded UI
 
     async def find_existing_room(self, current_username, target_username):
-        """Find an existing room between two users."""
+        """Find an existing room between two users.
+        
+        Returns the room object if found, otherwise None.
+        """
         try:
             # Get token from AuthState
             auth_state = await self.get_state(AuthState)
@@ -900,7 +893,22 @@ class MatchState(rx.State):
             }
             
             async with httpx.AsyncClient() as client:
-                # Get all rooms
+                # First try to use the optimized endpoint
+                try:
+                    response = await client.get(
+                        f"{self.API_BASE_URL}/communication/find-direct-room/?username={target_username}",
+                        headers=headers
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if "room" in data and data["room"]:
+                            print(f"Found existing room with {target_username} using direct endpoint")
+                            return data["room"]
+                except Exception as e:
+                    print(f"Error using direct room endpoint: {str(e)}, falling back to room list")
+                    
+                # Fall back to scanning all rooms
                 response = await client.get(
                     f"{self.API_BASE_URL}/communication/rooms/",
                     headers=headers
@@ -914,6 +922,7 @@ class MatchState(rx.State):
                         if room["room_type"] == "direct":
                             participants = [p["user"]["username"] for p in room["participants"]]
                             if current_username in participants and target_username in participants:
+                                print(f"Found existing room by scanning rooms list")
                                 return room
                     
                     # If no existing room found
@@ -921,13 +930,16 @@ class MatchState(rx.State):
                 else:
                     print(f"Error checking rooms: {response.text}")
                     return None
-                    
+                
         except Exception as e:
             print(f"Error in find_existing_room: {str(e)}")
             return None
 
     async def create_direct_chat_with_user(self, target_username):
-        """Create a direct chat with the specified user."""
+        """Create a direct chat with the specified user.
+        
+        Returns a redirect to the room if successful, otherwise False.
+        """
         try:
             # Get token from AuthState
             auth_state = await self.get_state(AuthState)
@@ -956,49 +968,45 @@ class MatchState(rx.State):
             
             if existing_room:
                 print(f"Room already exists between {current_username} and {target_username}")
-                return True
-            
-            # Create new room
-            print(f"Creating new room between {current_username} and {target_username}")
-            room_name = f"chat_{current_username}_{target_username}"
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.API_BASE_URL}/communication/rooms/",
-                    headers=headers,
-                    json={
-                        "name": room_name,
-                        "room_type": "direct",
-                        "max_participants": 2
-                        # Removed participants from initial creation
-                    }
-                )
+                room_id = existing_room.get("id")
+                return rx.redirect(f"/chat/room/{room_id}")
+            else:
+                # Create new room
+                print(f"Creating new room between {current_username} and {target_username}")
                 
-                if response.status_code == 201:
-                    room_data = response.json()
-                    room_id = room_data["id"]
-                    print(f"Room created successfully: {room_id}")
+                async with httpx.AsyncClient() as client:
+                    # Use the direct room creation endpoint
+                    create_response = await client.post(
+                        f"{self.API_BASE_URL}/communication/room/direct/",
+                        json={"username": target_username},
+                        headers=headers
+                    )
                     
-                    # Add participants one by one
-                    for username in [current_username, target_username]:
-                        add_participant_response = await client.post(
-                            f"{self.API_BASE_URL}/communication/rooms/{room_id}/add_participant/",
-                            headers=headers,
-                            json={"username": username}
-                        )
-                        print(f"Adding {username} - Status: {add_participant_response.status_code}")
-                        if add_participant_response.status_code != 200 and add_participant_response.status_code != 201:
-                            print(f"Failed to add {username}: {add_participant_response.text}")
+                    print(f"Create room response status: {create_response.status_code}")
                     
-                    # Reload rooms to update the list
-                    await self.load_rooms()
-                    return True
-                else:
-                    print(f"Failed to create chat room: {response.text}")
-                    return False
-                    
+                    if create_response.status_code == 201 or create_response.status_code == 200:
+                        room_data = create_response.json()
+                        room_id = room_data.get("id")
+                        if room_id:
+                            print(f"Created new room with ID: {room_id}")
+                            return rx.redirect(f"/chat/room/{room_id}")
+                        else:
+                            print("No room ID returned in response")
+                            self.error_message = "Failed to create chat room - no room ID returned"
+                            return False
+                    else:
+                        print(f"Failed to create room: {create_response.text}")
+                        self.error_message = f"Failed to create room: {create_response.status_code}"
+                        return False
+        
         except Exception as e:
-            print(f"Error creating direct chat: {str(e)}")
+            print(f"\n=== Error Debug ===")
+            print(f"Error: {str(e)}")
+            print(f"Error type: {type(e)}")
+            import traceback
+            traceback.print_exc()
+            print("==================\n")
+            self.error_message = f"Error creating chat: {str(e)}"
             return False
 
     async def load_likes(self):
@@ -1069,8 +1077,9 @@ class MatchState(rx.State):
                     print("\n=== Creating Direct Chats with Liked Users ===")
                     for like in self.likes:
                         liked_user = like["liked_user"]
-                        success = await self.create_direct_chat_with_user(liked_user)
-                        if success:
+                        result = await self.create_direct_chat_with_user(liked_user)
+                        # Check if result is a redirect (which means success) or False (failure)
+                        if result:
                             print(f"Ensured chat exists with liked user: {liked_user}")
                         else:
                             print(f"Failed to create chat with liked user: {liked_user}")
@@ -1484,197 +1493,6 @@ class MatchState(rx.State):
         """Clear the success message."""
         self.success_message = ""
 
-    async def create_direct_group_chat(self, form_data=None):
-        """Create a group chat using form data when available."""
-        print("\n=== Creating Direct Group Chat ===")
-        try:
-            # Get token from AuthState - avoiding problematic event specs
-            auth_state = await self.get_state(AuthState)
-            auth_token = auth_state.token
-            
-            if not auth_token:
-                self.error_message = "Authentication required. Please log in."
-                return
-            
-            # Default values in case form data can't be read
-            group_name = "New Group Chat"
-            max_participants = 10
-            
-            # Try to extract data from the form if possible
-            selected_members = ["Tester2"]  # Default fallback member
-            
-            # Try to get data from form_data if it exists
-            if form_data is not None:
-                print(f"\n===== FORM DATA DEBUG =====")
-                print(f"Form data type: {type(form_data)}")
-                
-                # For Reflex Var type, we need to extract using special methods
-                # to avoid UntypedVarError
-                try:
-                    if hasattr(form_data, "to_dict"):
-                        # Convert Var to dict if possible
-                        print("Converting form_data Var to dict")
-                        form_dict = {}
-                        
-                        # Access the raw JavaScript event data
-                        # This is passed directly from the form submission
-                        try:
-                            # Get the raw form data using rx.get_event_target
-                            import json
-                            from reflex.utils import console
-                            
-                            # Debug available methods
-                            console.print("Form data methods:", dir(form_data))
-                            
-                            # Just use our select implementation as a fallback
-                            form_selected_members = ["Tester2"]  # Default fallback
-                            group_name = "New Group Chat"
-                            
-                            # We'll extract the form data using a more direct approach
-                            print("Creating room with default values due to form data extraction complexity")
-                        except Exception as e:
-                            print(f"Error converting Var to dict: {e}")
-                            import traceback
-                            traceback.print_exc()
-                    else:
-                        print("Form data does not have to_dict method - handling as regular object")
-                        # Process normally for non-Var types
-                        if isinstance(form_data, dict):
-                            # Handle dict form data
-                            print("Processing form data as dict")
-                            form_selected_members = []
-                            
-                            # Print all form data for debugging
-                            for key, value in form_data.items():
-                                print(f"Form field: {key} = {value}")
-                                
-                                # Extract members
-                                if key.startswith("member_") and value:
-                                    username = key.split("_")[1]
-                                    form_selected_members.append(username)
-                                    print(f"Selected member: {username}")
-                            
-                            # Extract group name and max participants
-                            if "group_name" in form_data and form_data["group_name"]:
-                                group_name = form_data["group_name"]
-                            
-                            if "max_participants" in form_data and form_data["max_participants"]:
-                                try:
-                                    max_participants = int(form_data["max_participants"])
-                                except:
-                                    pass
-                            
-                            # Update selected members if any were found
-                            if form_selected_members:
-                                selected_members = form_selected_members
-                except Exception as e:
-                    print(f"Error extracting form data: {e}")
-                    import traceback
-                    traceback.print_exc()
-            else:
-                print("No form data received, using defaults")
-            
-            # Get current user's username - hardcoded to Tester based on logs
-            current_username = "Tester"
-            print(f"Using current username: {current_username}")
-            
-            # Prepare participants list
-            participants = [{"username": current_username}]
-            for member in selected_members:
-                if member != current_username:  # Avoid duplicate participants
-                    participants.append({"username": member})
-            
-            print(f"Creating room with: name={group_name}, max_participants={max_participants}")
-            print(f"Participants: {participants}")
-            
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Token {auth_token}"
-            }
-            
-            async with httpx.AsyncClient() as client:
-                # Create new room
-                response = await client.post(
-                    f"{self.API_BASE_URL}/communication/rooms/",
-                    headers=headers,
-                    json={
-                        "name": group_name,
-                        "room_type": "group",
-                        "max_participants": max_participants
-                        # Removed participants from initial creation since API expects them to be added separately
-                    }
-                )
-                
-                print(f"Create Room Response Status: {response.status_code}")
-                print(f"Create Room Response: {response.text}")
-                
-                if response.status_code == 201:
-                    room_data = response.json()
-                    room_id = room_data["id"]
-                    print(f"Room created successfully with ID: {room_id}")
-                    
-                    # Add participants one by one
-                    print(f"\n=== Adding Participants to Room {room_id} ===")
-                    for participant in participants:
-                        username = participant["username"]
-                        add_participant_response = await client.post(
-                            f"{self.API_BASE_URL}/communication/rooms/{room_id}/add_participant/",
-                            headers=headers,
-                            json={"username": username}
-                        )
-                        print(f"Adding {username} - Status: {add_participant_response.status_code}")
-                        if add_participant_response.status_code != 200 and add_participant_response.status_code != 201:
-                            print(f"Failed to add {username}: {add_participant_response.text}")
-                    
-                    # Reload rooms
-                    rooms_response = await client.get(
-                        f"{self.API_BASE_URL}/communication/rooms/",
-                        headers=headers
-                    )
-                    if rooms_response.status_code == 200:
-                        data = rooms_response.json()
-                        self.rooms = data.get("results", [])
-                        print(f"Successfully reloaded rooms: {len(self.rooms)} rooms found")
-                    
-                    self.success_message = "Group chat created successfully!"
-                else:
-                    self.error_message = f"Failed to create group chat: {response.text}"
-        
-        except Exception as e:
-            print(f"\n=== Error Debug ===")
-            print(f"Error: {str(e)}")
-            print(f"Error type: {type(e)}")
-            import traceback
-            traceback.print_exc()
-            print("==================\n")
-            self.error_message = f"Error creating group chat: {str(e)}"
-
-    # Chat related methods
-    def open_chat(self, username: str):
-        """Open a direct chat with the specified user.
-        This will create a chat room if one doesn't exist already, or
-        open an existing chat room between the current user and the liked user.
-        """
-        print(f"Opening chat with user: {username}")
-        
-        # Redirect to the direct chat route which will handle the room creation/loading
-        # This leverages the chat routing system which has been updated to use the new path
-        import reflex as rx
-        return rx.redirect(f"/chat/user/{username}")
-        
-        # Note: ChatRoomState.create_direct_chat method will be triggered when the chat route 
-        # is loaded, which handles:
-        # 1. Finding an existing chat room between the users
-        # 2. Creating a new chat room if one doesn't exist
-        # 3. Loading the messages in the correct format
-        # 4. Setting up the UI for the chat
-    
-    def open_group_chat(self, room_id: str, room_name: str):
-        """Open a group chat with the specified ID."""
-        print(f"Opening group chat: {room_name} ({room_id})")
-        import reflex as rx
-        return rx.redirect(f"/chat/room/{room_id}")
-
     @rx.event
     async def view_user_profile(self):
         """View the profile details of the current user."""
@@ -1736,6 +1554,90 @@ class MatchState(rx.State):
     def close_profile_popup(self):
         """Close the profile popup."""
         self.show_profile_popup = False
+
+    @rx.event
+    async def open_chat(self, username: str):
+        """Open a chat with the specified user.
+        
+        Checks if a room exists with this user, and if not, creates one.
+        Then redirects directly to the chat room.
+        """
+        print(f"\n=== Opening chat with user: {username} ===")
+        
+        try:
+            # Get token and current username
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if not auth_token:
+                    self.error_message = "Authentication required. Please log in."
+                    return
+            
+            # Get current user's username
+            current_username = self.get_username
+            
+            if not current_username:
+                self.error_message = "Could not get current user's username"
+                return
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            # Check if room already exists
+            existing_room = await self.find_existing_room(current_username, username)
+            
+            if existing_room:
+                # Room exists, redirect directly to it
+                room_id = existing_room.get("id")
+                print(f"Found existing room {room_id} - redirecting to it")
+                return rx.redirect(f"/chat/room/{room_id}")
+            else:
+                # Create new room
+                print(f"No existing room found - creating a new one with {username}")
+                
+                async with httpx.AsyncClient() as client:
+                    # Use the direct room creation endpoint
+                    create_response = await client.post(
+                        f"{self.API_BASE_URL}/communication/room/direct/",
+                        json={"username": username},
+                        headers=headers
+                    )
+                    
+                    print(f"Create room response status: {create_response.status_code}")
+                    
+                    if create_response.status_code == 201 or create_response.status_code == 200:
+                        room_data = create_response.json()
+                        room_id = room_data.get("id")
+                        
+                        if room_id:
+                            print(f"Created room with ID {room_id} - redirecting to it")
+                            return rx.redirect(f"/chat/room/{room_id}")
+                        else:
+                            print("Failed to get room ID from created room")
+                            self.error_message = "Could not create chat room"
+                    else:
+                        print(f"Failed to create room: {create_response.text}")
+                        self.error_message = f"Failed to create chat room: {create_response.status_code}"
+        except Exception as e:
+            print(f"Error in open_chat: {str(e)}")
+            self.error_message = f"Error opening chat: {str(e)}"
+
+    def open_group_chat(self, room_id: str, room_name: str):
+        """Open a group chat with the specified ID."""
+        print(f"Opening group chat: {room_name} ({room_id})")
+        return rx.redirect(f"/chat/room/{room_id}")
+
+    async def create_direct_group_chat(self, form_data: rx.event.EventHandler) -> rx.event.EventHandler:
+        """Handle group chat form submission.
+        
+        This is a wrapper that calls the create_group_chat method to maintain
+        backward compatibility with SideBar.py references.
+        """
+        return await self.create_group_chat(form_data)
 
 def profile_card() -> rx.Component:
     return rx.cond(
@@ -1842,61 +1744,13 @@ def profile_card() -> rx.Component:
     )
 
 def chat_interface() -> rx.Component:
-    return rx.cond(
-        MatchState.show_chat,
-        rx.box(
-            rx.vstack(
-                rx.hstack(
-                    rx.button(
-                        rx.icon("x", class_name="drop-shadow-lg"),
-                        on_click=MatchState.close_chat,
-                        class_name="absolute top-4 right-4 bg-red-500 text-white rounded-full w-10 h-10 hover:bg-red-600",
-                    ),
-                    width="full",
-                    justify="end",
-                ),
-                rx.box(
-                    rx.vstack(
-                        rx.foreach(
-                            MatchState.messages,
-                            lambda msg: rx.box(
-                                rx.text(
-                                    msg["content"],
-                                    class_name=rx.cond(
-                                        msg["sender"] == MatchState.profiles[MatchState.current_profile_index]["username"],
-                                        "bg-blue-500 ml-auto text-white p-2 rounded-lg",
-                                        "bg-gray-600 mr-auto text-white p-2 rounded-lg"
-                                    ),
-                                ),
-                                width="full",
-                                padding="2",
-                            ),
-                        ),
-                        class_name="h-[400px] overflow-y-auto p-4",
-                    ),
-                    class_name="w-full bg-gray-800 rounded-lg",
-                ),
-                rx.hstack(
-                    rx.input(
-                        value=MatchState.new_message,
-                        on_change=MatchState.set_new_message,
-                        placeholder="Type a message...",
-                        class_name="flex-1 bg-gray-700 text-white rounded-lg px-4 py-2",
-                    ),
-                    rx.button(
-                        "Send",
-                        on_click=MatchState.send_message,
-                        class_name="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600",
-                    ),
-                    spacing="2",
-                    width="full",
-                ),
-                spacing="4",
-                align_items="center",
-            ),
-            class_name="fixed inset-0 bg-black bg-opacity-75 flex flex-col items-center justify-center z-50",
-        ),
-    )
+    """
+    Note: This embedded chat interface is no longer used.
+    Chat functionality has been moved to the dedicated ChatPage component.
+    We now redirect users to /chat/user/[username] instead of showing an embedded chat.
+    """
+    # Return empty fragment since we're not using embedded chat anymore
+    return rx.fragment()
 
 def action_buttons() -> rx.Component:
     """Action buttons for like, dislike, etc."""
@@ -2187,6 +2041,7 @@ def match_page() -> rx.Component:
             ),
             class_name="flex-1 min-h-screen bg-gray-800 flex flex-col justify-center items-center",
         ),
+        # This is just a placeholder now - chat is handled by the dedicated ChatPage
         chat_interface(),
         profile_popup(),  # Add the profile popup component
         spacing="0",
