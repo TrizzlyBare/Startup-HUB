@@ -703,22 +703,22 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def get_object_for_request_to_join(self):
-            """
-            Special method to get a project object when a user is requesting to join it.
-            This allows accessing projects the user is not yet a member of.
-            """
-            # Get the pk from the URL
-            pk = self.kwargs.get("pk")
+        """
+        Special method to get a project object when a user is requesting to join it.
+        This allows accessing projects the user is not yet a member of.
+        """
+        # Get the pk from the URL
+        pk = self.kwargs.get("pk")
 
-            # Try to get the project directly from the database (without ownership restrictions)
-            project = get_object_or_404(StartupIdea, pk=pk)
-            return project
+        # Try to get the project directly from the database (without ownership restrictions)
+        project = get_object_or_404(StartupIdea, pk=pk)
+        return project
 
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=["get"])
     def project_join_requests(self, request, pk=None):
         """
         Get all join requests for a specific project.
-        
+
         Returns:
         - project name
         - list of join requests with sender details
@@ -730,7 +730,7 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
         if project.user != request.user and not request.user.is_staff:
             return Response(
                 {"error": "Only the project owner can view join requests"},
-                status=status.HTTP_403_FORBIDDEN
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         # Get all join requests for this project
@@ -739,21 +739,25 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
         # Customize the serialization to include additional details
         request_data = []
         for request in join_requests:
-            request_data.append({
-                'id': request.id,
-                'project_name': project.name,
-                'sender_name': request.user.username,
-                'sender_id': request.user.id,
-                'status': request.status,
-                'message': request.message,
-                'created_at': request.created_at
-            })
+            request_data.append(
+                {
+                    "id": request.id,
+                    "project_name": project.name,
+                    "sender_name": request.user.username,
+                    "sender_id": request.user.id,
+                    "status": request.status,
+                    "message": request.message,
+                    "created_at": request.created_at,
+                }
+            )
 
-        return Response({
-            'project_name': project.name,
-            'project_id': project.id,
-            'join_requests': request_data
-        })
+        return Response(
+            {
+                "project_name": project.name,
+                "project_id": project.id,
+                "join_requests": request_data,
+            }
+        )
 
     @action(detail=True, methods=["post"])
     def request_to_join(self, request, pk=None):
@@ -793,3 +797,44 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
 
         serializer = JoinRequestSerializer(join_request)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    # Add this method to the StartupIdeaViewSet class in views.py
+
+    @action(
+        detail=True, methods=["delete"], url_path="join-request/(?P<request_id>[^/.]+)"
+    )
+    def delete_join_request(self, request, pk=None, request_id=None):
+        """
+        Delete a specific join request
+
+        Only the request creator or the project owner can delete a join request
+        """
+        startup = self.get_object()
+
+        try:
+            join_request = JoinRequest.objects.get(id=request_id, project=startup)
+        except JoinRequest.DoesNotExist:
+            return Response(
+                {"error": "Join request not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check if the user is authorized to delete the request
+        # Allow if user is either the request creator or the project owner
+        if request.user != join_request.user and request.user != startup.user:
+            return Response(
+                {"error": "You don't have permission to delete this join request"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Log the deletion
+        logger.info(
+            f"Join request {join_request.id} for project {startup.name} being deleted by {request.user.username}"
+        )
+
+        # Delete the join request
+        join_request.delete()
+
+        return Response(
+            {"message": "Join request deleted successfully"},
+            status=status.HTTP_204_NO_CONTENT,
+        )

@@ -24,12 +24,17 @@ urlpatterns += [
         StartupIdeaViewSet.as_view({"get": "pending_join_requests"}),
         name="pending-join-requests",
     ),
+    # Add this to your urls.py file in the urlpatterns list
     path(
         "startup-ideas/<pk>/join-request/<request_id>/",
         StartupIdeaViewSet.as_view(
-            {"put": "handle_join_request", "patch": "handle_join_request"}
+            {
+                "put": "handle_join_request",
+                "patch": "handle_join_request",
+                "delete": "delete_join_request",
+            }
         ),
-        name="handle-join-request",
+        name="delete-join-request",
     ),
     path(
         "startup-ideas/<pk>/project-join-requests/",
