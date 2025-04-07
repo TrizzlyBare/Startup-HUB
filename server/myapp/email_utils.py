@@ -34,7 +34,6 @@ def send_join_request_notification(join_request):
     Startup Hub Team
     """
 
-    # HTML email content
     html_message = f"""
     <!DOCTYPE html>
     <html>

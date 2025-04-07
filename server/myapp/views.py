@@ -17,6 +17,7 @@ from .serializers import (
     UserBasicSerializer,
 )
 
+from .email_utils import send_join_request_notification
 
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status, permissions, filters
