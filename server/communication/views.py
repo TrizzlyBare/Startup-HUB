@@ -418,6 +418,25 @@ class RoomViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @action(detail=True, methods=["GET"])
+    def webrtc_config(self, request, pk=None):
+        """Get WebRTC configuration for a room"""
+        room = self.get_object()
+
+        # Generate WebRTC configuration
+        config = {
+            "room_config": {
+                "room_id": str(room.id),
+                "name": room.name,
+                "type": room.room_type,
+            },
+            "ice_servers": WebRTCConfig.get_ice_servers(),
+            "media_constraints": WebRTCConfig.get_media_constraints(),
+            "token": request.auth.key if request.auth else None,
+        }
+
+        return Response(config)
+
 
 class MessageViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
