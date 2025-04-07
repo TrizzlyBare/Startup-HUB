@@ -330,7 +330,7 @@ def join_request_modal() -> rx.Component:
                     rx.hstack(
                         rx.button(
                             "Cancel",
-                            on_click=MyProjectsState.toggle_join_request_modal,
+                            on_click=MyProjectsState.toggle_join_requests_modal,
                             class_name="px-6 py-2 bg-red-600 hover:bg-red-700 rounded-lg",
                         ),
                         rx.button(
@@ -352,7 +352,7 @@ def join_request_modal() -> rx.Component:
             width="90vw",
             class_name="bg-white p-8 rounded-xl shadow-2xl border border-gray-200",
         ),
-        open=MyProjectsState.show_join_request_modal,
+        open=MyProjectsState.show_join_requests_modal,
     )
 
 def join_requests_modal() -> rx.Component:
@@ -415,18 +415,24 @@ def join_requests_modal() -> rx.Component:
                                                 rx.hstack(
                                                     rx.button(
                                                         "Accept",
-                                                        on_click=lambda: [
-                                                            MyProjectsState.accept_join_request(request.id, request.sender_id),
-                                                            MyProjectsState.delete_join_request(request.id)
-                                                        ],
+                                                        on_click=lambda: MyProjectsState.accept_join_request(request.id, request.sender_id),
                                                         class_name="bg-green-600 text-white hover:bg-green-700 px-4 py-2 rounded-lg",
                                                     ),
                                                     rx.button(
-                                                        "Delete Request",
-                                                        on_click=lambda: MyProjectsState.delete_join_request(request.id),
+                                                        "Reject",
+                                                        on_click=lambda: MyProjectsState.reject_join_request(request.id),
                                                         class_name="bg-red-600 text-white hover:bg-red-700 px-4 py-2 rounded-lg",
                                                     ),
                                                     spacing="4",
+                                                ),
+                                            ),
+                                            # Delete button for accepted requests
+                                            rx.cond(
+                                                request.status == "accepted",
+                                                rx.button(
+                                                    "Delete Request",
+                                                    on_click=lambda: MyProjectsState.delete_join_request(request.id),
+                                                    class_name="bg-gray-600 text-white hover:bg-gray-700 px-4 py-2 rounded-lg",
                                                 ),
                                             ),
                                             justify="end",
@@ -437,7 +443,6 @@ def join_requests_modal() -> rx.Component:
                                     ),
                                 ),
                             ),
-                            width="100%",
                         ),
                         rx.text(
                             "No join requests yet.",

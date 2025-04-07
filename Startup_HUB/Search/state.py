@@ -616,6 +616,68 @@ class MyProjectsState(rx.State):
             self.error = str(e)
             print(f"Exception in accept_join_request: {str(e)}")
 
+    async def reject_join_request(self, request_id: int):
+        """Reject a join request."""
+        try:
+            if not self.selected_project:
+                self.error = "No project selected"
+                return
+                
+            # Get token from AuthState
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+                else:
+                    return rx.redirect("/login")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            # Find the join request
+            join_request = next((req for req in self.join_requests if req.id == request_id), None)
+            if not join_request:
+                self.error = "Join request not found"
+                return
+            
+            async with httpx.AsyncClient() as client:
+                # Update the join request status to rejected
+                update_response = await client.patch(
+                    f"{self.API_URL}/startup-profile/startup-ideas/{self.selected_project.id}/project-join-requests/{request_id}/",
+                    json={"status": "rejected"},
+                    headers=headers
+                )
+                
+                if update_response.status_code == 200:
+                    # Delete the join request
+                    delete_response = await client.delete(
+                        f"{self.API_URL}/startup-profile/startup-ideas/{self.selected_project.id}/join-request/{request_id}/",
+                        headers=headers
+                    )
+                    
+                    if delete_response.status_code == 204:
+                        # Update the local list immediately
+                        self.join_requests = [req for req in self.join_requests if req.id != request_id]
+                        # Then reload to ensure we have the latest data
+                        await self.load_join_requests(self.selected_project)
+                        self.show_success_notification(
+                            "Request Rejected",
+                            "The join request has been rejected and deleted."
+                        )
+                    else:
+                        self.error = f"Failed to delete request: {delete_response.text}"
+                else:
+                    self.error = f"Failed to update request status: {update_response.text}"
+                    
+        except Exception as e:
+            self.error = str(e)
+            print(f"Exception in reject_join_request: {str(e)}")
+
     async def delete_join_request(self, request_id: int):
         """Delete a join request."""
         try:

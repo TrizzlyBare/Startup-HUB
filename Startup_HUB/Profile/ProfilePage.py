@@ -1,6 +1,7 @@
 import reflex as rx
 from ..Auth.AuthPage import AuthState
 import httpx
+import aiohttp
 
 class State(rx.State):
     """State for the profile page."""
@@ -13,9 +14,12 @@ class State(rx.State):
     name: str = ""
     first_name: str = ""
     last_name: str = ""
-    job_title: str = ""
-    experience_level: str = ""
-    category: str = ""
+    career_summary: str = ""  # Changed from job_title to match API
+    experience: str = ""  # Changed from experience_level to match API
+    industry: str = ""  # Changed from category to match API
+    
+    # Profile Picture
+    profile_picture_url: str = ""
     
     # Startup Ideas
     startup_ideas: list = []
@@ -87,38 +91,113 @@ class State(rx.State):
             if username:
                 self.profile_username = username
                 await self.load_profile_data()
-            # else:
-            #     return rx.redirect("/")
-        
+            
         await self.load_startup_ideas()
     
     # About section
-    about: str = ""
+    bio: str = ""  # Changed from about to match API
     
     # Skills (list for better management)
-    skills: list[str] = []
+    skills_list: list[str] = []  # Changed from skills to match API
     
     # Projects (list of projects)
-    projects: list[str] = []
-    
-    @rx.var
-    def formatted_skills(self) -> str:
-        """Get skills as a comma-separated string."""
-        return ",".join(self.skills) if self.skills else ""
-
-    @rx.var
-    def formatted_projects(self) -> str:
-        """Get projects as a comma-separated string."""
-        return ",".join(self.projects) if self.projects else ""
+    past_projects_list: list[str] = []  # Changed from projects to match API
     
     # Online presence links
-    linkedin_link: str = ""
-    github_link: str = ""
-    portfolio_link: str = ""
+    contact_links: list = []  # Changed from individual links to match API
     
     # Edit mode toggle
     edit_mode: bool = False
     show_edit_form: bool = False
+
+    def set_career_summary(self, value: str):
+        """Set the career summary (job title)."""
+        self.career_summary = value
+
+    def set_experience(self, value: str):
+        """Set the experience level."""
+        self.experience = value
+
+    def set_industry(self, value: str):
+        """Set the industry."""
+        self.industry = value
+
+    def set_bio(self, value: str):
+        """Set the bio."""
+        self.bio = value
+
+    def set_skills_list(self, value: str):
+        """Set the skills list from comma-separated string."""
+        self.skills_list = [s.strip() for s in value.split(",") if s.strip()]
+
+    def set_past_projects_list(self, value: str):
+        """Set the past projects list from comma-separated string."""
+        self.past_projects_list = [p.strip() for p in value.split(",") if p.strip()]
+
+    def format_url(self, url: str) -> str:
+        """Format URL to ensure it's valid."""
+        if not url:
+            return ""
+        # Remove any whitespace
+        url = url.strip()
+        # If URL doesn't start with http:// or https://, add https://
+        if not url.startswith(("http://", "https://")):
+            url = f"https://{url}"
+        return url
+
+    def set_contact_links(self, value: str, link_type: str):
+        """Set a specific contact link."""
+        # Create a new list without the link type we're updating
+        new_links = [link for link in self.contact_links if link.get("title") != link_type]
+        
+        # Add the new link if it has a value
+        if value:
+            formatted_url = self.format_url(value)
+            # Keep the existing id if we're updating an existing link
+            existing_link = next((link for link in self.contact_links if link.get("title") == link_type), None)
+            new_link = {
+                "title": link_type,  # Title will be "Github", "Linkedin", "Portfolio"
+                "url": formatted_url
+            }
+            if existing_link and "id" in existing_link:
+                new_link["id"] = existing_link["id"]
+            new_links.append(new_link)
+        
+        self.contact_links = new_links
+
+    @rx.var
+    def formatted_skills(self) -> str:
+        """Get skills as a comma-separated string."""
+        return ",".join(self.skills_list) if self.skills_list else ""
+
+    @rx.var
+    def formatted_projects(self) -> str:
+        """Get projects as a comma-separated string."""
+        return ",".join(self.past_projects_list) if self.past_projects_list else ""
+
+    @rx.var
+    def linkedin_link(self) -> str:
+        """Get LinkedIn link from contact_links."""
+        for link in self.contact_links:
+            if link.get("title") == "Linkedin":
+                return link.get("url", "")
+        return ""
+
+    @rx.var
+    def github_link(self) -> str:
+        """Get GitHub link from contact_links."""
+        for link in self.contact_links:
+            if link.get("title") == "Github":
+                return link.get("url", "")
+        return ""
+
+    @rx.var
+    def portfolio_link(self) -> str:
+        """Get Portfolio link from contact_links."""
+        for link in self.contact_links:
+            if link.get("title") == "Portfolio":
+                return link.get("url", "")
+        return ""
 
     def toggle_edit_mode(self):
         """Toggle edit mode on/off."""
@@ -230,54 +309,43 @@ class State(rx.State):
                             data = response.json()
                             print(f"Received profile data: {data}")
                             
+                            # Update profile picture URL
+                            self.profile_picture_url = data.get("profile_picture_url", "")
+                            AuthState.profile_picture = self.profile_picture_url
+                            
                             # Update basic info - handle null values properly
                             self.first_name = data.get("first_name") or ""
                             self.last_name = data.get("last_name") or ""
                             self.name = f"{self.first_name} {self.last_name}".strip() or "No Name"
                             
                             # Handle field name differences
-                            self.job_title = data.get("job_title") or "No Job Title"
-                            self.experience_level = data.get("experience_level") or data.get("experience") or "Not Specified"
-                            self.category = data.get("category") or data.get("industry") or "Not Specified"
-                            self.about = data.get("about") or data.get("bio") or ""
+                            self.career_summary = data.get("career_summary") or "No Job Title"
+                            self.experience = data.get("experience_level") or data.get("experience") or "Not Specified"
+                            self.industry = data.get("category") or data.get("industry") or "Not Specified"
+                            self.bio = data.get("about") or data.get("bio") or ""
                             
                             # Handle skills - ensure null data shows properly
                             skills_data = data.get("skills") or []
                             if isinstance(skills_data, list):
-                                self.skills = skills_data
+                                self.skills_list = skills_data
                             elif isinstance(skills_data, str):
                                 # Handle case where skills might be a comma-separated string
-                                self.skills = [s.strip() for s in skills_data.split(",") if s.strip()]
+                                self.skills_list = [s.strip() for s in skills_data.split(",") if s.strip()]
                             else:
-                                self.skills = []
+                                self.skills_list = []
                             
                             # Handle projects - ensure null data shows properly
                             projects_data = data.get("projects") or data.get("past_projects") or []
                             if isinstance(projects_data, list):
-                                self.projects = projects_data
+                                self.past_projects_list = projects_data
                             elif isinstance(projects_data, str):
                                 # Handle case where projects might be a comma-separated string
-                                self.projects = [p.strip() for p in projects_data.split(",") if p.strip()]
+                                self.past_projects_list = [p.strip() for p in projects_data.split(",") if p.strip()]
                             else:
-                                self.projects = []
+                                self.past_projects_list = []
                                 
-                            # Handle social links - ensure null data shows properly
-                            # Check for contact_links array first
-                            contact_links = data.get("contact_links") or []
-                            if contact_links:
-                                # Extract links from contact_links array
-                                for link in contact_links:
-                                    if "linkedin" in link.lower():
-                                        self.linkedin_link = link
-                                    elif "github" in link.lower():
-                                        self.github_link = link
-                                    elif "portfolio" in link.lower() or "website" in link.lower():
-                                        self.portfolio_link = link
-                            else:
-                                # Fall back to individual link fields
-                                self.linkedin_link = data.get("linkedin_link") or ""
-                                self.github_link = data.get("github_link") or ""
-                                self.portfolio_link = data.get("portfolio_link") or ""
+                            # Handle contact links
+                            self.contact_links = data.get("contact_links", [])
                         elif response.status_code == 404:
                             # Profile doesn't exist yet, create it
                             print(f"Profile for {self.profile_username} doesn't exist yet. Creating it...")
@@ -334,23 +402,40 @@ class State(rx.State):
         # Update profile data from form
         self.first_name = form_data.get("first_name", self.first_name)
         self.last_name = form_data.get("last_name", self.last_name)
-        self.job_title = form_data.get("job_title", self.job_title)
-        self.about = form_data.get("about", self.about)
-        self.category = form_data.get("category", self.category)
-        self.experience_level = form_data.get("experience_level", self.experience_level)
-        self.linkedin_link = form_data.get("linkedin_link", self.linkedin_link)
-        self.github_link = form_data.get("github_link", self.github_link)
-        self.portfolio_link = form_data.get("portfolio_link", self.portfolio_link)
+        self.career_summary = form_data.get("career_summary", self.career_summary)
+        self.bio = form_data.get("about", self.bio)
+        self.industry = form_data.get("category", self.industry)
+        self.experience = form_data.get("experience_level", self.experience)
+        
+        # Update contact links from form data
+        self.contact_links = []
+        
+        # Add links from form data
+        if form_data.get("linkedin_link"):
+            self.contact_links.append({
+                "title": "Linkedin",  # Exact title from API
+                "url": self.format_url(form_data.get("linkedin_link"))
+            })
+        if form_data.get("github_link"):
+            self.contact_links.append({
+                "title": "Github",  # Exact title from API
+                "url": self.format_url(form_data.get("github_link"))
+            })
+        if form_data.get("portfolio_link"):
+            self.contact_links.append({
+                "title": "Portfolio",  # Exact title from API
+                "url": self.format_url(form_data.get("portfolio_link"))
+            })
         
         # Update skills from form data
         skills_value = form_data.get("skills", "")
         if skills_value:
-            self.skills = [s.strip() for s in skills_value.split(",") if s.strip()]
+            self.skills_list = [s.strip() for s in skills_value.split(",") if s.strip()]
         
         # Update projects from form data
         projects_value = form_data.get("projects", "")
         if projects_value:
-            self.projects = [p.strip() for p in projects_value.split(",") if p.strip()]
+            self.past_projects_list = [p.strip() for p in projects_value.split(",") if p.strip()]
         
         # Compose full name
         self.name = f"{self.first_name} {self.last_name}".strip() or "No Name"
@@ -392,32 +477,15 @@ class State(rx.State):
             "first_name": self.first_name,
             "last_name": self.last_name,
             "email": user_data.get("email", ""),  # Get email from auth debug data
-            "profile_picture_url": None,  # Will be handled separately if needed
-            "bio": self.about,
-            "industry": self.category,
-            "experience": self.experience_level,
-            "skills": ",".join(self.skills) if self.skills else "",
-            "past_projects": ",".join(self.projects) if self.projects else "",
-            "career_summary": self.job_title,  # Using job_title as career_summary
-            "contact_links": []  # Initialize empty contact_links array
+            "profile_picture_url": self.profile_picture_url,
+            "bio": self.bio,
+            "industry": self.industry,
+            "experience": self.experience,
+            "skills": ",".join(self.skills_list) if self.skills_list else "",
+            "past_projects": ",".join(self.past_projects_list) if self.past_projects_list else "",
+            "career_summary": self.career_summary,  # Using job_title as career_summary
+            "contact_links": self.contact_links
         }
-        
-        # If we have contact links, add them
-        if self.linkedin_link:
-            profile_data["contact_links"].append({
-                "title": "LinkedIn",
-                "url": self.linkedin_link if self.linkedin_link.startswith(("http://", "https://")) else f"https://{self.linkedin_link}"
-            })
-        if self.github_link:
-            profile_data["contact_links"].append({
-                "title": "GitHub",
-                "url": self.github_link if self.github_link.startswith(("http://", "https://")) else f"https://{self.github_link}"
-            })
-        if self.portfolio_link:
-            profile_data["contact_links"].append({
-                "title": "Portfolio",
-                "url": self.portfolio_link if self.portfolio_link.startswith(("http://", "https://")) else f"https://{self.portfolio_link}"
-            })
         
         # Define headers here
         headers = {
@@ -506,7 +574,7 @@ class State(rx.State):
     @rx.var
     def has_about(self) -> bool:
         """Check if about text exists."""
-        return len(self.about) > 0
+        return len(self.bio) > 0
 
     async def load_startup_ideas(self):
         """Load startup ideas for the current user."""
@@ -636,6 +704,95 @@ class State(rx.State):
                     print(f"Error deleting startup idea: {response.text}")
         except Exception as e:
             print(f"Error in delete_startup: {e}")
+
+    async def upload_profile_picture(self, files: list[rx.UploadFile]):
+        """Upload a new profile picture."""
+        print("\n" + "="*50)
+        print("🚀 STARTING PROFILE PICTURE UPLOAD")
+        print("="*50 + "\n")
+        
+        if not files or len(files) == 0:
+            print("❌ ERROR: No files received")
+            return
+        
+        try:
+            # Get the first file from the list
+            file = files[0]
+            print(f"\n📁 FILE INFORMATION:")
+            print(f"  - Filename: {file.filename}")
+            print(f"  - Content Type: {file.content_type}")
+            
+            # Read the file content
+            content = await file.read()
+            print(f"\n📦 FILE CONTENT:")
+            print(f"  - Content Length: {len(content)} bytes")
+            
+            # Get auth token
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                print("\n❌ ERROR: No auth token found")
+                return
+            print(f"\n🔑 AUTH TOKEN: {auth_token[:10]}...")
+            
+            # Create form data with just the profile picture
+            form = aiohttp.FormData()
+            form.add_field('profile_picture',
+                         content,
+                         filename=file.filename,
+                         content_type='image/jpeg' if file.filename.lower().endswith(('.jpg', '.jpeg')) else 'image/png')
+            
+            print("\n📤 UPLOADING PROFILE PICTURE...")
+            # Make the request to update profile with new image
+            async with aiohttp.ClientSession() as session:
+                async with session.put(
+                    f"{self.API_URL}/profile/",
+                    data=form,
+                    headers={
+                        "Authorization": f"Token {auth_token}",
+                        "Accept": "application/json",
+                        "Content-Type": "multipart/form-data"
+                    }
+                ) as response:
+                    print(f"\n📥 UPLOAD RESPONSE:")
+                    print(f"  - Status: {response.status}")
+                    response_text = await response.text()
+                    print(f"  - Response: {response_text}")
+                    
+                    if response.status == 200:
+                        # Update the profile picture in the state
+                        data = await response.json()
+                        if "profile_picture_url" in data:
+                            print("\n✅ SUCCESS:")
+                            print(f"  - New URL: {data['profile_picture_url']}")
+                            self.profile_picture_url = data["profile_picture_url"]
+                            AuthState.profile_picture = self.profile_picture_url
+                            # Reload the profile data to ensure everything is in sync
+                            await self.load_profile_data()
+                        else:
+                            print("\n❌ ERROR: No profile_picture_url in response")
+                    else:
+                        print(f"\n❌ ERROR uploading profile picture: {response_text}")
+        
+        except Exception as e:
+            print(f"\n❌ ERROR in upload_profile_picture: {e}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            
+        finally:
+            print("\n" + "="*50)
+            print("🏁 END OF PROFILE PICTURE UPLOAD")
+            print("="*50 + "\n")
+            
+            # Keep the edit form open
+            self.show_edit_form = True
+            
+            # Force a re-render of the form
+            await self.get_state(AuthState)
+            
+            # Add a small delay to ensure the form stays open
+            await rx.sleep(0.1)
 
 def skill_badge(skill: str) -> rx.Component:
     """Create a badge for a skill."""
@@ -847,17 +1004,17 @@ def profile_display() -> rx.Component:
                 rx.vstack(
                     rx.heading(State.name, size="8", class_name="text-black font-bold"),
                     rx.hstack(
-                        rx.text(f"Job: {State.job_title}" ,size="5", class_name="text-gray-400"),
+                        rx.text(f"Job: {State.career_summary}" ,size="5", class_name="text-gray-400"),
                         align_items="center",
                         spacing="2"
                     ),
                     rx.hstack(
                         rx.badge(
-                            State.category,
+                            State.industry,
                             class_name="bg-blue-100 text-blue-800 px-3 py-1 rounded-full"
                         ),
                         rx.badge(
-                            State.experience_level,
+                            State.experience,
                             class_name="bg-green-100 text-green-800 px-3 py-1 rounded-full"
                         ),
                         spacing="2"
@@ -892,7 +1049,7 @@ def profile_display() -> rx.Component:
                 rx.heading("About", size="6", margin_bottom="2" ,class_name="text-sky-500"),
                 rx.cond(
                     State.has_about,
-                    rx.text(State.about,class_name="text-gray-400"),
+                    rx.text(State.bio,class_name="text-gray-400"),
                     rx.text("No description provided.", class_name="text-gray-400 italic")
                 ),
                 width="100%",
@@ -910,7 +1067,7 @@ def profile_display() -> rx.Component:
                 ),
                 rx.flex(
                     rx.foreach(
-                        State.skills,
+                        State.skills_list,
                         skill_badge
                     ),
                     wrap="wrap",
@@ -931,7 +1088,7 @@ def profile_display() -> rx.Component:
                 ),
                 rx.flex(
                     rx.foreach(
-                        State.projects,
+                        State.past_projects_list,
                         project_badge
                     ),
                     wrap="wrap",
@@ -1026,9 +1183,9 @@ def edit_form() -> rx.Component:
                         rx.vstack(
                             rx.box(
                                 rx.cond(
-                                    AuthState.profile_picture,
+                                    State.profile_picture_url,
                                     rx.image(
-                                        src=AuthState.profile_picture,
+                                        src=State.profile_picture_url,
                                         width="100%",
                                         height="100%",
                                         object_fit="cover",
@@ -1049,11 +1206,21 @@ def edit_form() -> rx.Component:
                                 border_color="gray.200",
                                 overflow="hidden"
                             ),
-                            rx.button(
-                                rx.hstack(
-                                    rx.text("+ Upload profile photo"),
+                            rx.upload(
+                                rx.button(
+                                    rx.hstack(
+                                        rx.icon("upload", class_name="mr-2"),
+                                        rx.text("Upload profile photo"),
+                                    ),
+                                    class_name="px-4 py-2 bg-sky-200 text-sky-700 hover:bg-gray-300 rounded-lg mt-2",
                                 ),
-                                class_name="px-4 py-2 bg-sky-200 text-sky-700 hover:bg-gray-300 rounded-lg mt-2",
+                                accept={
+                                    "image/png": [".png"],
+                                    "image/jpeg": [".jpg", ".jpeg"],
+                                },
+                                max_files=1,
+                                on_drop=State.upload_profile_picture,
+                                on_click=lambda: State.set_show_edit_form(True),  # Keep form open on click
                             ),
                             align="center",
                             spacing="2",
@@ -1069,7 +1236,7 @@ def edit_form() -> rx.Component:
                                     name="first_name",
                                     required=True,
                                     value=State.first_name,
-                                    on_change=State.set_first_name,
+                                    on_change=lambda value: State.set_first_name(value),
                                     class_name="w-full p-2 border text-black rounded-lg bg-white",
                                 ),
                                 width="100%",
@@ -1082,7 +1249,7 @@ def edit_form() -> rx.Component:
                                     name="last_name",
                                     required=True,
                                     value=State.last_name,
-                                    on_change=State.set_last_name,
+                                    on_change=lambda value: State.set_last_name(value),
                                     class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 ),
                                 width="100%",
@@ -1096,9 +1263,9 @@ def edit_form() -> rx.Component:
                         rx.text("Job Title", align="left", width="100%" , font_weight="bold", size = "5" , class_name="text-sky-500"),
                         rx.input(
                             placeholder="Your job title",
-                            name="job_title",
-                            value=State.job_title,
-                            on_change=State.set_job_title,
+                            name="career_summary",
+                            value=State.career_summary,
+                            on_change=State.set_career_summary,
                             class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         
@@ -1110,8 +1277,8 @@ def edit_form() -> rx.Component:
                                     ["Technology", "Finance", "Healthcare", "Education", "E-commerce", "Other"],
                                     placeholder="Select industry",
                                     name="category",
-                                    value=State.category,
-                                    on_change=State.set_category,
+                                    value=State.industry,
+                                    on_change=State.set_industry,
                                     class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 ),
                                 width="100%",
@@ -1123,8 +1290,8 @@ def edit_form() -> rx.Component:
                                     ["< 1 year", "1-3 years", "3-5 years", "5-10 years", "10+ years"],
                                     placeholder="Select experience",
                                     name="experience_level",
-                                    value=State.experience_level,
-                                    on_change=State.set_experience_level,
+                                    value=State.experience,
+                                    on_change=State.set_experience,
                                     class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 ),
                                 width="100%",
@@ -1139,8 +1306,8 @@ def edit_form() -> rx.Component:
                         rx.text_area(
                             placeholder="Tell us about yourself...",
                             name="about",
-                            value=State.about,
-                            on_change=State.set_about,
+                            value=State.bio,
+                            on_change=State.set_bio,
                             height="120px",
                             class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
@@ -1151,7 +1318,7 @@ def edit_form() -> rx.Component:
                             placeholder="Skills (comma-separated)",
                             name="skills",
                             value=State.formatted_skills,
-                            on_change=lambda value: State.set_skills(value.split(",")),
+                            on_change=State.set_skills_list,
                             class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         
@@ -1161,7 +1328,7 @@ def edit_form() -> rx.Component:
                             placeholder="Projects (comma-separated)",
                             name="projects",
                             value=State.formatted_projects,
-                            on_change=lambda value: State.set_projects(value.split(",")),
+                            on_change=State.set_past_projects_list,
                             class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         
@@ -1173,7 +1340,7 @@ def edit_form() -> rx.Component:
                                 placeholder="LinkedIn URL",
                                 name="linkedin_link",
                                 value=State.linkedin_link,
-                                on_change=State.set_linkedin_link,
+                                on_change=lambda value: State.set_contact_links(value, "Linkedin"),  # Exact title
                                 class_name="w-full p-2 border rounded-lg bg-white text-black",
                             ),
                             width="100%"
@@ -1184,7 +1351,7 @@ def edit_form() -> rx.Component:
                                 placeholder="GitHub URL",
                                 name="github_link",
                                 value=State.github_link,
-                                on_change=State.set_github_link,
+                                on_change=lambda value: State.set_contact_links(value, "Github"),  # Exact title
                                 class_name="w-full p-2 border rounded-lg bg-white text-black",
                             ),
                             width="100%"
@@ -1195,7 +1362,7 @@ def edit_form() -> rx.Component:
                                 placeholder="Portfolio Website",
                                 name="portfolio_link",
                                 value=State.portfolio_link,
-                                on_change=State.set_portfolio_link,
+                                on_change=lambda value: State.set_contact_links(value, "Portfolio"),  # Exact title
                                 class_name="w-full p-2 border rounded-lg bg-white text-black",
                             ),
                             width="100%"
@@ -1203,18 +1370,15 @@ def edit_form() -> rx.Component:
                         
                         # Buttons
                         rx.hstack(
-                            rx.dialog.close(
-                                rx.button(
-                                    "Cancel",
-                                    class_name="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg",
-                                ),
+                            rx.button(
+                                "Cancel",
+                                on_click=State.cancel_edit,
+                                class_name="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg",
                             ),
-                            rx.dialog.close(
-                                rx.button(
-                                    "Save Profile",
-                                    type="submit",
-                                    class_name="px-6 py-2 bg-sky-600 text-white hover:bg-sky-700 rounded-lg",
-                                ),
+                            rx.button(
+                                "Save Profile",
+                                type="submit",
+                                class_name="px-6 py-2 bg-sky-600 text-white hover:bg-sky-700 rounded-lg",
                             ),
                             spacing="4",
                             justify="end",

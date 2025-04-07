@@ -152,8 +152,6 @@ app.add_page(search_page, route="/search/query/[url_query]")
 app.add_page(search_page, route="/search/type/[search_type]/query/[url_query]")
 
 # My Projects pages
-app.add_page(my_projects_page, route="/my-projects/[user_id]")
-app.add_page(my_projects_page, route="/my-projects", on_load=MyProjectsState.redirect_to_user_projects)
 
 # Join Requests page
 app.add_page(join_requests_page, route="/projects/[id]/join-requests")
