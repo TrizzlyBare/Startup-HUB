@@ -752,3 +752,48 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
 
         serializer = JoinRequestSerializer(join_request)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"])
+    def project_join_requests(self, request, pk=None):
+        """
+        Get all join requests for a specific project.
+
+        Returns:
+        - project name
+        - list of join requests with sender details
+        """
+        # Get the project
+        project = self.get_object()
+
+        # Check if the user is the project owner or an admin
+        if project.user != request.user and not request.user.is_staff:
+            return Response(
+                {"error": "Only the project owner can view join requests"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Get all join requests for this project
+        join_requests = JoinRequest.objects.filter(project=project)
+
+        # Customize the serialization to include additional details
+        request_data = []
+        for request in join_requests:
+            request_data.append(
+                {
+                    "id": request.id,
+                    "project_name": project.name,
+                    "sender_name": request.user.username,
+                    "sender_id": request.user.id,
+                    "status": request.status,
+                    "message": request.message,
+                    "created_at": request.created_at,
+                }
+            )
+
+        return Response(
+            {
+                "project_name": project.name,
+                "project_id": project.id,
+                "join_requests": request_data,
+            }
+        )
