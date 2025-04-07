@@ -1003,7 +1003,7 @@ class MatchState(rx.State):
                             return False
                     else:
                         print(f"Failed to create room: {create_response.text}")
-                        self.error_message = f"Failed to create room: {create_response.status_code}"
+                        self.error_message = f"Failed to create chat room: {create_response.status_code}"
                         return False
         
         except Exception as e:
@@ -1434,27 +1434,31 @@ class MatchState(rx.State):
             print(f"Creating room with: name={group_name}, max_participants={max_participants}")
             print(f"Participants: {participants}")
             
+            # Set up headers for API calls
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            # Create the room
             async with httpx.AsyncClient() as client:
                 # Create new room
-                response = await client.post(
+                create_response = await client.post(
                     f"{self.API_BASE_URL}/communication/rooms/",
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Token {auth_token}"
-                    },
+                    headers=headers,
                     json={
                         "name": group_name,
                         "room_type": "group",
-                        "max_participants": max_participants
-                        # Removed participants from initial creation since API expects them to be added separately
+                        "max_participants": max_participants,
+                        "participants": participants
                     }
                 )
                 
-                print(f"Create Room Response Status: {response.status_code}")
-                print(f"Create Room Response: {response.text}")
+                print(f"Create Room Response Status: {create_response.status_code}")
+                print(f"Create Room Response: {create_response.text}")
                 
-                if response.status_code == 201:
-                    room_data = response.json()
+                if create_response.status_code == 201:
+                    room_data = create_response.json()
                     room_id = room_data["id"]
                     print(f"Room created successfully with ID: {room_id}")
                     
@@ -1483,7 +1487,7 @@ class MatchState(rx.State):
                     
                     self.success_message = "Group chat created successfully!"
                 else:
-                    self.error_message = f"Failed to create group chat: {response.text}"
+                    self.error_message = f"Failed to create group chat: {create_response.text}"
                 
         except Exception as e:
             print(f"\n=== Error Debug ===")

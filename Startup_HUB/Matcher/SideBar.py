@@ -299,29 +299,35 @@ def create_group_modal() -> rx.Component:
         rx.dialog.content(
             rx.dialog.title(
                 "Create New Group Chat",
-                class_name="text-2xl font-bold text-sky-600 text-center"
+                class_name="text-2xl font-bold text-sky-600 text-center font-mono"
             ),
             rx.dialog.description(
                 rx.form(
                     rx.vstack(
-                        rx.input(
-                            placeholder="Group Name",
-                            name="group_name",
-                            required=True,
-                            class_name="w-full h-10 border rounded-xl bg-white",
+                        rx.text(
+                            "Group Name:",
+                            class_name="font-semibold text-lg text-sky-300"
                         ),
                         rx.input(
-                            placeholder="Max Participants (default: 10)",
+                            name="group_name",
+                            required=True,
+                            class_name="w-full h-10 border rounded-xl bg-white text-black"
+                        ),
+                        rx.text(
+                            "Max Members:",
+                            class_name="font-semibold text-lg mt-4 text-sky-300"
+                        ),
+                        rx.input(
                             name="max_participants",
                             type="number",
                             min="2",
                             max="100",
                             default_value="10",
-                            class_name="w-full h-10 border rounded-xl bg-white",
+                            class_name="w-full h-10 border rounded-xl bg-white text-black",
                         ),
                         rx.text(
                             "Add Members",
-                            class_name="font-semibold text-lg mt-4",
+                            class_name="font-semibold text-lg mt-4 text-sky-300",
                         ),
                         rx.vstack(
                             rx.foreach(

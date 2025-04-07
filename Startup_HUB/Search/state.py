@@ -1,6 +1,6 @@
 import reflex as rx
 import httpx
-from typing import List, Optional
+from typing import List, Optional, Dict
 from ..Auth.AuthPage import AuthState
 
 class Project(rx.Base):
@@ -47,6 +47,142 @@ class MyProjectsState(rx.State):
     # Error handling
     error: Optional[str] = None
     
+    # Sidebar states
+    active_tab: str = "projects"  # Default tab
+    matches: List[Dict] = []
+    likes: List[Dict] = []
+    rooms: List[Dict] = []
+    current_chat: Optional[str] = None
+    current_group_chat: Optional[str] = None
+    current_group_name: Optional[str] = None
+    
+    def set_active_tab(self, tab: str):
+        """Set the active tab in the sidebar."""
+        self.active_tab = tab
+    
+    async def load_matches(self):
+        """Load matches from the API."""
+        try:
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+                else:
+                    return rx.redirect("/login")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.API_URL}/matcher/matches/",
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    self.matches = response.json()
+                elif response.status_code == 401:
+                    return rx.redirect("/login")
+        except Exception as e:
+            print(f"Error loading matches: {str(e)}")
+    
+    async def load_likes(self):
+        """Load likes from the API."""
+        try:
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+                else:
+                    return rx.redirect("/login")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.API_URL}/matcher/likes/",
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    self.likes = response.json()
+                elif response.status_code == 401:
+                    return rx.redirect("/login")
+        except Exception as e:
+            print(f"Error loading likes: {str(e)}")
+    
+    async def load_rooms(self):
+        """Load chat rooms from the API."""
+        try:
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+                else:
+                    return rx.redirect("/login")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.API_URL}/chat/rooms/",
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    self.rooms = response.json()
+                elif response.status_code == 401:
+                    return rx.redirect("/login")
+        except Exception as e:
+            print(f"Error loading rooms: {str(e)}")
+    
+    def open_chat(self, username: str):
+        """Open a chat with a user."""
+        self.current_chat = username
+        self.current_group_chat = None
+        self.current_group_name = None
+    
+    def open_group_chat(self, room_id: str, room_name: str):
+        """Open a group chat."""
+        self.current_group_chat = room_id
+        self.current_group_name = room_name
+        self.current_chat = None
+    
+    def get_username(self) -> str:
+        """Get the current user's username."""
+        try:
+            # First try to get from AuthState
+            auth_state = self.get_state(AuthState)
+            if auth_state and hasattr(auth_state, 'username'):
+                return auth_state.username
+            
+            return ""
+        except Exception as e:
+            print(f"Error getting username: {str(e)}")
+            return ""
+    
+    @rx.var
+    def username(self) -> str:
+        """Computed var to get the current user's username."""
+        return self.get_username()
+    
     @rx.var
     def has_projects(self) -> bool:
         """Check if there are any projects."""
@@ -74,8 +210,11 @@ class MyProjectsState(rx.State):
         return "1"
 
     async def on_mount(self):
-        """Load projects when the component mounts."""
+        """Load data when the component mounts."""
         await self.load_projects()
+        await self.load_matches()
+        await self.load_likes()
+        await self.load_rooms()
     
     async def load_projects(self):
         """Load projects from the API."""
