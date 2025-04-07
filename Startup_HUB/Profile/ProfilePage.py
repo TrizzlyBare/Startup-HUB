@@ -845,9 +845,9 @@ def profile_display() -> rx.Component:
                 ),
                 # Basic Info
                 rx.vstack(
-                    rx.heading(State.name, size="7", class_name="text-sky-600 font-bold"),
+                    rx.heading(State.name, size="8", class_name="text-black font-bold"),
                     rx.hstack(
-                        rx.text(f"Job: {State.job_title}"),
+                        rx.text(f"Job: {State.job_title}" ,size="5", class_name="text-gray-400"),
                         align_items="center",
                         spacing="2"
                     ),
@@ -870,27 +870,15 @@ def profile_display() -> rx.Component:
                 rx.hstack(
                     # Edit Profile Button
                     rx.button(
-                        rx.icon("pencil"),
+                        rx.icon("pencil", class_name="w-6 h-6"),  # Increased icon size
                         on_click=State.toggle_edit_form,
-                        class_name="px-6 py-3 bg-white text-gray-600 rounded-lg hover:bg-sky-200 hover:text-gray-600 transition-all duration-200"
-                    ),
-                    # View Matches Button
-                    rx.button(
-                        "View Matches",
-                        on_click=rx.redirect(f"/match/from-profile/{State.profile_username}"),
-                        class_name="px-6 py-3 bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-all duration-200"
+                        class_name="px-8 py-4 text-lg bg-white text-gray-600 rounded-xl hover:bg-sky-200 hover:text-gray-600 transition-all duration-200"
                     ),
                     # My Projects Button
                     rx.button(
                         "My Projects",
                         on_click=rx.redirect(f"/my-projects/user/{State.profile_username}"),
-                        class_name="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm",
-                    ),
-
-                    rx.button(
-                        "Log Out",
-                        on_click=State.logout,
-                        class_name="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                        class_name="px-6 py-3 text-lg bg-blue-600 text-white rounded-xl bg-sky-600 hover:bg-sky-500 hover:scale-105 transition-all duration-200 font-bold",
                     ),
                     spacing="4"
                 ),
@@ -901,11 +889,11 @@ def profile_display() -> rx.Component:
             
             # About Section
             rx.box(
-                rx.heading("About", size="5", margin_bottom="2"),
+                rx.heading("About", size="6", margin_bottom="2" ,class_name="text-sky-500"),
                 rx.cond(
                     State.has_about,
-                    rx.text(State.about),
-                    rx.text("No description provided.", class_name="text-gray-500 italic")
+                    rx.text(State.about,class_name="text-gray-400"),
+                    rx.text("No description provided.", class_name="text-gray-400 italic")
                 ),
                 width="100%",
                 padding="4",
@@ -915,7 +903,7 @@ def profile_display() -> rx.Component:
             # Skills Section
             rx.box(
                 rx.hstack(
-                    rx.heading("Skills", size="5"),
+                    rx.heading("Skills", size="6",class_name="text-sky-500"),
                     rx.spacer(),
                     width="100%",
                     margin_bottom="2",
@@ -926,7 +914,8 @@ def profile_display() -> rx.Component:
                         skill_badge
                     ),
                     wrap="wrap",
-                    gap="2"
+                    gap="2",
+                    class_name="text-gray-400"
                 ),
                 width="100%",
                 padding="4",
@@ -935,7 +924,7 @@ def profile_display() -> rx.Component:
 
             rx.box(
                 rx.hstack(
-                    rx.heading("Projects", size="5"),
+                    rx.heading("Projects", size="6",class_name="text-sky-500"),
                     rx.spacer(),
                     width="100%",
                     margin_bottom="2",
@@ -946,7 +935,8 @@ def profile_display() -> rx.Component:
                         project_badge
                     ),
                     wrap="wrap",
-                    gap="2"
+                    gap="2",
+                    class_name="text-gray-400",
                 ),
                 width="100%",
                 padding="4",
@@ -955,7 +945,7 @@ def profile_display() -> rx.Component:
             
             # Online Presence Section
             rx.box(
-                rx.heading("Online Presence", size="5", margin_bottom="2"),
+                rx.heading("Online Presence", size="6",class_name="text-sky-500" , margin_bottom="2"),
                 rx.vstack(
                     rx.cond(
                         State.linkedin_link != "",
@@ -997,13 +987,28 @@ def profile_display() -> rx.Component:
                 class_name="bg-white rounded-lg shadow"
             ),
             
+            # Logout button at the bottom right
+            rx.box(
+                rx.hstack(
+                    rx.spacer(),
+                    rx.button(
+                        rx.icon("log-out", class_name="w-7 h-7"),
+                        on_click=State.logout,
+                        class_name="px-6 py-3 text-lg bg-white text-red-600 rounded-xl hover:bg-red-200 hover:scale-105 transition-all duration-200 font-bold"
+                    ),
+                ),
+                width="100%",
+                padding="2",
+                margin_top="4"
+            ),
+            
             width="100%",
             max_width="1000px",
             margin="auto",
             padding="4",
             spacing="4"
         ),
-        class_name="bg-white rounded-lg shadow-lg p-6 w-full max-w-6xl mx-auto"
+        class_name="bg-white rounded-lg shadow-lg p-6 w-full max-w-6xl mx-auto mt-10"
     )
 
 def edit_form() -> rx.Component:
@@ -1012,7 +1017,7 @@ def edit_form() -> rx.Component:
         rx.dialog.content(
             rx.dialog.title(
                 "Edit Profile", 
-                class_name="text-3xl font-bold mb-4 text-blue-600",
+                class_name="text-3xl font-bold mb-4 text-sky-600",
             ),
             rx.dialog.description(
                 rx.form(
@@ -1046,11 +1051,9 @@ def edit_form() -> rx.Component:
                             ),
                             rx.button(
                                 rx.hstack(
-                                    rx.icon("plus", size=16),
-                                    rx.text("Upload profile photo"),
-                                    spacing="1"
+                                    rx.text("+ Upload profile photo"),
                                 ),
-                                class_name="px-4 py-2 bg-gray-200 text-gray-700 hover:bg-gray-300 rounded-lg mt-2",
+                                class_name="px-4 py-2 bg-sky-200 text-sky-700 hover:bg-gray-300 rounded-lg mt-2",
                             ),
                             align="center",
                             spacing="2",
@@ -1060,27 +1063,27 @@ def edit_form() -> rx.Component:
                         # Name Fields
                         rx.hstack(
                             rx.vstack(
-                                rx.text("First Name", font_weight="medium", align="left", width="100%"),
+                                rx.text("First Name", align="left", width="100%" ,font_weight="bold", size = "5" , class_name="text-sky-500"),
                                 rx.input(
                                     placeholder="First Name",
                                     name="first_name",
                                     required=True,
                                     value=State.first_name,
                                     on_change=State.set_first_name,
-                                    class_name="w-full p-2 border rounded-lg bg-white",
+                                    class_name="w-full p-2 border text-black rounded-lg bg-white",
                                 ),
                                 width="100%",
                                 align_items="start"
                             ),
                             rx.vstack(
-                                rx.text("Last Name", font_weight="medium", align="left", width="100%"),
+                                rx.text("Last Name", align="left", width="100%" , font_weight="bold", size = "5" , class_name="text-sky-500"),
                                 rx.input(
                                     placeholder="Last Name",
                                     name="last_name",
                                     required=True,
                                     value=State.last_name,
                                     on_change=State.set_last_name,
-                                    class_name="w-full p-2 border rounded-lg bg-white",
+                                    class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 ),
                                 width="100%",
                                 align_items="start"
@@ -1090,39 +1093,39 @@ def edit_form() -> rx.Component:
                         ),
                         
                         # Job Title Field
-                        rx.text("Job Title", font_weight="medium", align="left", width="100%"),
+                        rx.text("Job Title", align="left", width="100%" , font_weight="bold", size = "5" , class_name="text-sky-500"),
                         rx.input(
                             placeholder="Your job title",
                             name="job_title",
                             value=State.job_title,
                             on_change=State.set_job_title,
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         
                         # Industry & Experience
                         rx.hstack(
                             rx.vstack(
-                                rx.text("Industry", font_weight="medium", align="left", width="100%"),
+                                rx.text("Industry", align="left", width="100%", font_weight="bold", size = "5" , class_name="text-sky-500"),
                                 rx.select(
                                     ["Technology", "Finance", "Healthcare", "Education", "E-commerce", "Other"],
                                     placeholder="Select industry",
                                     name="category",
                                     value=State.category,
                                     on_change=State.set_category,
-                                    class_name="w-full p-2 border rounded-lg bg-white",
+                                    class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 ),
                                 width="100%",
                                 align_items="start"
                             ),
                             rx.vstack(
-                                rx.text("Years of Experience", font_weight="medium", align="left", width="100%"),
+                                rx.text("Years of Experience", align="left", width="100%", font_weight="bold", size = "5" , class_name="text-sky-500"),
                                 rx.select(
                                     ["< 1 year", "1-3 years", "3-5 years", "5-10 years", "10+ years"],
                                     placeholder="Select experience",
                                     name="experience_level",
                                     value=State.experience_level,
                                     on_change=State.set_experience_level,
-                                    class_name="w-full p-2 border rounded-lg bg-white",
+                                    class_name="w-full p-2 border rounded-lg bg-white text-black",
                                 ),
                                 width="100%",
                                 align_items="start"
@@ -1132,68 +1135,68 @@ def edit_form() -> rx.Component:
                         ),
                         
                         # About Section
-                        rx.text("About", font_weight="medium", align="left", width="100%"),
+                        rx.text("About", align="left", width="100%" , font_weight="bold", size = "5" , class_name="text-sky-500"),
                         rx.text_area(
                             placeholder="Tell us about yourself...",
                             name="about",
                             value=State.about,
                             on_change=State.set_about,
                             height="120px",
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         
                         # Skills Section
-                        rx.text("Skills", font_weight="medium", align="left", width="100%", margin_top="4"),
+                        rx.text("Skills", align="left", width="100%", margin_top="4" , font_weight="bold", size = "5" , class_name="text-sky-500"),
                         rx.input(
                             placeholder="Skills (comma-separated)",
                             name="skills",
                             value=State.formatted_skills,
                             on_change=lambda value: State.set_skills(value.split(",")),
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         
                         # Projects Section
-                        rx.text("Projects", font_weight="medium", align="left", width="100%", margin_top="4"),
+                        rx.text("Projects", align="left", width="100%", margin_top="4" , font_weight="bold", size = "5" , class_name="text-sky-500"),
                         rx.input(
                             placeholder="Projects (comma-separated)",
                             name="projects",
                             value=State.formatted_projects,
                             on_change=lambda value: State.set_projects(value.split(",")),
-                            class_name="w-full p-2 border rounded-lg bg-white",
+                            class_name="w-full p-2 border rounded-lg bg-white text-black",
                         ),
                         
                         # Online Presence
-                        rx.text("Online Presence", font_weight="medium", align="left", width="100%", margin_top="4"),
+                        rx.text("Online Presence", align="left", width="100%", margin_top="4" , font_weight="bold", size = "5" , class_name="text-sky-500"),
                         rx.hstack(
-                            rx.icon("linkedin", color="blue.500"),
+                            rx.icon("linkedin", color="black"),
                             rx.input(
                                 placeholder="LinkedIn URL",
                                 name="linkedin_link",
                                 value=State.linkedin_link,
                                 on_change=State.set_linkedin_link,
-                                class_name="w-full p-2 border rounded-lg bg-white",
+                                class_name="w-full p-2 border rounded-lg bg-white text-black",
                             ),
                             width="100%"
                         ),
                         rx.hstack(
-                            rx.icon("github", color="gray.800"),
+                            rx.icon("github", color="black"),
                             rx.input(
                                 placeholder="GitHub URL",
                                 name="github_link",
                                 value=State.github_link,
                                 on_change=State.set_github_link,
-                                class_name="w-full p-2 border rounded-lg bg-white",
+                                class_name="w-full p-2 border rounded-lg bg-white text-black",
                             ),
                             width="100%"
                         ),
                         rx.hstack(
-                            rx.icon("globe", color="green.500"),
+                            rx.icon("globe", color="black"),
                             rx.input(
                                 placeholder="Portfolio Website",
                                 name="portfolio_link",
                                 value=State.portfolio_link,
                                 on_change=State.set_portfolio_link,
-                                class_name="w-full p-2 border rounded-lg bg-white",
+                                class_name="w-full p-2 border rounded-lg bg-white text-black",
                             ),
                             width="100%"
                         ),
@@ -1203,7 +1206,6 @@ def edit_form() -> rx.Component:
                             rx.dialog.close(
                                 rx.button(
                                     "Cancel",
-                                    on_click=State.cancel_edit,
                                     class_name="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg",
                                 ),
                             ),
@@ -1259,30 +1261,36 @@ def profile_page() -> rx.Component:
                 
                 # Page content
                 rx.hstack(
+                    rx.heading(
+                        "Profile information",
+                        size="9",
+                        color="white",
+                        class_name="mb-4 mt-4 ml-10"
+                    ),
                     rx.spacer(),
-                    # Add logout button
-                    
                     width="100%",
+                    class_name="bg-sky-600"
                 ),
                 
-                # # Auth Debug Information (displayed at top for easy access)
-                # rx.box(
-                #     rx.heading("Auth Debug Info", size="6", margin_bottom="2", color="white"),
-                #     rx.text(State.auth_debug_result, color="white"),
-                #     # Replace direct DOM manipulation with on_mount event handler
-                #     rx.html(
-                #         "",
-                #         id="token-display",
-                #         tag="p", 
-                #         color="white",
-                #     ),
-                #     width="100%",
-                #     padding="4",
-                #     class_name="bg-gray-800 rounded-lg mb-4"
-                # ),
                 
                 # Profile content
                 profile_display(),
+                
+                # View Matches Button (moved outside of profile display)
+                rx.hstack(
+                    rx.spacer(),
+                    rx.button(
+                        "View Matches",
+                        on_click=rx.redirect(f"/match/from-profile/{State.profile_username}"),
+                        class_name="px-9 py-6 text-lg bg-cyan-600 text-white rounded-xl hover:bg-sky-700 hover:scale-110 transition-all duration-200 mt-4 font-bold"
+                    ),
+                    width="100%",
+                    margin_top="4",
+                    padding_right="24",
+                    justify="end",
+                    padding_left="20%",
+                    class_name="px-40 py-3"
+                ),
                 
                 # Edit form modal
                 edit_form(),

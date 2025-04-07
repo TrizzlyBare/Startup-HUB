@@ -13,6 +13,16 @@ class Project(rx.Base):
     team_size: int = 1
     looking_for: List[str] = []
 
+class JoinRequest(rx.Base):
+    """A join request model."""
+    id: int
+    project_name: str
+    sender_name: str
+    sender_id: int
+    status: str
+    message: str
+    created_at: str
+
 class MyProjectsState(rx.State):
     """The state for the my projects page."""
     
@@ -26,6 +36,13 @@ class MyProjectsState(rx.State):
     show_modal: bool = False
     show_edit_modal: bool = False
     editing_project: Optional[Project] = None
+    
+    # Join request states
+    show_join_request_modal: bool = False
+    show_join_requests_modal: bool = False
+    selected_project: Optional[Project] = None
+    join_request_message: str = ""
+    join_requests: List[JoinRequest] = []
     
     # Error handling
     error: Optional[str] = None
@@ -177,11 +194,13 @@ class MyProjectsState(rx.State):
                 "pitch": form_data.get("description", "").strip() or "No pitch provided",
                 "description": form_data.get("description", "").strip() or "No description provided",
                 "skills": tech_stack,  # Send as string, let backend handle parsing
+                "skills_list": [skill.strip() for skill in tech_stack.split(",") if skill.strip()],  # List of skills
                 "looking_for": looking_for,  # Send as string, let backend handle parsing
-                "pitch_deck": "https://example.com/pitch-deck",  # Valid URL
+                "looking_for_list": [role.strip() for role in looking_for.split(",") if role.strip()],  # List of roles
+                "pitch_deck_url": "https://example.com/pitch-deck",  # Valid URL
                 "website": "https://example.com",  # Valid URL
                 "funding_stage": form_data.get("funding_stage") or "Pre-seed",
-                "investment_needed": 0,  # Integer
+                "investment_needed": "0.00",  # String format as in example
                 "team_size": int(form_data.get("team_size", 1)) if form_data.get("team_size") else 1  # Integer
             }
             
@@ -372,3 +391,270 @@ class MyProjectsState(rx.State):
         except Exception as e:
             print(f"Error in debug_auth_token: {e}")
             return {}
+
+    def toggle_join_request_modal(self, project: Optional[Project] = None):
+        """Toggle the join request modal."""
+        self.show_join_request_modal = not self.show_join_request_modal
+        self.selected_project = project if project else None
+        if not self.show_join_request_modal:
+            self.join_request_message = ""
+            self.error = None
+    
+    async def send_join_request(self):
+        """Send a request to join a project."""
+        try:
+            if not self.selected_project:
+                self.error = "No project selected"
+                return
+                
+            # Get token from AuthState
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+                else:
+                    return rx.redirect("/login")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            # Prepare join request data
+            request_data = {
+                "message": self.join_request_message.strip()
+            }
+            
+            print(f"Sending request to join startup group: {self.selected_project.name} (ID: {self.selected_project.id})")
+            print(f"Request data: {request_data}")
+            
+            async with httpx.AsyncClient() as client:
+                # First, verify the project exists using the public endpoint
+                try:
+                    verify_response = await client.get(
+                        f"{self.API_URL}/startup-profile/startup-ideas/{self.selected_project.id}/",
+                        headers=headers
+                    )
+                    print(f"Project verification response: {verify_response.status_code}")
+                    print(f"Project verification content: {verify_response.text}")
+                    
+                    if verify_response.status_code == 404:
+                        self.error = "Project not found. Please refresh the page and try again."
+                        return
+                except Exception as e:
+                    print(f"Error verifying project: {str(e)}")
+                    self.error = "Error verifying project. Please try again later."
+                    return
+                
+                # Try the join request endpoint
+                try:
+                    response = await client.post(
+                        f"{self.API_URL}/startup-profile/startup-ideas/{self.selected_project.id}/request-to-join/",  # Changed to correct endpoint
+                        json=request_data,
+                        headers=headers
+                    )
+                    
+                    print(f"Join request response: {response.status_code}")
+                    print(f"Join request content: {response.text}")
+                    
+                    if response.status_code in [200, 201]:
+                        self.show_join_request_modal = False
+                        self.selected_project = None
+                        self.join_request_message = ""
+                        # Show success notification
+                        self.show_success_notification(
+                            "Join Request Sent",
+                            "Your request to join the project has been sent successfully. The project owner will be notified by email."
+                        )
+                    else:
+                        error_data = response.json()
+                        self.error = error_data.get("error", "Failed to send join request")
+                        print(f"Error sending join request: {response.text}")
+                except Exception as e:
+                    print(f"Error sending join request: {str(e)}")
+                    self.error = "Failed to send join request. Please try again later."
+                    
+        except Exception as e:
+            self.error = str(e)
+            print(f"Exception in send_join_request: {str(e)}")
+    
+    def show_success_notification(self, title: str, message: str):
+        """Show a success notification."""
+        # You can implement a notification system here
+        print(f"Success: {title} - {message}")
+
+    async def toggle_join_requests_modal(self, project: Optional[Project] = None):
+        """Toggle the join requests modal."""
+        self.show_join_requests_modal = not self.show_join_requests_modal
+        self.selected_project = project if project else None
+        if self.show_join_requests_modal and project:
+            await self.load_join_requests(project)
+        if not self.show_join_requests_modal:
+            self.join_requests = []
+            self.error = None
+
+    async def load_join_requests(self, project: Project):
+        """Load join requests for a project."""
+        try:
+            # Get token from AuthState
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+                else:
+                    return rx.redirect("/login")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.API_URL}/startup-profile/startup-ideas/{project.id}/project-join-requests/",
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    self.join_requests = [
+                        JoinRequest(
+                            id=req["id"],
+                            project_name=req["project_name"],
+                            sender_name=req["sender_name"],
+                            sender_id=req["sender_id"],
+                            status=req["status"],
+                            message=req["message"],
+                            created_at=req["created_at"]
+                        )
+                        for req in data.get("join_requests", [])
+                    ]
+                elif response.status_code == 401:
+                    return rx.redirect("/login")
+                else:
+                    self.error = f"Failed to load join requests: {response.text}"
+                    
+        except Exception as e:
+            self.error = str(e)
+            print(f"Exception in load_join_requests: {str(e)}")
+
+    async def accept_join_request(self, request_id: int, sender_id: int):
+        """Accept a join request and add the sender as a project member."""
+        try:
+            if not self.selected_project:
+                self.error = "No project selected"
+                return
+                
+            # Get token from AuthState
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+                else:
+                    return rx.redirect("/login")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            # Find the join request to get the sender's username
+            join_request = next((req for req in self.join_requests if req.id == request_id), None)
+            if not join_request:
+                self.error = "Join request not found"
+                return
+            
+            # First, add the member to the project
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.API_URL}/startup-profile/startup-ideas/{self.selected_project.id}/add_member/",
+                    json={"user_id": sender_id, "username": join_request.sender_name},  # Use sender's username from the request
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    # Update the join request status
+                    update_response = await client.patch(
+                        f"{self.API_URL}/startup-profile/startup-ideas/{self.selected_project.id}/project-join-requests/{request_id}/",
+                        json={"status": "accepted"},
+                        headers=headers
+                    )
+                    
+                    if update_response.status_code == 200:
+                        # Delete the join request using the correct endpoint
+                        delete_response = await client.delete(
+                            f"{self.API_URL}/startup-profile/startup-ideas/{self.selected_project.id}/join-request/{request_id}/",
+                            headers=headers
+                        )
+                        
+                        if delete_response.status_code == 204:
+                            # Update the local list immediately
+                            self.join_requests = [req for req in self.join_requests if req.id != request_id]
+                            # Then reload to ensure we have the latest data
+                            await self.load_join_requests(self.selected_project)
+                            self.show_success_notification(
+                                "Request Accepted",
+                                "The user has been added to your project and the request has been deleted."
+                            )
+                        else:
+                            self.error = f"Failed to delete request: {delete_response.text}"
+                    else:
+                        self.error = f"Failed to update request status: {update_response.text}"
+                else:
+                    self.error = f"Failed to add member: {response.text}"
+                    
+        except Exception as e:
+            self.error = str(e)
+            print(f"Exception in accept_join_request: {str(e)}")
+
+    async def delete_join_request(self, request_id: int):
+        """Delete a join request."""
+        try:
+            if not self.selected_project:
+                self.error = "No project selected"
+                return
+                
+            # Get token from AuthState
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+                else:
+                    return rx.redirect("/login")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.delete(
+                    f"{self.API_URL}/startup-profile/startup-ideas/{self.selected_project.id}/join-request/{request_id}/",
+                    headers=headers
+                )
+                
+                if response.status_code == 204:
+                    # Reload the join requests to show updated list
+                    await self.load_join_requests(self.selected_project)
+                    self.show_success_notification(
+                        "Request Deleted",
+                        "The join request has been deleted successfully."
+                    )
+                else:
+                    self.error = f"Failed to delete request: {response.text}"
+                    
+        except Exception as e:
+            self.error = str(e)
+            print(f"Exception in delete_join_request: {str(e)}")
