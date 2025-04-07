@@ -989,15 +989,14 @@ class UserContactLinksAPIView(APIView):
             )
 
 
-class PasswordResetRequestView(generics.GenericAPIView):
-    """View for requesting a password reset via email"""
+# In views.py, at the top of the file with other imports
+from django.core.mail import EmailMultiAlternatives
+from datetime import datetime  # Ensure this import is added
 
+
+class PasswordResetRequestView(generics.GenericAPIView):
     serializer_class = PasswordResetRequestSerializer
     permission_classes = [AllowAny]
-
-    # In views.py, modify the PasswordResetRequestView
-
-    from datetime import datetime
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -1090,9 +1089,6 @@ class PasswordResetRequestView(generics.GenericAPIView):
                 """
 
                 # Send email using EmailMultiAlternatives for HTML support
-                from django.core.mail import EmailMultiAlternatives
-                from datetime import datetime
-
                 email = EmailMultiAlternatives(
                     subject="Reset Your Startup Hub Password",
                     body="Plain text fallback for email clients that don't support HTML",
