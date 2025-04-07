@@ -30,8 +30,10 @@ from django.contrib.auth import get_user_model
 
 from .models import StartupIdea
 from .serializers import StartupIdeaSerializer
+import logging
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class StandardResultsSetPagination(PageNumberPagination):
@@ -809,6 +811,11 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
 
         Only the request creator or the project owner can delete a join request
         """
+        # Import the logger from the existing email_utils module since it's already set up there
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         startup = self.get_object()
 
         try:
