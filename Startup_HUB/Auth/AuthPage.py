@@ -107,6 +107,10 @@ class AuthState(BaseState):
             localStorage.setItem('auth_token', '{token}');
             console.log('Token saved to localStorage:', '{token}');
             
+            // Save username to localStorage so it can be accessed in ChatPage
+            localStorage.setItem('username', '{username}');
+            console.log('Username saved to localStorage:', '{username}');
+            
             // Make the auth debug request
             fetch('{self.API_BASE_URL}/auth-debug/', {{
                 method: 'GET',
@@ -120,6 +124,10 @@ class AuthState(BaseState):
                 // Get the username from the auth debug response
                 const username = data.user_from_token?.username || '{username}';
                 console.log('Username from auth debug:', username);
+                
+                // Save the correct username to localStorage
+                localStorage.setItem('username', username);
+                console.log('Updated username in localStorage:', username);
                 
                 // Redirect to the profile page with the correct username case
                 window.location.href = '/profile/' + username;
@@ -240,6 +248,10 @@ class AuthState(BaseState):
                         # Get the correct username case from auth debug
                         # We'll use a script to make the auth debug request and get the correct username
                         return rx.call_script(f"""
+                            // Save original username to localStorage
+                            localStorage.setItem('username', '{username}');
+                            console.log('Username saved to localStorage:', '{username}');
+                            
                             // Make the auth debug request
                             fetch('{self.API_BASE_URL}/auth-debug/', {{
                                 method: 'GET',
@@ -253,6 +265,10 @@ class AuthState(BaseState):
                                 // Get the username from the auth debug response
                                 const username = data.user_from_token?.username || '{username}';
                                 console.log('Username from auth debug:', username);
+                                
+                                // Update username in localStorage with correct case
+                                localStorage.setItem('username', username);
+                                console.log('Updated username in localStorage:', username);
                                 
                                 // Redirect to the profile page with the correct username case
                                 window.location.href = '/profile/' + username;
