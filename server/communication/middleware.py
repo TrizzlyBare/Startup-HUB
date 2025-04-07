@@ -74,12 +74,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class WebSocketTokenAuthMiddleware:
-    """
-    WebSocket middleware that authenticates using the same flexible token
-    mechanism as the REST API.
-    """
+from authen.authentication import BearerTokenAuthentication
+from rest_framework.authtoken.models import Token
 
+
+class WebSocketTokenAuthMiddleware:
     def __init__(self, app):
         self.app = app
         self.bearer_auth = BearerTokenAuthentication()
@@ -92,18 +91,11 @@ class WebSocketTokenAuthMiddleware:
         return await self.app(scope, receive, send)
 
     async def get_user(self, scope):
-        """
-        Get user from query string token or header using the existing BearerTokenAuthentication
-        """
-        # Check if user is already authenticated
-        if scope.get("user", None) and scope["user"].is_authenticated:
-            return scope["user"]
-
-        # Build a request-like object that our BearerTokenAuthentication can use
+        # Build a request-like object
         request = WebSocketRequestAdapter(scope)
 
-        # Use the existing authentication class to authenticate
         try:
+            # Use your existing authentication method
             auth_result = await database_sync_to_async(self.bearer_auth.authenticate)(
                 request
             )
@@ -140,3 +132,37 @@ class WebSocketRequestAdapter:
                 if "=" in param:
                     key, value = param.split("=", 1)
                     self.GET[key] = value
+
+
+class WebSocketTokenAuthMiddleware:
+    def __init__(self, app):
+        self.app = app
+        self.bearer_auth = BearerTokenAuthentication()  # Ensure this import exists
+
+    async def __call__(self, scope, receive, send):
+        # Add user to scope
+        scope["user"] = await self.get_user(scope)
+
+        # Continue with next middleware or application
+        return await self.app(scope, receive, send)
+
+    async def get_user(self, scope):
+        """
+        Get user from query string token or header using the existing BearerTokenAuthentication
+        """
+        # Build a request-like object that our BearerTokenAuthentication can use
+        request = WebSocketRequestAdapter(scope)
+
+        # Use the existing authentication class to authenticate
+        try:
+            auth_result = await database_sync_to_async(self.bearer_auth.authenticate)(
+                request
+            )
+            if auth_result:
+                user, token = auth_result
+                return user
+        except Exception as e:
+            logger.error(f"Error authenticating WebSocket: {str(e)}")
+
+        # Return anonymous user if no valid token found
+        return AnonymousUser()

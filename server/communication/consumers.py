@@ -30,8 +30,6 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
-
-
 class CommunicationConsumer(AsyncJsonWebsocketConsumer):
     # async def connect(self):
     #     self.user = self.scope["user"]

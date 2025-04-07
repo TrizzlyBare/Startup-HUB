@@ -267,3 +267,149 @@ class CallInvitation(models.Model):
         if self.is_expired() and self.status == "pending":
             self.status = "expired"
             self.save(update_fields=["status"])
+
+
+from django.db import models
+from django.conf import settings
+from django.utils import timezone
+import uuid
+
+
+class WebRTCSession(models.Model):
+    """
+    Represents a WebRTC peer connection session
+    """
+
+    SESSION_TYPES = (
+        ("audio", "Audio"),
+        ("video", "Video"),
+        ("screen_share", "Screen Share"),
+    )
+
+    SESSION_STATUSES = (
+        ("initiated", "Initiated"),
+        ("connecting", "Connecting"),
+        ("connected", "Connected"),
+        ("disconnected", "Disconnected"),
+        ("failed", "Failed"),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    room = models.ForeignKey(
+        "Room", on_delete=models.CASCADE, related_name="webrtc_sessions"
+    )
+    session_type = models.CharField(max_length=20, choices=SESSION_TYPES)
+    status = models.CharField(
+        max_length=20, choices=SESSION_STATUSES, default="initiated"
+    )
+    initiator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="initiated_webrtc_sessions",
+    )
+    participants = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, related_name="webrtc_sessions"
+    )
+
+    started_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    ice_config = models.JSONField(null=True, blank=True)
+    media_constraints = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "WebRTC Session"
+        verbose_name_plural = "WebRTC Sessions"
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        return f"{self.session_type} session in {self.room.name}"
+
+    def end_session(self):
+        """
+        End the current WebRTC session
+        """
+        self.status = "disconnected"
+        self.ended_at = timezone.now()
+        self.save(update_fields=["status", "ended_at"])
+
+    def update_status(self, new_status):
+        """
+        Update session status with validation
+        """
+        if new_status in dict(self.SESSION_STATUSES):
+            self.status = new_status
+            self.save(update_fields=["status"])
+        else:
+            raise ValueError(f"Invalid session status: {new_status}")
+
+
+class WebRTCPeerConnection(models.Model):
+    """
+    Represents individual peer connections within a WebRTC session
+    """
+
+    PEER_STATUSES = (
+        ("pending", "Pending"),
+        ("negotiating", "Negotiating"),
+        ("connected", "Connected"),
+        ("disconnected", "Disconnected"),
+        ("failed", "Failed"),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    session = models.ForeignKey(
+        WebRTCSession, on_delete=models.CASCADE, related_name="peer_connections"
+    )
+    local_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="local_peer_connections",
+    )
+    remote_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="remote_peer_connections",
+    )
+
+    status = models.CharField(max_length=20, choices=PEER_STATUSES, default="pending")
+
+    connection_offer = models.TextField(null=True, blank=True)
+    connection_answer = models.TextField(null=True, blank=True)
+
+    ice_candidates = models.JSONField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("session", "local_user", "remote_user")
+        verbose_name = "WebRTC Peer Connection"
+        verbose_name_plural = "WebRTC Peer Connections"
+
+    def __str__(self):
+        return f"Peer Connection: {self.local_user} to {self.remote_user}"
+
+    def update_connection_status(self, status, offer=None, answer=None):
+        """
+        Update peer connection status and optionally store offer/answer
+        """
+        if status in dict(self.PEER_STATUSES):
+            self.status = status
+            if offer:
+                self.connection_offer = offer
+            if answer:
+                self.connection_answer = answer
+            self.save()
+        else:
+            raise ValueError(f"Invalid peer connection status: {status}")
+
+    def add_ice_candidate(self, candidate):
+        """
+        Add ICE candidate to the connection
+        """
+        if not self.ice_candidates:
+            self.ice_candidates = []
+
+        self.ice_candidates.append(candidate)
+        self.save(update_fields=["ice_candidates"])

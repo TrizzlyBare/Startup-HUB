@@ -1,5 +1,13 @@
 from django.contrib import admin
-from .models import Room, Participant, Message, CallLog, CallInvitation
+from .models import (
+    Room,
+    Participant,
+    Message,
+    CallLog,
+    CallInvitation,
+    WebRTCPeerConnection,
+    WebRTCSession,
+)
 
 
 @admin.register(Room)
@@ -34,3 +42,24 @@ class CallInvitationAdmin(admin.ModelAdmin):
     list_display = ("inviter", "invitee", "room", "call_type", "created_at", "status")
     list_filter = ("call_type", "status", "created_at")
     search_fields = ("inviter__username", "invitee__username")
+
+
+@admin.register(WebRTCSession)
+class WebRTCSessionAdmin(admin.ModelAdmin):
+    list_display = (
+        "room",
+        "session_type",
+        "status",
+        "initiator",
+        "started_at",
+        "ended_at",
+    )
+    list_filter = ("session_type", "status")
+    search_fields = ("room__name", "initiator__username")
+
+
+@admin.register(WebRTCPeerConnection)
+class WebRTCPeerConnectionAdmin(admin.ModelAdmin):
+    list_display = ("session", "local_user", "remote_user", "status", "created_at")
+    list_filter = ("status", "created_at")
+    search_fields = ("local_user__username", "remote_user__username")

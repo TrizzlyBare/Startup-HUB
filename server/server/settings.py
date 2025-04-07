@@ -58,6 +58,10 @@ INSTALLED_APPS = [
 
 ASGI_APPLICATION = "server.asgi.application"
 
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+]
+
 # Updated REST Framework settings with the custom authentication
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -234,3 +238,83 @@ ALLOWED_UPLOAD_EXTENSIONS = {
 }
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+# Google Cloud WebRTC Settings
+# Basic Google STUN server (free public server)
+GOOGLE_CLOUD_STUN_SERVER = "stun:stun.l.google.com:19302"
+
+# Google Cloud TURN server settings
+GOOGLE_CLOUD_TURN_URL = os.getenv("GOOGLE_CLOUD_TURN_URL", "turn:34.59.164.107:3478")
+GOOGLE_CLOUD_TURN_TCP_URL = os.getenv(
+    "GOOGLE_CLOUD_TURN_TCP_URL",
+    "turn:34.59.164.107:3478?transport=tcp",
+)
+GOOGLE_CLOUD_TURN_TLS_URL = os.getenv(
+    "GOOGLE_CLOUD_TURN_TLS_URL", "turns:34.59.164.107:5349"
+)
+
+# In settings.py
+
+# Google Cloud TURN Server Configuration
+GOOGLE_CLOUD_TURN_SERVERS = [
+    {
+        "urls": "turn:34.59.164.107:3478",  # Remove the .com
+        "username": os.getenv("GOOGLE_CLOUD_TURN_USERNAME"),
+        "credential": os.getenv("GOOGLE_CLOUD_TURN_CREDENTIAL"),
+    },
+    {
+        "urls": "turn:34.59.164.107:3478?transport=tcp",  # Use your actual IP here instead of placeholder
+        "username": os.getenv("GOOGLE_CLOUD_TURN_USERNAME"),
+        "credential": os.getenv("GOOGLE_CLOUD_TURN_CREDENTIAL"),
+    },
+    # Optional: Add TLS TURN server
+    {
+        "urls": "turns:34.59.164.107:5349",  # Use your actual IP here instead of placeholder
+        "username": os.getenv("GOOGLE_CLOUD_TURN_USERNAME"),
+        "credential": os.getenv("GOOGLE_CLOUD_TURN_CREDENTIAL"),
+    },
+]
+
+# Update WebRTC config to use these servers
+WEBRTC_TURN_SERVERS = GOOGLE_CLOUD_TURN_SERVERS
+
+# For static credentials
+GOOGLE_CLOUD_TURN_USERNAME = os.getenv("GOOGLE_CLOUD_TURN_USERNAME", "")
+GOOGLE_CLOUD_TURN_CREDENTIAL = os.getenv("GOOGLE_CLOUD_TURN_CREDENTIAL", "")
+
+# For HMAC authentication (recommended for production)
+GOOGLE_CLOUD_TURN_SECRET = os.getenv("GOOGLE_CLOUD_TURN_SECRET", "")
+
+# Additional WebRTC settings
+WEBRTC_ICE_TIMEOUT = 10000  # ms
+WEBRTC_RECONNECTION_ATTEMPTS = 3
+
+# Required for Google Cloud TURN server authorization
+SECURE_CROSS_ORIGIN_OPENER_POLICY = os.getenv(
+    "SECURE_CROSS_ORIGIN_OPENER_POLICY", "same-origin-allow-popups"
+)
+
+import sys
+
+# Add this at the end of settings.py
+if "test" in sys.argv:
+    # Use in-memory database for testing
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+        }
+    }
+
+    # Use in-memory channel layer instead of Redis
+    CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
+
+    # Disable migrations completely during tests
+    class DisableMigrations:
+        def __contains__(self, item):
+            return True
+
+        def __getitem__(self, item):
+            return None
+
+    MIGRATION_MODULES = DisableMigrations()

@@ -8,36 +8,36 @@ https://docs.djangoproject.com/en/5.1/howto/deployment/asgi/
 """
 
 # asgi.py
-import os
-import django
-from django.core.asgi import get_asgi_application
+# import os
+# import django
+# from django.core.asgi import get_asgi_application
 
-# Set up Django BEFORE importing routing modules
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.settings")
-django.setup()
+# # Set up Django BEFORE importing routing modules
+# os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.settings")
+# django.setup()
 
-# Now import routing modules
-from channels.routing import ProtocolTypeRouter, URLRouter
-from channels.auth import AuthMiddlewareStack
-import message.routing
-import webcall.routing
-import communication.routing
+# # Now import routing modules
+# from channels.routing import ProtocolTypeRouter, URLRouter
+# from channels.auth import AuthMiddlewareStack
+# import message.routing
+# import webcall.routing
+# import communication.routing
 
-# Initialize Django ASGI application
-django_asgi_app = get_asgi_application()
+# # Initialize Django ASGI application
+# django_asgi_app = get_asgi_application()
 
-application = ProtocolTypeRouter(
-    {
-        "http": django_asgi_app,
-        "websocket": AuthMiddlewareStack(
-            # URLRouter(
-            #     message.routing.websocket_urlpatterns
-            #     + webcall.routing.websocket_urlpatterns
-            # )
-            URLRouter(communication.routing.websocket_urlpatterns)
-        ),
-    }
-)
+# application = ProtocolTypeRouter(
+#     {
+#         "http": django_asgi_app,
+#         "websocket": AuthMiddlewareStack(
+#             # URLRouter(
+#             #     message.routing.websocket_urlpatterns
+#             #     + webcall.routing.websocket_urlpatterns
+#             # )
+#             URLRouter(communication.routing.websocket_urlpatterns)
+#         ),
+#     }
+# )
 
 ASGI_APPLICATION = "server.asgi.application"
 
@@ -80,3 +80,20 @@ ASGI_APPLICATION = "server.asgi.application"
 #         ),
 #     }
 # )
+
+import os
+from django.core.asgi import get_asgi_application
+from channels.routing import ProtocolTypeRouter, URLRouter
+from authen.middleware import WebSocketTokenAuthMiddleware
+from communication.routing import websocket_urlpatterns
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.settings")
+
+application = ProtocolTypeRouter(
+    {
+        "http": get_asgi_application(),
+        "websocket": WebSocketTokenAuthMiddleware(URLRouter(websocket_urlpatterns)),
+    }
+)
+
+ASGI_APPLICATION = "server.asgi.application"
