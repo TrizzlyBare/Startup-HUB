@@ -1,8 +1,10 @@
 import reflex as rx
 import json
 import asyncio
+import httpx
 from typing import List, Dict, Optional, Any
 from ..Matcher.SideBar import sidebar
+from ..Auth.AuthPage import AuthState
 
 class ChatState(rx.State):
     # API settings
@@ -34,22 +36,31 @@ class ChatState(rx.State):
     error_message: str = ""
     success_message: str = ""
     
-    # WebSocket connection status
+    # WebSocket connection status (for future implementation)
     is_connected: bool = False
-    reconnecting: bool = False
-    should_reconnect: bool = True
-    last_message_time: float = 0
     
     # UI state
     sidebar_visible: bool = True
     
-    # Login state
+    # User info state
     username: str = ""
+    
+    # Debug flags - these control what features are enabled during development
+    debug_show_info: bool = True        # Show debug info panel
+    debug_use_dummy_data: bool = True   # Use dummy data instead of API calls where needed
+    debug_log_api_calls: bool = True    # Log API calls and responses
 
     @rx.var
-    def is_authenticated(self) -> bool:
-        return self.auth_token != ""
-        
+    def route_room_id(self) -> str:
+        """Get room_id from route parameters."""
+        if hasattr(self, "router"):
+            params = getattr(self.router.page, "params", {})
+            room_id = params.get("room_id", "")
+            if room_id:
+                print(f"Found room_id in URL: {room_id}")
+                return room_id
+        return ""
+
     @rx.var
     def is_someone_typing(self) -> bool:
         return len(self.typing_users) > 0
@@ -91,213 +102,580 @@ class ChatState(rx.State):
                 
         return result
 
+    async def get_token(self) -> str:
+        """Get authentication token from state or localStorage."""
+        if self.auth_token:
+            return self.auth_token
+            
+        # Try to get token from AuthState
+        try:
+            auth_state = await self.get_state(AuthState)
+            if auth_state and auth_state.token:
+                self.auth_token = auth_state.token
+                return self.auth_token
+        except Exception as e:
+            print(f"Error getting token from AuthState: {e}")
+        
+        # Fallback to localStorage
+        try:
+            token = await rx.call_script("localStorage.getItem('auth_token')")
+            if token:
+                self.auth_token = token
+                return token
+        except Exception as e:
+            print(f"Error getting token from localStorage: {e}")
+            
+        return ""
+
+    async def get_username(self) -> str:
+        """Get username from state or localStorage."""
+        if self.username:
+            return self.username
+            
+        # Try to get username from localStorage
+        try:
+            username = await rx.call_script("localStorage.getItem('username')")
+            if username:
+                self.username = username
+                return username
+        except Exception as e:
+            print(f"Error getting username from localStorage: {e}")
+            
+        return "user"  # Default fallback
+
+    async def get_storage_item(self, key: str) -> str:
+        """Safely get an item from localStorage using direct JavaScript.
+        
+        This uses a simple approach that should work in most Reflex versions.
+        """
+        # For now, return empty string since we can't properly await rx.call_script
+        # in the current Reflex version
+        print(f"Attempting to get {key} from localStorage")
+        
+        try:
+            # In this version of Reflex, we can't properly await rx.call_script
+            # So we'll return an empty string for now
+            return ""
+        except Exception as e:
+            print(f"Error in get_storage_item: {e}")
+            return ""
+
     @rx.event
     async def on_mount(self):
         """Initialize when the component mounts."""
         print("\n=== ChatPage Mounted ===")
         
-        # Try to get token from local storage
+        # Use try-except to make this robust against different Reflex versions
         try:
-            token = await rx.call_script("localStorage.getItem('auth_token')")
-            if token:
-                print(f"Found auth token in localStorage: {token[:5]}...")
-                self.auth_token = token
-                await self.load_rooms()
+            # Get authentication token from AuthState
+            self.auth_token = await self.get_token()
+            
+            # Get username from localStorage
+            self.username = await self.get_username()
+            
+            print(f"Auth values - token: {self.auth_token}, username: {self.username}")
+            
+            # Step 1: Load the list of rooms (conversations)
+            await self.load_rooms()
+            
+            # Step 2: Check if we have a room_id in the URL route
+            room_id = self.route_room_id
+            
+            # Step 3: If we have a room_id, load that specific room's messages
+            if room_id:
+                self.current_room_id = room_id
+                print(f"Opening room from URL: {room_id}")
+                await self.load_messages()
             else:
-                # Try alternative methods to get the token
-                token = rx.get_local_storage("auth_token")
-                if token:
-                    print(f"Found auth token via get_local_storage: {token[:5]}...")
-                    self.auth_token = token
-                    await self.load_rooms()
-                else:
-                    # Redirect to login or show login form
-                    print("No auth token found - showing login form")
-                    self.error_message = "Please log in to access chat"
+                print("No room_id in URL, showing rooms list only")
+                
         except Exception as e:
-            print(f"Error in ChatPage on_mount: {str(e)}")
-            self.error_message = f"Error initializing chat: {str(e)}"
+            print(f"Error in on_mount: {e}")
+            self.error_message = "Error loading chat data. Please try again."
+            
+            # If we fail to load from API, use dummy data in development
+            if self.debug_use_dummy_data:
+                await self._set_dummy_data()
+                if self.current_room_id:
+                    self._set_dummy_messages()
+
+    async def _set_dummy_data(self):
+        """Set dummy room data for development and testing."""
+        print("Setting dummy room data")
+        self.rooms = [
+            {
+                "id": "1",
+                "name": "Test Chat Room",
+                "profile_image": "",
+                "last_message": {"content": "This is a test message in the first room"}
+            },
+            {
+                "id": "2",
+                "name": "Another Test Room",
+                "profile_image": "",
+                "last_message": {"content": "Hello from the second room"}
+            },
+            {
+                "id": "3",
+                "name": "Third Room",
+                "profile_image": "",
+                "last_message": {}
+            }
+        ]
+        print(f"Created {len(self.rooms)} dummy rooms")
+        
+    def _set_dummy_messages(self):
+        """Set dummy messages for development and testing."""
+        print("Setting dummy messages")
+        self.chat_history = [
+            ("other", "Hello there! This is a test message."),
+            ("user", "Hi! I'm responding to the test."),
+            ("other", "Great to see the chat working!"),
+            ("user", "Yes, it's working well."),
+        ]
+        print(f"Created {len(self.chat_history)} dummy messages")
 
     @rx.event
     async def poll_messages(self):
         """Poll for new messages as a fallback for WebSockets."""
-        if not self.current_room_id or not self.auth_token:
+        print(f"\n=== Starting message polling for room: {self.current_room_id} ===")
+        
+        # Verify the room_id is valid
+        if not self.current_room_id or not isinstance(self.current_room_id, str) or not self.current_room_id.strip():
+            print("Cannot poll messages: missing or invalid room_id")
             return
             
+        if not self.auth_token:
+            print("Cannot poll messages: missing auth_token")
+            return
+            
+        # Store room_id locally to avoid any issues with state changes
+        room_id = self.current_room_id
+        print(f"Polling messages for room {room_id}")
+            
+        poll_count = 0
+        last_message_id = None  # Track the last message ID we've seen
+        
+        # Set up headers once
+        headers = {
+            "Authorization": f"Token {self.auth_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        
         while self.should_reconnect:
+            # Check if room_id is still valid and matches
+            if self.current_room_id != room_id:
+                print(f"Room changed from {room_id} to {self.current_room_id}, stopping polling")
+                break
+                
             try:
-                # Only poll if we haven't received a message recently
-                current_time = asyncio.get_event_loop().time()
-                if current_time - self.last_message_time > 2:  # If no messages in 2 seconds
-                    response = await rx.http.get(
-                        f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/messages/?since_timestamp={self.last_message_time}",
-                        headers={"Authorization": f"Token {self.auth_token}"}
+                poll_count += 1
+                if poll_count % 10 == 0:  # Log every 10 polls to avoid spam
+                    print(f"Polling messages for room {room_id} (count: {poll_count})...")
+                
+                # Use the correct API endpoint for fetching messages
+                url = f"{self.API_BASE_URL}/communication/messages/?room_id={room_id}"
+                
+                # Add pagination if needed
+                if last_message_id:
+                    url += f"&after_id={last_message_id}"
+                    
+                if poll_count % 10 == 0:  # Log URL occasionally
+                    print(f"Polling URL: {url}")
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        url,
+                        headers=headers,
+                        follow_redirects=True,
+                        timeout=10.0  # Add timeout to prevent hanging
                     )
                     
-                    data = response.json()
+                    # Debug response information
+                    if poll_count % 10 == 0:
+                        print(f"Response status: {response.status_code}")
+                        print(f"Response headers: {response.headers}")
+                        # Print first 200 chars of response to debug
+                        content_preview = response.text[:200] + "..." if len(response.text) > 200 else response.text
+                        print(f"Response content: {content_preview}")
+                    
+                    # Check if response is empty or invalid
+                    if not response.text or response.text.isspace():
+                        print("Empty response received from server")
+                        continue
+                    
+                    try:
+                        data = response.json()
+                    except json.JSONDecodeError as e:
+                        print(f"Invalid JSON response: {str(e)}")
+                        print(f"Raw response: {response.text[:500]}")
+                        await asyncio.sleep(5)  # Wait longer after an error
+                        continue
+                    
                     messages = data.get("results", [])
                     
-                    for msg in messages:
-                        sender = msg.get("sender", {}).get("username", "unknown")
-                        content = msg.get("content", "")
-                        sent_at = msg.get("sent_at", "")
+                    if messages:
+                        print(f"Received {len(messages)} new messages")
                         
-                        # Determine if the message is from the current user
-                        is_current_user = sender == rx.get_local_storage("username")
+                        # Update the last message ID if we have messages
+                        if messages:
+                            last_message_id = messages[-1].get("id") 
                         
-                        # Add to chat history if not already there
-                        message_key = f"{sender}:{content}:{sent_at}"
-                        if not any(message_key in str(msg) for msg in self.chat_history[-10:]):
-                            self.chat_history.append(
-                                ("user" if is_current_user else "other", content)
-                            )
-                
-                # Update last message time
-                self.last_message_time = current_time
+                        # Process new messages
+                        for msg in messages:
+                            sender = msg.get("sender", {}).get("username", "unknown")
+                            content = msg.get("content", "")
+                            sent_at = msg.get("sent_at", "")
+                            
+                            # Determine if the message is from the current user
+                            is_current_user = sender == self.username
+                            
+                            # Add to chat history if not already there
+                            message_key = f"{sender}:{content}:{sent_at}"
+                            if not any(message_key in str(msg) for msg in self.chat_history[-10:]):
+                                print(f"Adding message from {sender}: {content[:20]}...")
+                                self.chat_history.append(
+                                    ("user" if is_current_user else "other", content)
+                                )
+                    
+                    # Update last message time
+                    self.last_message_time = asyncio.get_event_loop().time()
+            except httpx.HTTPError as e:
+                # Handle HTTP-specific errors
+                print(f"HTTP error during polling: {str(e)}")
+                await asyncio.sleep(5)  # Wait longer after an error
             except Exception as e:
-                self.error_message = f"Error polling messages: {str(e)}"
+                print(f"Error polling messages: {str(e)}")
+                await asyncio.sleep(5)  # Wait longer after an error
                 
-            # Wait 2 seconds before polling again
-            await rx.utils.sleep(2)
-
-    @rx.event
-    async def login(self, username: str, password: str = ""):
-        """Login user to get authentication token."""
-        try:
-            response = await rx.http.post(
-                f"{self.API_BASE_URL}/communication/login/",
-                json={"username": username},  # Password not needed as per API description
-                headers={"Content-Type": "application/json"}
-            )
-            
-            data = response.json()
-            if "token" in data:
-                self.auth_token = data["token"]
-                rx.set_local_storage("auth_token", self.auth_token)
-                rx.set_local_storage("username", username)
-                self.success_message = "Login successful"
-                await self.load_rooms()
-            else:
-                self.error_message = "Failed to login"
-        except Exception as e:
-            self.error_message = f"Login error: {str(e)}"
+            # Wait before polling again - shorter wait if no errors
+            await asyncio.sleep(2)
+        
+        print("Message polling stopped.")
 
     @rx.event
     async def load_rooms(self):
         """Load all rooms for the current user."""
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        
         if not self.auth_token:
             self.error_message = "Not authenticated"
             return
 
         try:
-            response = await rx.http.get(
-                f"{self.API_BASE_URL}/communication/my-rooms/",
-                headers={"Authorization": f"Token {self.auth_token}"}
-            )
+            print("Loading rooms...")
             
-            data = response.json()
-            self.rooms = data.get("rooms", [])
+            # Set up headers
+            headers = {
+                "Authorization": f"Token {self.auth_token}",
+                "Content-Type": "application/json"
+            }
             
-            # If we have rooms, set the first one as active
-            if self.rooms and not self.current_room_id:
-                first_room = self.rooms[0]
-                self.current_room_id = first_room.get("id")
-                self.current_chat_user = first_room.get("name", "Chat")
-                await self.load_messages()
+            # Use AsyncClient for HTTP requests
+            async with httpx.AsyncClient() as client:
+                # Use the correct API endpoint for rooms
+                response = await client.get(
+                    f"{self.API_BASE_URL}/communication/rooms/",  # Simplified endpoint
+                    headers=headers,
+                    follow_redirects=True
+                )
                 
-                # Start polling for messages as WebSocket alternative
-                self.should_reconnect = True
-                self.last_message_time = asyncio.get_event_loop().time()
-                asyncio.create_task(self.poll_messages())
+                print(f"Rooms API response status: {response.status_code}")
+                
+                data = response.json()
+                self.rooms = data.get("results", [])  # Adjust based on your API response structure
+                print(f"Loaded {len(self.rooms)} rooms")
+                
+                # Debug room data with more detailed information
+                for i, room in enumerate(self.rooms):
+                    room_id = room.get("id", "")
+                    room_name = room.get("name", "Unknown")
+                    print(f"Room {i+1}: ID={room_id}, Name={room_name}")
+                    
+                    # Additional debug info for direct rooms
+                    participants = room.get("participants", [])
+                    if participants and len(participants) > 0:
+                        participant_names = [p.get("user", {}).get("username", "unknown") for p in participants]
+                        print(f"  Participants: {', '.join(participant_names)}")
+                
+                # If we have a current_room_id but no current_chat_user, try to find the name
+                if self.current_room_id and not self.current_chat_user:
+                    print(f"Looking for name for room {self.current_room_id}")
+                    found = False
+                    for room in self.rooms:
+                        if str(room.get("id", "")) == str(self.current_room_id):
+                            self.current_chat_user = room.get("name", "Chat Room")
+                            print(f"Found room name: {self.current_chat_user} for room {self.current_room_id}")
+                            found = True
+                            break
+                    if not found:
+                        print(f"WARNING: Could not find room with ID {self.current_room_id} in rooms list")
+                    
+                # If we have rooms, set the first one as active if no room already selected
+                if self.rooms and not self.current_room_id:
+                    print("No room selected, setting first room as active")
+                    first_room = self.rooms[0]
+                    self.current_room_id = first_room.get("id")
+                    self.current_chat_user = first_room.get("name", "Chat")
+                    print(f"Set active room: ID={self.current_room_id}, Name={self.current_chat_user}")
+                    await self.load_messages()
+                    
+                    # Start polling for messages
+                    self.should_reconnect = True
+                    self.last_message_time = asyncio.get_event_loop().time()
+                    print("Starting polling for first room")
+                    asyncio.create_task(self.poll_messages())
+                    
+                self.loading = False
         except Exception as e:
             self.error_message = f"Error loading rooms: {str(e)}"
+            print(f"Error loading rooms: {str(e)}")
+            self.loading = False
 
     @rx.event
     async def load_messages(self):
         """Load messages for the current room."""
-        if not self.auth_token or not self.current_room_id:
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        
+        if not self.auth_token:
+            print("Cannot load messages: not authenticated")
             return
 
+        if not self.current_room_id:
+            print("Cannot load messages: no room ID")
+            return
+            
+        # Store the room_id locally to avoid any issues with state changes
+        room_id = self.current_room_id
+
         try:
-            response = await rx.http.get(
-                f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/messages/",
-                headers={"Authorization": f"Token {self.auth_token}"}
-            )
+            print(f"Loading messages for room {room_id}...")
             
-            data = response.json()
-            messages = data.get("results", [])
+            # Set up headers
+            headers = {
+                "Authorization": f"Token {self.auth_token}",
+                "Content-Type": "application/json"
+            }
             
-            # Clear existing chat history
-            self.chat_history = []
-            
-            # Format messages for display
-            for msg in messages:
-                sender = msg.get("sender", {}).get("username", "unknown")
-                content = msg.get("content", "")
+            # Before loading messages, get room details directly from the server
+            # to ensure we have the correct and most up-to-date room name
+            async with httpx.AsyncClient() as client:
+                # First get the room details to get the most accurate name
+                try:
+                    room_response = await client.get(
+                        f"{self.API_BASE_URL}/communication/rooms/{room_id}/",
+                        headers=headers,
+                        follow_redirects=True
+                    )
+                    
+                    if room_response.status_code == 200:
+                        room_data = room_response.json()
+                        if room_data and "name" in room_data:
+                            self.current_chat_user = room_data["name"]
+                            print(f"Updated room name from API: {self.current_chat_user}")
+                    else:
+                        print(f"Could not fetch room details, status: {room_response.status_code}")
+                        # Fall back to finding room name from cached rooms list
+                        self._find_room_name_from_cache(room_id)
+                except Exception as e:
+                    print(f"Error fetching room details: {e}")
+                    # Fall back to finding room name from cached rooms list
+                    self._find_room_name_from_cache(room_id)
                 
-                # Determine if the message is from the current user
-                is_current_user = sender == rx.get_local_storage("username")
-                
-                # Add to chat history
-                self.chat_history.append(
-                    ("user" if is_current_user else "other", content)
+                # Now load messages
+                response = await client.get(
+                    f"{self.API_BASE_URL}/communication/messages/?room_id={room_id}",
+                    headers=headers,
+                    follow_redirects=True
                 )
                 
-            # Update last message time to now
-            self.last_message_time = asyncio.get_event_loop().time()
+                print(f"Messages API response status: {response.status_code}")
+                
+                data = response.json()
+                messages = data.get("results", [])
+                print(f"Loaded {len(messages)} messages")
+                
+                # Clear existing chat history
+                self.chat_history = []
+                
+                # Format messages for display - newer messages should be at the bottom
+                sorted_messages = sorted(messages, key=lambda m: m.get("sent_at", ""))
+                
+                for msg in sorted_messages:
+                    sender = msg.get("sender", {}).get("username", "unknown")
+                    content = msg.get("content", "")
+                    
+                    # Determine if the message is from the current user
+                    is_current_user = sender == self.username
+                    
+                    # Add to chat history
+                    self.chat_history.append(
+                        ("user" if is_current_user else "other", content)
+                    )
+                    
+                print(f"Successfully loaded and processed {len(messages)} messages")
         except Exception as e:
+            print(f"Error loading messages: {str(e)}")
             self.error_message = f"Error loading messages: {str(e)}"
+            
+            # If in development mode, use dummy data on error
+            if self.debug_use_dummy_data:
+                self._set_dummy_messages()
+
+    def _find_room_name_from_cache(self, room_id):
+        """Helper method to find room name from cached rooms list."""
+        print(f"Finding room name from cached rooms for room ID: {room_id}")
+        found = False
+        for room in self.rooms:
+            if str(room.get("id", "")) == str(room_id):
+                self.current_chat_user = room.get("name", "Chat Room")
+                print(f"Found room name in cache: {self.current_chat_user}")
+                found = True
+                break
+        
+        if not found:
+            print(f"Room {room_id} not found in cached rooms list, using default name")
+            self.current_chat_user = "Chat Room"
 
     @rx.event
     async def send_message(self):
         """Send a message to the current room."""
-        if not self.message.strip() or not self.current_room_id:
+        if not self.message.strip():
+            print("Cannot send empty message")
             return
             
+        # Verify the room_id is valid
+        if not self.current_room_id or not isinstance(self.current_room_id, str) or not self.current_room_id.strip():
+            print("Cannot send message: missing or invalid room_id")
+            self.error_message = "Cannot send message: no active chat room"
+            return
+            
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        
+        if not self.auth_token:
+            print("Cannot send message: not authenticated")
+            self.error_message = "Not authenticated. Please log in."
+            return
+            
+        # Store the room_id locally to avoid any issues with state changes  
+        room_id = self.current_room_id
+            
         try:
+            print(f"Sending message to room {room_id}: {self.message[:10]}...")
             # Add message to UI immediately for responsiveness
             self.chat_history.append(("user", self.message))
             message_to_send = self.message
             self.message = ""
             yield
             
-            # Send via REST API
-            response = await rx.http.post(
-                f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/messages/",
-                json={"content": message_to_send, "message_type": "text"},
-                headers={
-                    "Authorization": f"Token {self.auth_token}",
-                    "Content-Type": "application/json"
-                }
-            )
+            # Send via REST API - with the correct endpoint path
+            print("Making API call to send message...")
             
-            if response.status_code != 201:
-                # If message failed to send, show error
-                self.error_message = "Failed to send message"
-            else:
-                # Update last message time to now
-                self.last_message_time = asyncio.get_event_loop().time()
+            # Set up headers
+            headers = {
+                "Authorization": f"Token {self.auth_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # Use AsyncClient for HTTP requests
+            async with httpx.AsyncClient() as client:
+                # Include both room and room_id fields with the same value
+                payload = {
+                    "room": room_id,
+                    "room_id": room_id,
+                    "content": message_to_send, 
+                    "message_type": "text"
+                }
+                print(f"Message payload: {payload}")
+                
+                response = await client.post(
+                    f"{self.API_BASE_URL}/communication/messages/",
+                    json=payload,
+                    headers=headers,
+                    follow_redirects=True
+                )
+                
+                print(f"Message send API response status: {response.status_code}")
+                
+                if response.status_code != 201:
+                    # If message failed to send, show error
+                    self.error_message = "Failed to send message"
+                    print(f"Failed to send message: {response.text}")
+                else:
+                    print("Message sent successfully")
+                    # Reload messages to make sure we have the latest
+                    await self.load_messages()
         except Exception as e:
+            print(f"Error sending message: {str(e)}")
             self.error_message = f"Error sending message: {str(e)}"
     
     @rx.event
     async def send_typing_notification(self):
         """Send typing notification to other users."""
-        if not self.current_room_id:
+        # Verify the room_id is valid
+        if not self.current_room_id or not isinstance(self.current_room_id, str) or not self.current_room_id.strip():
+            print("Cannot send typing notification: missing or invalid room_id")
             return
             
-        try:
-            # Use REST API to send typing notification
-            await rx.http.post(
-                f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/typing/",
-                headers={
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        
+        if not self.auth_token:
+            print("Cannot send typing notification: not authenticated")
+            return
+            
+        # Store the room_id locally to avoid any issues with state changes
+        room_id = self.current_room_id
+        
+        # Run typing notification in background
+        self._send_typing_notification_impl(room_id)
+            
+    def _send_typing_notification_impl(self, room_id: str):
+        """Implementation of typing notification that runs in background."""
+        # Define the task
+        async def _typing_task():
+            try:
+                # Since the typing endpoint doesn't exist, we'll simulate it locally
+                # Add the current user to typing_users list temporarily
+                if self.username not in self.typing_users:
+                    self.typing_users.append(self.username)
+                    
+                # Wait a bit and then remove typing status
+                await asyncio.sleep(2)
+                
+                # Remove user from typing list
+                if self.username in self.typing_users:
+                    self.typing_users.remove(self.username)
+                    
+                """
+                # This code is kept for reference but won't be used
+                # since the typing endpoint doesn't exist
+                
+                # Set up headers
+                headers = {
                     "Authorization": f"Token {self.auth_token}",
                     "Content-Type": "application/json"
                 }
-            )
-        except Exception:
-            # Silently fail typing notifications
-            pass
+                
+                # Use AsyncClient for HTTP requests
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{self.API_BASE_URL}/communication/rooms/{room_id}/typing/",
+                        headers=headers,
+                        follow_redirects=True
+                    )
+                    print(f"Typing notification response: {response.status_code}")
+                """
+            except Exception as e:
+                # Log error but continue without showing error to user
+                print(f"Error in typing notification: {str(e)}")
+                
+        # Start the task
+        asyncio.create_task(_typing_task())
 
     @rx.event
     async def handle_upload(self, files: list[rx.UploadFile]):
@@ -335,30 +713,41 @@ class ChatState(rx.State):
                 form_data.add_file("file", upload_data, filename=file.filename)
                 form_data.add_field("file_type", file_type)
                 
-                media_response = await rx.http.post(
-                    f"{self.API_BASE_URL}/communication/media/",
-                    data=form_data,
-                    headers={"Authorization": f"Token {self.auth_token}"}
-                )
-                
-                media_data = media_response.json()
-                media_id = media_data.get("id")
-                
-                # Send message with media
-                message_data = {
-                    "room_id": self.current_room_id,
-                    "message_type": file_type,
-                    f"{file_type}": media_id
+                # Set up headers
+                headers = {
+                    "Authorization": f"Token {self.auth_token}"
                 }
                 
-                await rx.http.post(
-                    f"{self.API_BASE_URL}/communication/messages/",
-                    json=message_data,
-                    headers={
+                # Use AsyncClient for HTTP requests
+                async with httpx.AsyncClient() as client:
+                    media_response = await client.post(
+                        f"{self.API_BASE_URL}/communication/media/",
+                        data=form_data,
+                        headers=headers,
+                        follow_redirects=True
+                    )
+                    
+                    media_data = media_response.json()
+                    media_id = media_data.get("id")
+                    
+                    # Send message with media
+                    message_data = {
+                        "room_id": self.current_room_id,
+                        "message_type": file_type,
+                        f"{file_type}": media_id
+                    }
+                    
+                    message_headers = {
                         "Authorization": f"Token {self.auth_token}",
                         "Content-Type": "application/json"
                     }
-                )
+                    
+                    await client.post(
+                        f"{self.API_BASE_URL}/communication/messages/",
+                        json=message_data,
+                        headers=message_headers,
+                        follow_redirects=True
+                    )
                 
                 # Update last message time
                 self.last_message_time = asyncio.get_event_loop().time()
@@ -374,33 +763,50 @@ class ChatState(rx.State):
             print("No room ID provided to open_room method")
             return
             
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        
         if not self.auth_token:
             print("Not authenticated - cannot open room")
+            self.error_message = "Not authenticated. Please log in."
             return
 
-        # Set the room details
+        # Force room_id to be a string
+        room_id = str(room_id)
+        print(f"Room ID (forced to string): {room_id}")
+        
+        # 1. Set the room details
         self.current_room_id = room_id
         
-        # Set room name if provided
+        # 2. Set initial room name if provided
         if room_name:
+            # Set it initially, but we'll confirm it when loading messages
             self.current_chat_user = room_name
+            print(f"Setting initial room name: {room_name}")
         else:
-            # Try to find room name in the rooms list
-            for room in self.rooms:
-                if str(room.get("id", "")) == str(room_id):
-                    self.current_chat_user = room.get("name", "Chat Room")
-                    print(f"Found room name: {self.current_chat_user}")
-                    break
-            else:
-                # Set a default name if not found
-                self.current_chat_user = "Chat Room"
-                print("Room not found in rooms list, using default name")
+            # Clear it so load_messages will load the correct name from the server
+            self.current_chat_user = ""
                 
-        print(f"Set current_room_id to {self.current_room_id} and current_chat_user to {self.current_chat_user}")
+        print(f"Set current_room_id to {self.current_room_id}")
         
-        # Load messages for this room
+        # Check if we need to reload rooms before loading messages
+        if not self.rooms:
+            print("No rooms loaded yet, loading rooms first")
+            await self.load_rooms()
+            
+        # 3. Load messages for this room (this will also fetch the correct room name)
         try:
             await self.load_messages()
+            
+            # 4. Update the URL to reflect the current room
+            # Only update URL if we're not already on this room's URL
+            if hasattr(self, "router"):
+                current_params = getattr(self.router.page, "params", {})
+                current_room_id = current_params.get("room_id", "")
+                
+                if current_room_id != room_id:
+                    print(f"Updating URL to /chat/room/{room_id}")
+                    return rx.redirect(f"/chat/room/{room_id}")
         except Exception as e:
             print(f"Error loading messages: {str(e)}")
             self.error_message = f"Failed to load messages: {str(e)}"
@@ -410,58 +816,69 @@ class ChatState(rx.State):
         """Create or open a direct chat with a user."""
         print(f"\n===== Creating direct chat with user: {username} =====")
         
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        
         if not self.auth_token:
             print("Not authenticated - cannot create chat")
-            self.error_message = "Not authenticated"
+            self.error_message = "Not authenticated. Please log in."
             return
             
         try:
             print(f"Checking if direct room already exists with {username}")
-            # Check if room already exists
-            response = await rx.http.get(
-                f"{self.API_BASE_URL}/communication/find-direct-room/?username={username}",
-                headers={"Authorization": f"Token {self.auth_token}"}
-            )
             
-            print(f"Find room response status: {response.status}") 
-            data = response.json()
-            print(f"Find room response data: {data}")
+            # Set up headers
+            headers = {
+                "Authorization": f"Token {self.auth_token}",
+                "Content-Type": "application/json"
+            }
             
-            if "room" in data and data["room"]:
-                # Room exists, open it
-                room = data["room"]
-                room_id = room.get("id")
-                print(f"Found existing room: {room_id}")
-                await self.open_room(room_id, username)
-            else:
-                # Create new direct room
-                print(f"No existing room found, creating new one with {username}")
-                create_response = await rx.http.post(
-                    f"{self.API_BASE_URL}/communication/room/direct/",
-                    json={"username": username},
-                    headers={
-                        "Authorization": f"Token {self.auth_token}",
-                        "Content-Type": "application/json"
-                    }
+            # Use AsyncClient for HTTP requests
+            async with httpx.AsyncClient() as client:
+                # Check if room already exists
+                response = await client.get(
+                    f"{self.API_BASE_URL}/communication/find-direct-room/?username={username}",
+                    headers=headers,
+                    follow_redirects=True
                 )
                 
-                print(f"Create room response status: {create_response.status}")
-                room_data = create_response.json()
-                print(f"Create room response data: {room_data}")
+                print(f"Find room response status: {response.status}") 
+                data = response.json()
+                print(f"Find room response data: {data}")
                 
-                room_id = room_data.get("id")
-                if not room_id:
-                    print("No room ID returned in response")
-                    self.error_message = "Failed to create chat room - no room ID returned"
-                    return
+                if "room" in data and data["room"]:
+                    # Room exists, open it
+                    room = data["room"]
+                    room_id = room.get("id")
+                    print(f"Found existing room: {room_id}")
+                    await self.open_room(room_id, username)
+                else:
+                    # Create new direct room
+                    print(f"No existing room found, creating new one with {username}")
+                    create_response = await client.post(
+                        f"{self.API_BASE_URL}/communication/room/direct/",
+                        json={"username": username},
+                        headers=headers,
+                        follow_redirects=True
+                    )
                     
-                print(f"Created new room with ID: {room_id}")
-                # Ensure current_room_id is set before loading messages
-                self.current_room_id = room_id
-                await self.open_room(room_id, username)
-                
-            # Reload rooms list
-            await self.load_rooms()
+                    print(f"Create room response status: {create_response.status}")
+                    room_data = create_response.json()
+                    print(f"Create room response data: {room_data}")
+                    
+                    room_id = room_data.get("id")
+                    if not room_id:
+                        print("No room ID returned in response")
+                        self.error_message = "Failed to create chat room - no room ID returned"
+                        return
+                        
+                    print(f"Created new room with ID: {room_id}")
+                    # Ensure current_room_id is set before loading messages
+                    self.current_room_id = room_id
+                    await self.open_room(room_id, username)
+                    
+                # Reload rooms list
+                await self.load_rooms()
         except Exception as e:
             print(f"Error creating direct chat: {str(e)}")
             self.error_message = f"Error creating direct chat: {str(e)}"
@@ -473,25 +890,39 @@ class ChatState(rx.State):
             self.error_message = "No active chat room"
             return
             
-        try:
-            # Notify server about call start
-            response = await rx.http.post(
-                f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/start_call/",
-                json={"call_type": "audio"},
-                headers={
-                    "Authorization": f"Token {self.auth_token}",
-                    "Content-Type": "application/json"
-                }
-            )
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        
+        if not self.auth_token:
+            print("Not authenticated - cannot start call")
+            self.error_message = "Not authenticated. Please log in."
+            return
             
-            if response.status_code == 200:
-                self.show_call_popup = True
-                self.call_duration = 0
-                self.show_calling_popup = True
-                self.call_type = "audio"
-                asyncio.create_task(self.increment_call_duration())
-            else:
-                self.error_message = "Failed to start call"
+        try:
+            # Set up headers
+            headers = {
+                "Authorization": f"Token {self.auth_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # Use AsyncClient for HTTP requests
+            async with httpx.AsyncClient() as client:
+                # Notify server about call start
+                response = await client.post(
+                    f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/start_call/",
+                    json={"call_type": "audio"},
+                    headers=headers,
+                    follow_redirects=True
+                )
+                
+                if response.status_code == 200:
+                    self.show_call_popup = True
+                    self.call_duration = 0
+                    self.show_calling_popup = True
+                    self.call_type = "audio"
+                    asyncio.create_task(self.increment_call_duration())
+                else:
+                    self.error_message = "Failed to start call"
         except Exception as e:
             self.error_message = f"Error starting call: {str(e)}"
 
@@ -502,24 +933,38 @@ class ChatState(rx.State):
             self.error_message = "No active chat room"
             return
             
-        try:
-            # Notify server about call start
-            response = await rx.http.post(
-                f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/start_call/",
-                json={"call_type": "video"},
-                headers={
-                    "Authorization": f"Token {self.auth_token}",
-                    "Content-Type": "application/json"
-                }
-            )
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        
+        if not self.auth_token:
+            print("Not authenticated - cannot start video call")
+            self.error_message = "Not authenticated. Please log in."
+            return
             
-            if response.status_code == 200:
-                self.show_video_popup = True
-                self.show_calling_popup = True
-                self.call_type = "video"
-                asyncio.create_task(self.increment_call_duration())
-            else:
-                self.error_message = "Failed to start video call"
+        try:
+            # Set up headers
+            headers = {
+                "Authorization": f"Token {self.auth_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # Use AsyncClient for HTTP requests
+            async with httpx.AsyncClient() as client:
+                # Notify server about call start
+                response = await client.post(
+                    f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/start_call/",
+                    json={"call_type": "video"},
+                    headers=headers,
+                    follow_redirects=True
+                )
+                
+                if response.status_code == 200:
+                    self.show_video_popup = True
+                    self.show_calling_popup = True
+                    self.call_type = "video"
+                    asyncio.create_task(self.increment_call_duration())
+                else:
+                    self.error_message = "Failed to start video call"
         except Exception as e:
             self.error_message = f"Error starting video call: {str(e)}"
 
@@ -531,10 +976,26 @@ class ChatState(rx.State):
         # Notify server about call end
         if self.current_room_id:
             try:
-                await rx.http.post(
-                    f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/end_call/",
-                    headers={"Authorization": f"Token {self.auth_token}"}
-                )
+                # Get authentication token
+                self.auth_token = await self.get_token()
+                
+                if not self.auth_token:
+                    print("Not authenticated - cannot end call properly")
+                    return
+                    
+                # Set up headers
+                headers = {
+                    "Authorization": f"Token {self.auth_token}",
+                    "Content-Type": "application/json"
+                }
+                
+                # Use AsyncClient for HTTP requests
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/end_call/",
+                        headers=headers,
+                        follow_redirects=True
+                    )
             except Exception:
                 pass  # Silently fail
         yield
@@ -547,10 +1008,26 @@ class ChatState(rx.State):
         # Notify server about call end
         if self.current_room_id:
             try:
-                await rx.http.post(
-                    f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/end_call/",
-                    headers={"Authorization": f"Token {self.auth_token}"}
-                )
+                # Get authentication token
+                self.auth_token = await self.get_token()
+                
+                if not self.auth_token:
+                    print("Not authenticated - cannot end call properly")
+                    return
+                    
+                # Set up headers
+                headers = {
+                    "Authorization": f"Token {self.auth_token}",
+                    "Content-Type": "application/json"
+                }
+                
+                # Use AsyncClient for HTTP requests
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/end_call/",
+                        headers=headers,
+                        follow_redirects=True
+                    )
             except Exception:
                 pass  # Silently fail
         yield
@@ -584,110 +1061,89 @@ class ChatState(rx.State):
     @rx.event
     async def cleanup(self):
         """Clean up resources when component unmounts."""
-        self.should_reconnect = False  # Stop polling
+        # Clear any resource usage
+        self.chat_history = []
         yield
 
     @rx.event
-    async def handle_room_click(self):
-        """Handle click on a room - no-argument version needed by Reflex."""
-        # We'll use a different approach without needing event data
-        # We'll rely on the JavaScript to call our open_room method directly
-        pass
-
-    @rx.event
-    async def open_room_1(self):
-        """Open room 1."""
-        # Open the first room in the formatted rooms list
-        if self.formatted_rooms and len(self.formatted_rooms) > 0:
-            room = self.formatted_rooms[0]
-            await self.open_room(
-                room.get("id", ""), 
-                room.get("name", "Unknown Room")
-            )
-    
-    @rx.event
-    async def open_room_2(self):
-        """Open room 2."""
-        # Open the second room in the formatted rooms list
-        if self.formatted_rooms and len(self.formatted_rooms) > 1:
-            room = self.formatted_rooms[1]
-            await self.open_room(
-                room.get("id", ""), 
-                room.get("name", "Unknown Room")
-            )
-    
-    @rx.event
-    async def open_room_3(self):
-        """Open room 3."""
-        # Open the third room in the formatted rooms list
-        if self.formatted_rooms and len(self.formatted_rooms) > 2:
-            room = self.formatted_rooms[2]
-            await self.open_room(
-                room.get("id", ""), 
-                room.get("name", "Unknown Room")
-            )
+    async def go_back_to_chat_list(self):
+        """Go back to the chat list from a chat room."""
+        print("Going back to chat list")
+        # Clear the current room state
+        self.current_room_id = ""
+        self.current_chat_user = ""
+        
+        # Redirect to the chat list
+        return rx.redirect("/chat")
 
     @rx.event
     async def keypress_handler(self, key: str):
         """Handle keypress events in the message input."""
-        # Only send typing notification for non-Enter keys
-        if key != "Enter":
-            await self.send_typing_notification()
-        # Send message when Enter is pressed
-        elif key == "Enter":
-            await self.send_message()
+        try:
+            # Only send typing notification for non-Enter keys
+            if key != "Enter":
+                # Use direct call instead of emit - typing isn't critical
+                print("User is typing...")
+                # Don't await - just fire and forget for typing notifications
+                self.send_typing_notification()
+            # Send message when Enter is pressed
+            elif key == "Enter" and self.message.strip():
+                print(f"Sending message: {self.message[:10]}...")
+                # Use regular send_message, it will update the UI
+                await self.send_message()
+        except Exception as e:
+            print(f"Error in keypress_handler: {e}")
 
     @rx.event
     async def show_error(self):
-        """Show error message in a browser alert."""
-        if self.error_message:
-            await rx.window_alert(self.error_message)
-        yield
-        
-    @rx.event
-    async def show_success(self):
-        """Show success message in a browser alert."""
-        if self.success_message:
-            await rx.window_alert(self.success_message)
+        """Show error message in a notification."""
+        # Don't use window_alert - the error_alert component will display the message
         yield
 
     @rx.event
-    async def find_existing_room(self, current_username, target_username):
-        """Find an existing direct chat room between two users.
+    async def show_success(self):
+        """Show success message in a notification."""
+        # Don't use window_alert - the success_alert component will display the message
+        yield
         
-        Returns the room ID if found, otherwise None.
-        """
-        print(f"\n===== Finding existing room between {current_username} and {target_username} =====")
+    @rx.event
+    async def set_success_message(self, message: str):
+        """Set a success message in the state."""
+        self.success_message = message
+        yield
+
+    @rx.event
+    async def set_error_message(self, message: str):
+        """Set an error message in the state."""
+        self.error_message = message
+        yield
+
+    @rx.event
+    async def toggle_debug_info(self):
+        """Toggle the visibility of the debug info panel."""
+        self.debug_show_info = not self.debug_show_info
+        yield
         
-        if not self.auth_token:
-            print("Not authenticated - cannot find room")
-            return None
+    @rx.event
+    async def toggle_debug_dummy_data(self):
+        """Toggle between using dummy data and real API data."""
+        self.debug_use_dummy_data = not self.debug_use_dummy_data
+        print(f"Debug dummy data set to: {self.debug_use_dummy_data}")
         
-        try:
-            print(f"Making API request to find direct room with {target_username}")
-            # Call the API to find an existing direct room
-            response = await rx.http.get(
-                f"{self.API_BASE_URL}/communication/find-direct-room/?username={target_username}",
-                headers={"Authorization": f"Token {self.auth_token}"}
-            )
-            
-            print(f"Find room response status: {response.status}")
-            data = response.json()
-            print(f"Find room response data: {data}")
-            
-            # Check if a room was found
-            if "room" in data and data["room"]:
-                # Return the room ID
-                room_id = data["room"].get("id")
-                print(f"Found existing room: {room_id}")
-                return room_id
-            
-            # No room found
-            print("No existing room found")
-            return None
-        except Exception as e:
-            print(f"Error finding existing room: {str(e)}")
-            return None
+        # Reload data with the new setting
+        if self.debug_use_dummy_data:
+            await self._set_dummy_data()
+            self._set_dummy_messages()
+        else:
+            try:
+                await self.load_rooms()
+                if self.current_room_id:
+                    await self.load_messages()
+            except Exception as e:
+                print(f"Error loading data: {e}, falling back to dummy data")
+                await self._set_dummy_data()
+                self._set_dummy_messages()
+        yield
 
 def calling_popup() -> rx.Component:
     return rx.cond(
@@ -979,8 +1435,8 @@ def rooms_list() -> rx.Component:
                                     ),
                                     width="100%",
                                 ),
-                                # Now use a direct URL instead of an event handler
-                                on_click=rx.redirect(f"/chat/room/{room.get('id', '')}"),
+                                # Use direct URL pattern for chat rooms
+                                on_click=lambda: ChatState.open_room(room.get("id", ""), room.get("name", f"Room {index+1}")),
                                 width="100%",
                                 justify_content="flex-start",
                                 bg="transparent",
@@ -1010,7 +1466,7 @@ def rooms_list() -> rx.Component:
                             padding="2",
                             variant="ghost",
                             # This would open a "create chat" dialog in a future implementation
-                            on_click=rx.window_alert("Create chat feature coming soon!"),
+                            on_click=ChatState.set_success_message("Create chat feature coming soon!"),
                         ),
                         width="100%",
                     ),
@@ -1024,7 +1480,7 @@ def rooms_list() -> rx.Component:
                         ),
                         rx.button(
                             "Create New Chat",
-                            on_click=rx.window_alert("Create chat feature coming soon!"),
+                            on_click=ChatState.set_success_message("Create chat feature coming soon!"),
                             bg="#80d0ea",
                             color="white",
                             _hover={"bg": "#6bc0d9"},
@@ -1083,213 +1539,6 @@ def rooms_list() -> rx.Component:
         height="100vh",
         bg="#2d2d2d",
         border_right="1px solid #444",
-    )
-
-def login_form() -> rx.Component:
-    return rx.box(
-        rx.vstack(
-            rx.heading("Login to Chat", size="3", color="white", margin_bottom="4"),
-            rx.input(
-                placeholder="Username",
-                value=ChatState.username,
-                on_change=ChatState.set_username,
-                margin_bottom="3",
-                bg="white",
-                border="1px solid #80d0ea",
-                border_radius="md",
-                padding="2",
-            ),
-            rx.button(
-                "Login",
-                on_click=lambda: ChatState.login(ChatState.username),
-                bg="#80d0ea",
-                color="white",
-                width="100%",
-                _hover={"bg": "#6bc0d9"},
-                padding_y="2",
-                border_radius="md",
-                margin_top="2",
-            ),
-            width="300px",
-            padding="5",
-            bg="#2d2d2d",
-            border_radius="md",
-            border="1px solid #444",
-            margin="auto",
-        ),
-        width="100%",
-        height="100vh",
-        display="flex",
-        justify_content="center",
-        align_items="center",
-        bg="#1e1e1e",
-    )
-
-def error_alert() -> rx.Component:
-    """Error notification component."""
-    return rx.cond(
-        ChatState.error_message != "",
-        rx.box(
-            rx.vstack(
-                rx.text(
-                    "Error",
-                    font_size="lg",
-                    font_weight="bold",
-                    color="white",
-                ),
-                rx.text(
-                    ChatState.error_message,
-                    color="white",
-                ),
-                rx.button(
-                    "Close",
-                    on_click=ChatState.clear_error_message,
-                    bg="#ff4444",
-                    color="white",
-                    border_radius="md",
-                    _hover={"bg": "#ff3333"},
-                ),
-                spacing="2",
-                align_items="start",
-                padding="4",
-            ),
-            bg="#ff4444",
-            border_radius="md",
-            position="fixed",
-            bottom="4",
-            right="4",
-            width="300px",
-            z_index="1000",
-            box_shadow="0 4px 8px rgba(0,0,0,0.2)",
-            # Don't use if/else with Var objects
-            on_mount=ChatState.show_error,
-        ),
-        rx.fragment(),
-    )
-
-def success_alert() -> rx.Component:
-    """Success notification component."""
-    return rx.cond(
-        ChatState.success_message != "",
-        rx.box(
-            rx.vstack(
-                rx.text(
-                    "Success",
-                    font_size="lg",
-                    font_weight="bold",
-                    color="white",
-                ),
-                rx.text(
-                    ChatState.success_message,
-                    color="white",
-                ),
-                rx.button(
-                    "Close",
-                    on_click=ChatState.clear_success_message,
-                    bg="#4CAF50",
-                    color="white",
-                    border_radius="md",
-                    _hover={"bg": "#45a049"},
-                ),
-                spacing="2",
-                align_items="start",
-                padding="4",
-            ),
-            bg="#4CAF50",
-            border_radius="md",
-            position="fixed",
-            bottom="4",
-            right="4",
-            width="300px",
-            z_index="1000",
-            box_shadow="0 4px 8px rgba(0,0,0,0.2)",
-            # Don't use if/else with Var objects
-            on_mount=ChatState.show_success,
-        ),
-        rx.fragment(),
-    )
-
-def user_header() -> rx.Component:
-    return rx.hstack(
-        # Back button - only show when in a chat
-        rx.cond(
-            ChatState.current_room_id != "",
-            rx.button(
-                rx.icon("arrow-left", color="white", font_size="18px"),
-                on_click=rx.redirect("/chat"),
-                variant="ghost",
-                _hover={
-                    "bg": "rgba(255, 255, 255, 0.1)",
-                    "transform": "scale(1.1)",
-                },
-                transition="all 0.2s ease-in-out",
-                title="Back to Chats List",
-            ),
-            rx.box(width="32px", height="32px"),  # Placeholder
-        ),
-        rx.cond(
-            ChatState.current_chat_user != "",
-            rx.avatar(
-                name=rx.cond(
-                    ChatState.current_chat_user != "", 
-                    ChatState.current_chat_user, 
-                    "Chat"
-                ), 
-                size="2", 
-                border="2px solid white"
-            ),
-            rx.box(width="32px", height="32px"),
-        ),
-        rx.text(
-            rx.cond(
-                ChatState.current_chat_user != "",
-                ChatState.current_chat_user,
-                "Chat"
-            ), 
-            font_weight="bold", 
-            color="white", 
-            font_size="16px"
-        ),
-        rx.spacer(),
-        rx.hstack(
-            rx.button(
-                rx.icon("phone", color="white", font_size="18px"),
-                on_click=ChatState.start_call,
-                variant="ghost",
-                _hover={
-                    "bg": "rgba(255, 255, 255, 0.1)",
-                    "transform": "scale(1.2)",
-                },
-                transition="all 0.2s ease-in-out",
-                disabled=ChatState.current_room_id == "",
-            ),
-            rx.button(
-                rx.icon("video", color="white", font_size="18px"),
-                on_click=ChatState.start_video_call,
-                variant="ghost",
-                _hover={
-                    "bg": "rgba(255, 255, 255, 0.1)",
-                    "transform": "scale(1.2)",
-                },
-                transition="all 0.2s ease-in-out",
-                disabled=ChatState.current_room_id == "",
-            ),
-            rx.button(
-                rx.icon("info", color="white", font_size="18px"),
-                variant="ghost",
-                _hover={
-                    "bg": "rgba(255, 255, 255, 0.1)",
-                    "transform": "scale(1.2)",
-                },
-                transition="all 0.2s ease-in-out",
-            ),
-            spacing="4",
-        ),
-        width="100%",
-        padding="10px 15px",
-        bg="#80d0ea",
-        border_radius="0",
-        height="60px",
     )
 
 def message_display(sender: str, message: str) -> rx.Component:
@@ -1500,38 +1749,299 @@ def message_input() -> rx.Component:
         align_items="center",
     )
 
+def error_alert() -> rx.Component:
+    """Error notification component."""
+    return rx.cond(
+        ChatState.error_message != "",
+        rx.box(
+            rx.vstack(
+                rx.text(
+                    "Error",
+                    font_size="lg",
+                    font_weight="bold",
+                    color="white",
+                ),
+                rx.text(
+                    ChatState.error_message,
+                    color="white",
+                ),
+                rx.button(
+                    "Close",
+                    on_click=ChatState.clear_error_message,
+                    bg="#ff4444",
+                    color="white",
+                    border_radius="md",
+                    _hover={"bg": "#ff3333"},
+                ),
+                spacing="2",
+                align_items="start",
+                padding="4",
+            ),
+            bg="#ff4444",
+            border_radius="md",
+            position="fixed",
+            bottom="4",
+            right="4",
+            width="300px",
+            z_index="1000",
+            box_shadow="0 4px 8px rgba(0,0,0,0.2)",
+            # Don't use if/else with Var objects
+            on_mount=ChatState.show_error,
+        ),
+        rx.fragment(),
+    )
+
+def success_alert() -> rx.Component:
+    """Success notification component."""
+    return rx.cond(
+        ChatState.success_message != "",
+        rx.box(
+            rx.vstack(
+                rx.text(
+                    "Success",
+                    font_size="lg",
+                    font_weight="bold",
+                    color="white",
+                ),
+                rx.text(
+                    ChatState.success_message,
+                    color="white",
+                ),
+                rx.button(
+                    "Close",
+                    on_click=ChatState.clear_success_message,
+                    bg="#4CAF50",
+                    color="white",
+                    border_radius="md",
+                    _hover={"bg": "#45a049"},
+                ),
+                spacing="2",
+                align_items="start",
+                padding="4",
+            ),
+            bg="#4CAF50",
+            border_radius="md",
+            position="fixed",
+            bottom="4",
+            right="4",
+            width="300px",
+            z_index="1000",
+            box_shadow="0 4px 8px rgba(0,0,0,0.2)",
+            # Don't use if/else with Var objects
+            on_mount=ChatState.show_success,
+        ),
+        rx.fragment(),
+    )
+
+def debug_info() -> rx.Component:
+    """Debug component showing route parameters (for development)."""
+    return rx.cond(
+        # Only show when debug_show_info is enabled
+        ChatState.debug_show_info,  
+        rx.box(
+            rx.vstack(
+                rx.text("Debug Info", font_weight="bold", color="white"),
+                rx.text(
+                    "Room ID from URL: ",
+                    ChatState.route_room_id,
+                    color="white",
+                    font_size="sm",
+                ),
+                rx.text(
+                    "Current Room ID: ",
+                    ChatState.current_room_id,
+                    color="white",
+                    font_size="sm",
+                ),
+                rx.text(
+                    "Debug Settings:",
+                    color="white",
+                    font_size="sm",
+                    font_weight="bold",
+                    margin_top="2",
+                ),
+                rx.text(
+                    "Use Dummy Data: ",
+                    str(ChatState.debug_use_dummy_data),
+                    color="#80d0ea",
+                    font_size="sm",
+                ),
+                rx.text(
+                    "Log API Calls: ",
+                    str(ChatState.debug_log_api_calls),
+                    color="#80d0ea",
+                    font_size="sm",
+                ),
+                rx.hstack(
+                    rx.button(
+                        "Hide Debug",
+                        on_click=ChatState.toggle_debug_info,
+                        size="4",
+                        bg="#80d0ea",
+                        color="white",
+                    ),
+                    rx.button(
+                        "Toggle Dummy Data",
+                        on_click=ChatState.toggle_debug_dummy_data,
+                        size="4",
+                        bg="#80d0ea",
+                        color="white",
+                    ),
+                    spacing="2",
+                    margin_top="2",
+                ),
+                spacing="1",
+                align_items="start",
+                padding="2",
+            ),
+            bg="#333",
+            border_radius="md",
+            position="fixed",
+            bottom="4",
+            left="4",
+            width="300px",
+            opacity="0.8",
+            z_index="900",
+            display="block",  # Make visible when debug_show_info is true
+        ),
+        rx.fragment(),
+    )
+
+def debug_button() -> rx.Component:
+    """Button to show debug panel when it's hidden."""
+    return rx.cond(
+        ~ChatState.debug_show_info,  # Only show when debug_show_info is False
+        rx.box(
+            rx.button(
+                "Debug",
+                on_click=ChatState.toggle_debug_info,
+                size="4",
+                bg="#80d0ea",
+                color="white",
+                border_radius="md",
+                _hover={"bg": "#6bc0d9"},
+            ),
+            position="fixed",
+            bottom="4",
+            left="4",
+            z_index="900",
+        ),
+        rx.fragment(),
+    )
+
+def user_header() -> rx.Component:
+    return rx.hstack(
+        # Back button - only show when in a chat
+        rx.cond(
+            ChatState.current_room_id != "",
+            rx.button(
+                rx.icon("arrow-left", color="white", font_size="18px"),
+                on_click=ChatState.go_back_to_chat_list,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.1)",
+                },
+                transition="all 0.2s ease-in-out",
+                title="Back to Chats List",
+            ),
+            rx.box(width="32px", height="32px"),  # Placeholder
+        ),
+        rx.cond(
+            ChatState.current_chat_user != "",
+            rx.avatar(
+                name=rx.cond(
+                    ChatState.current_chat_user != "", 
+                    ChatState.current_chat_user, 
+                    "Chat"
+                ), 
+                size="2", 
+                border="2px solid white"
+            ),
+            rx.box(width="32px", height="32px"),
+        ),
+        rx.text(
+            rx.cond(
+                ChatState.current_chat_user != "",
+                ChatState.current_chat_user,
+                "Chat"
+            ), 
+            font_weight="bold", 
+            color="white", 
+            font_size="16px"
+        ),
+        rx.spacer(),
+        rx.hstack(
+            rx.button(
+                rx.icon("phone", color="white", font_size="18px"),
+                on_click=ChatState.start_call,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+                disabled=ChatState.current_room_id == "",
+            ),
+            rx.button(
+                rx.icon("video", color="white", font_size="18px"),
+                on_click=ChatState.start_video_call,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+                disabled=ChatState.current_room_id == "",
+            ),
+            rx.button(
+                rx.icon("info", color="white", font_size="18px"),
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
+            spacing="4",
+        ),
+        width="100%",
+        padding="10px 15px",
+        bg="#80d0ea",
+        border_radius="0",
+        height="60px",
+    )
+
 def chat_page() -> rx.Component:
     return rx.box(
-        rx.cond(
-            ChatState.is_authenticated,
-            rx.hstack(
-                rx.cond(
-                    ChatState.sidebar_visible,
-                    sidebar(),
-                    rx.fragment()
-                ),
-                rooms_list(),
-                rx.vstack(
-                    user_header(),
-                    chat(),
-                    message_input(),
-                    height="100vh",
-                    width="100%",
-                    spacing="0",
-                    bg="#2d2d2d",
-                ),
-                spacing="0",
-                width="100%",
-                height="100vh",
-                overflow="hidden",
+        rx.hstack(
+            rx.cond(
+                ChatState.sidebar_visible,
+                sidebar(),
+                rx.fragment()
             ),
-            login_form(),
+            rooms_list(),
+            rx.vstack(
+                user_header(),
+                chat(),
+                message_input(),
+                height="100vh",
+                width="100%",
+                spacing="0",
+                bg="#2d2d2d",
+            ),
+            spacing="0",
+            width="100%",
+            height="100vh",
+            overflow="hidden",
         ),
         calling_popup(),
         call_popup(),
         video_call_popup(),
         error_alert(),
         success_alert(),
+        debug_info(),  # Debug panel
+        debug_button(),  # Button to show debug panel
         on_mount=ChatState.on_mount,
         on_unmount=ChatState.cleanup,
         style={
@@ -1547,428 +2057,3 @@ def chat_page() -> rx.Component:
             }
         },
     )
-
-def direct_chat_room_route() -> rx.Component:
-    """Route handler for direct chat room with specific user.
-    
-    This route now just extracts the user info and passes to the room-based implementation.
-    The room_id is always the primary identifier.
-    """
-    # Get URL parameters
-    chat_user = rx.State.router.page.params.get("chat_user", "")
-    room_id = rx.State.router.page.params.get("room_id", "")
-    
-    # This is useful for debugging
-    print(f"Opening direct chat with user: {chat_user}, room_id: {room_id}")
-    
-    # Create a wrapper component with its own state
-    class DirectChatWrapper(rx.Component):
-        # Show loading state
-        loading: bool = True
-        error: str = ""
-        
-        def on_mount(self):
-            """Called when the component mounts."""
-            return self.on_direct_chat_load
-            
-        # Define the on_mount event without parameters
-        @rx.event
-        async def on_direct_chat_load(self):
-            """Load the direct chat room when mounted."""
-            print(f"Starting direct_chat_room_route on_mount handler for {chat_user}, {room_id}")
-            
-            try:
-                # Check authentication first
-                token = None
-                try:
-                    token = await rx.call_script("localStorage.getItem('auth_token')")
-                    print(f"Found token in localStorage: {bool(token)}")
-                except Exception as e:
-                    print(f"Error getting token from localStorage: {str(e)}")
-                
-                if not token:
-                    token = rx.get_local_storage("auth_token")
-                    print(f"Tried get_local_storage for token: {bool(token)}")
-                    
-                if not token:
-                    print("No auth token found - showing login form")
-                    # Set auth token in ChatState to trigger login form
-                    ChatState.auth_token = ""
-                    self.error = "Please log in to use chat"
-                    self.loading = False
-                    return
-                else:
-                    # We have a token, set it in ChatState
-                    print(f"Found auth token for direct chat: {token[:5]}...")
-                    ChatState.auth_token = token
-                
-                # Validate room_id
-                if not room_id:
-                    print("No room ID specified")
-                    self.error = "No room ID specified"
-                    self.loading = False
-                    return
-                
-                # Set the room details using ChatState
-                ChatState.current_room_id = room_id
-                ChatState.current_chat_user = chat_user
-                
-                # Load messages
-                try:
-                    await ChatState.load_messages()
-                    print(f"Loaded messages for room {room_id}")
-                except Exception as e:
-                    print(f"Error loading messages: {str(e)}")
-                    self.error = f"Error loading messages: {str(e)}"
-                
-                # Loading complete
-                self.loading = False
-            except Exception as e:
-                print(f"Unexpected exception in direct_chat_room_route: {str(e)}")
-                self.error = f"Error: {str(e)}"
-                self.loading = False
-        
-        def build(self):
-            """Build the component."""
-            # Add a loading and error state
-            return rx.cond(
-                self.loading, 
-                # Loading state
-                rx.center(
-                    rx.vstack(
-                        rx.heading("Opening Chat...", size="lg"),
-                        rx.spinner(size="xl", color="#80d0ea", thickness="4px"),
-                        rx.text(f"Loading chat with {chat_user}..."),
-                        rx.cond(
-                            self.error != "",
-                            rx.text(self.error, color="red"),
-                            rx.text("", height="0px"), # Empty placeholder
-                        ),
-                        spacing="4",
-                        padding="8",
-                    ),
-                    height="100vh",
-                    width="100%",
-                ),
-                # Regular chat page
-                rx.box(
-                    chat_page(),
-                )
-            )
-    
-    # Return the wrapper component
-    return DirectChatWrapper()
-
-def chat_room_route() -> rx.Component:
-    """Route handler for any chat room by ID.
-    
-    This is the primary route for all chat types - direct or group.
-    """
-    # Get URL parameters
-    room_id = rx.State.router.page.params.get("room_id", "")
-    
-    # This is useful for debugging
-    print(f"Opening chat room: {room_id}")
-    
-    # Create a wrapper component with its own state
-    class ChatRoomWrapper(rx.Component):
-        # Show loading state
-        loading: bool = True
-        error: str = ""
-        
-        def on_mount(self):
-            """Called when the component mounts."""
-            return self.on_room_load
-            
-        # Define the on_mount event without parameters
-        @rx.event
-        async def on_room_load(self):
-            """Load the chat room when mounted."""
-            print(f"Starting chat_room_route on_mount handler for room {room_id}")
-            
-            try:
-                # Check authentication first
-                token = None
-                try:
-                    token = await rx.call_script("localStorage.getItem('auth_token')")
-                    print(f"Found token in localStorage: {bool(token)}")
-                except Exception as e:
-                    print(f"Error getting token from localStorage: {str(e)}")
-                
-                if not token:
-                    token = rx.get_local_storage("auth_token")
-                    print(f"Tried get_local_storage for token: {bool(token)}")
-                
-                if not token:
-                    print("No auth token found - showing login form")
-                    # Set auth token in ChatState to trigger login form
-                    ChatState.auth_token = ""
-                    self.error = "Please log in to use chat"
-                    self.loading = False
-                    return
-                else:
-                    # We have a token, set it in ChatState
-                    print(f"Found auth token for chat: {token[:5]}...")
-                    ChatState.auth_token = token
-                
-                # Validate room_id
-                if not room_id:
-                    print("No room ID specified - redirecting to main chat")
-                    self.loading = False
-                    return rx.redirect("/chat")
-                
-                # Load rooms first to make sure we have the latest data
-                try:
-                    await ChatState.load_rooms()
-                    print(f"Loaded {len(ChatState.rooms)} rooms")
-                except Exception as e:
-                    print(f"Error loading rooms: {str(e)}")
-                
-                # Try to find room details in available rooms
-                found_room = False
-                for room in ChatState.rooms:
-                    if str(room.get("id", "")) == room_id:
-                        room_name = room.get("name", "Chat Room")
-                        # Set the room info
-                        ChatState.current_room_id = room_id
-                        ChatState.current_chat_user = room_name
-                        found_room = True
-                        print(f"Found room in room list: {room_name}")
-                        break
-                        
-                # If not found but we have a room ID, try to load it directly
-                if not found_room and room_id:
-                    # Set default name temporarily
-                    ChatState.current_room_id = room_id
-                    ChatState.current_chat_user = "Chat Room"
-                    print(f"Room {room_id} not found in room list, using default name")
-                    
-                # Load the messages for this room
-                try:
-                    await ChatState.load_messages()
-                    print(f"Loaded messages for room {room_id}")
-                except Exception as e:
-                    print(f"Error loading messages: {str(e)}")
-                    self.error = f"Error loading messages: {str(e)}"
-                
-                # Loading complete
-                self.loading = False
-            except Exception as e:
-                print(f"Unexpected exception in chat_room_route: {str(e)}")
-                self.error = f"Error: {str(e)}"
-                self.loading = False
-        
-        def build(self):
-            """Build the component."""
-            # Add a loading and error state
-            return rx.cond(
-                self.loading, 
-                # Loading state
-                rx.center(
-                    rx.vstack(
-                        rx.heading("Opening Chat Room...", size="lg"),
-                        rx.spinner(size="xl", color="#80d0ea", thickness="4px"),
-                        rx.text(f"Loading chat room {room_id}..."),
-                        rx.cond(
-                            self.error != "",
-                            rx.text(self.error, color="red"),
-                            rx.text("", height="0px"), # Empty placeholder
-                        ),
-                        spacing="4",
-                        padding="8",
-                    ),
-                    height="100vh",
-                    width="100%",
-                ),
-                # Regular chat page
-                rx.box(
-                    chat_page(),
-                )
-            )
-    
-    # Return the wrapper component
-    return ChatRoomWrapper()
-
-def chat_user_route() -> rx.Component:
-    """Route handler for chat with a user by username only (without room ID).
-    
-    This will find or create a direct chat room with the specified user.
-    """
-    # Get URL parameters
-    chat_user = rx.State.router.page.params.get("chat_user", "")
-    
-    # This is useful for debugging
-    print(f"\n===== DEBUG: Finding or creating direct chat with user: {chat_user} =====")
-    
-    # Create a wrapper component with its own state
-    class ChatUserWrapper(rx.Component):
-        # Show loading state
-        loading: bool = True
-        error: str = ""
-        
-        def on_mount(self):
-            """Called when the component mounts."""
-            print(f"MOUNT: ChatUserWrapper for user {chat_user}")
-            return self.on_chat_user_load
-            
-        # Define the on_mount event without parameters
-        @rx.event
-        async def on_chat_user_load(self):
-            """Find or create a chat room with this user when mounted."""
-            print(f"\n===== Starting chat_user_route on_mount handler for {chat_user} =====")
-            
-            try:
-                # Check authentication first
-                token = None
-                try:
-                    token = rx.get_local_storage("auth_token")
-                    print(f"Token from local storage: {bool(token)}")
-                except Exception as e:
-                    print(f"Error getting token from local storage: {str(e)}")
-                    
-                if not token:
-                    print("No auth token found - showing login form")
-                    # Set auth token in ChatState to empty to show login form
-                    ChatState.auth_token = ""
-                    self.error = "Please log in to use chat"
-                    self.loading = False
-                    return
-                else:
-                    # We have a token, set it in ChatState
-                    print(f"Found auth token: {token[:5]}...")
-                    ChatState.auth_token = token
-                
-                # Continue with user check
-                if not chat_user:
-                    print("No chat user specified - showing main chat")
-                    self.loading = False
-                    return rx.redirect("/chat")
-                    
-                # Try to find existing room first
-                current_username = None
-                try:
-                    current_username = rx.get_local_storage("username")
-                    print(f"Current user: {current_username}, target: {chat_user}")
-                except Exception as e:
-                    print(f"Error getting username from local storage: {str(e)}")
-                    current_username = "unknown"
-                    
-                if not current_username:
-                    self.error = "Could not determine current user"
-                    self.loading = False
-                    return
-                
-                # First try loading rooms to ensure we have the latest data
-                try:
-                    await ChatState.load_rooms()
-                except Exception as e:
-                    print(f"Error loading rooms: {str(e)}")
-                    self.error = f"Error loading rooms: {str(e)}"
-                    self.loading = False
-                    return
-                
-                # Now check for existing room
-                existing_room = None
-                try:
-                    existing_room = await ChatState.find_existing_room(current_username, chat_user)
-                    print(f"Existing room check result: {existing_room}")
-                except Exception as e:
-                    print(f"Error finding existing room: {str(e)}")
-                    self.error = f"Error finding room: {str(e)}"
-                    self.loading = False
-                    return
-                
-                if existing_room:
-                    # Room exists, redirect to it
-                    print(f"Found existing room: {existing_room}")
-                    self.loading = False
-                    # Extract room_id properly whether it's just an ID or a full room object
-                    room_id = existing_room
-                    if isinstance(existing_room, dict):
-                        room_id = existing_room.get("id")
-                    return rx.redirect(f"/chat/room/{room_id}")
-                else:
-                    # Create new direct room
-                    print(f"No existing room found, creating new chat with {chat_user}")
-                    
-                    try:
-                        # Create a direct chat room
-                        print(f"Calling ChatState.create_direct_chat with {chat_user}")
-                        await ChatState.create_direct_chat(chat_user)
-                        
-                        # Check if room was created successfully
-                        if ChatState.current_room_id:
-                            room_id = ChatState.current_room_id
-                            print(f"Created room successfully: {room_id}")
-                            self.loading = False
-                            return rx.redirect(f"/chat/room/{room_id}")
-                        else:
-                            # Show an error with more context
-                            print("Room creation failed - no room ID set in ChatState")
-                            self.error = f"Could not create chat with {chat_user} (no room ID returned)"
-                            self.loading = False
-                    except Exception as e:
-                        # Show error with more details
-                        print(f"Exception creating chat: {str(e)}")
-                        import traceback
-                        traceback.print_exc()
-                        self.error = f"Error creating chat: {str(e)}"
-                        self.loading = False
-            except Exception as e:
-                print(f"Unexpected exception in chat_user_route: {str(e)}")
-                self.error = f"Error: {str(e)}"
-                self.loading = False
-        
-        def build(self):
-            """Build the component."""
-            # Always show some UI even in error states
-            return rx.cond(
-                self.loading, 
-                # Loading state
-                rx.center(
-                    rx.vstack(
-                        rx.heading("Opening Chat...", size="lg"),
-                        rx.spinner(size="xl", color="#80d0ea", thickness="4px"),
-                        rx.text(f"Finding or creating chat with {chat_user}..."),
-                        rx.cond(
-                            self.error != "",
-                            rx.text(self.error, color="red"),
-                            rx.text("", height="0px"), # Empty placeholder
-                        ),
-                        spacing="4",
-                        padding="8",
-                    ),
-                    height="100vh",
-                    width="100%",
-                ),
-                # Either error or chat page
-                rx.cond(
-                    self.error != "",
-                    # Error state - show a friendly error
-                    rx.center(
-                        rx.vstack(
-                            rx.heading("Chat Error", size="lg"),
-                            rx.text(self.error, color="red"),
-                            rx.button(
-                                "Return to Chat", 
-                                on_click=rx.redirect("/chat"),
-                                color_scheme="blue",
-                            ),
-                            spacing="4",
-                            padding="8",
-                            bg="white",
-                            border_radius="md",
-                            box_shadow="lg",
-                        ),
-                        height="100vh",
-                        width="100%",
-                    ),
-                    # Regular chat page - don't add on_mount here to avoid recursion
-                    rx.box(
-                        chat_page(),
-                    )
-                )
-            )
-    
-    # Return the wrapper component
-    return ChatUserWrapper()
