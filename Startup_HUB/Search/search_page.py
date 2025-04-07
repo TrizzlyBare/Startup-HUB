@@ -9,8 +9,8 @@ class Member(rx.Base):
     id: int
     username: str
     profile_picture_url: Optional[str]
-    skills: str
-    industry: str
+    skills: Optional[str] = None
+    industry: Optional[str] = None
 
 class Owner(rx.Base):
     """An owner model."""
@@ -60,6 +60,12 @@ class SearchState(rx.State):
     total_count: int = 0
     next_page: Optional[str] = None
     previous_page: Optional[str] = None
+    
+    # Notification states
+    show_notification: bool = False
+    notification_type: str = "info"  # info, success, error
+    notification_title: str = ""
+    notification_message: str = ""
 
     async def on_mount(self):
         """Fetch all projects when the page loads."""
@@ -70,7 +76,6 @@ class SearchState(rx.State):
         """Search for startup groups based on the query."""
         self.is_loading = True
         print(f"\n=== Loading Projects ===")
-        print(f"Search query: {self.search_query}")
         
         try:
             # Get token from AuthState
@@ -94,7 +99,6 @@ class SearchState(rx.State):
                 # Get all projects without any filters
                 response = await client.get(
                     f"{self.API_URL}/startup-profile/startup-ideas/all-projects/",
-                    params={"search": self.search_query} if self.search_query else None,
                     headers=headers
                 )
                 
@@ -187,11 +191,70 @@ class SearchState(rx.State):
         """Set the search query."""
         self.search_query = query
 
-    def request_to_join(self, group_name: str):
-        """Send a request to join a startup group."""
-        for group in self.search_results:
-            if group.name == group_name:
-                group.join_requested = True
+    async def request_to_join(self, group_name: str):
+        """Send a request to join a startup group and email the owner."""
+        try:
+            # Find the group by name
+            target_group = None
+            for group in self.search_results:
+                if group.name == group_name:
+                    target_group = group
+                    break
+            
+            if not target_group:
+                print(f"Group with name '{group_name}' not found")
+                self.show_error_notification(
+                    "Group Not Found", 
+                    f"Couldn't find group '{group_name}'"
+                )
+                return
+            
+            # Get token from AuthState
+            auth_state = await self.get_state(AuthState)
+            auth_token = auth_state.token
+            
+            if not auth_token:
+                auth_token = await rx.call_script("localStorage.getItem('auth_token')")
+                if auth_token:
+                    auth_state.set_token(auth_token)
+                else:
+                    return rx.redirect("/login")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Token {auth_token}"
+            }
+            
+            # Send request to join
+            print(f"Sending request to join startup group: {target_group.name} (ID: {target_group.id})")
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.API_URL}/startup-profile/startup-ideas/{target_group.id}/request-to-join/",
+                    headers=headers
+                )
+                
+                if response.status_code == 200 or response.status_code == 201:
+                    print(f"Successfully sent request to join group: {target_group.name}")
+                    # Update UI to show request sent
+                    target_group.join_requested = True
+                    self.show_success_notification(
+                        "Request Sent", 
+                        f"Successfully sent join request to {target_group.name}. The owner will be notified by email."
+                    )
+                else:
+                    print(f"Failed to send join request. Status: {response.status_code}, Response: {response.text}")
+                    self.error = f"Failed to send join request: {response.text}"
+                    self.show_error_notification(
+                        "Request Failed", 
+                        "Failed to send join request. Please try again later."
+                    )
+        except Exception as e:
+            print(f"Exception in request_to_join: {str(e)}")
+            self.error = str(e)
+            self.show_error_notification(
+                "Error", 
+                f"An error occurred: {str(e)}"
+            )
 
     def set_active_tab(self, tab: str):
         """Set the active tab in the sidebar."""
@@ -211,6 +274,24 @@ class SearchState(rx.State):
         """Show the my projects page."""
         self.active_tab = "My Projects"
         return rx.redirect("/my-projects")
+        
+    def show_success_notification(self, title: str, message: str):
+        """Show a success notification."""
+        self.notification_type = "success"
+        self.notification_title = title
+        self.notification_message = message
+        self.show_notification = True
+        
+    def show_error_notification(self, title: str, message: str):
+        """Show an error notification."""
+        self.notification_type = "error"
+        self.notification_title = title
+        self.notification_message = message
+        self.show_notification = True
+        
+    def hide_notification(self):
+        """Hide the notification."""
+        self.show_notification = False
 
 def show_startup(startup: StartupGroup):
     """Show a startup group in a styled box."""
@@ -221,11 +302,11 @@ def show_startup(startup: StartupGroup):
                 rx.avatar(
                     src=startup.owner.profile_picture,
                     fallback=startup.owner.username[0].upper(),
-                    size="3",
+                    size="5",
                 ),
                 rx.vstack(
-                    rx.heading(startup.name, size="5", class_name="text-sky-600 font-bold"),
-                    rx.text(f"by {startup.owner.username}", class_name="text-gray-500 text-sm"),
+                    rx.heading(startup.name, size="6", class_name="text-sky-600 font-bold font-mono"),
+                    rx.text(f"by {startup.owner.username}",size="3", class_name="text-gray-500 "),
                     align_items="start",
                 ),
                 justify="start",
@@ -234,14 +315,14 @@ def show_startup(startup: StartupGroup):
             ),
             # Description
             rx.text(
-                startup.description,
+                f"description : {startup.description}",
                 color="black",
                 noOfLines=3,
-                class_name="text-base font-small pt-2",
+                class_name="text-base font-small pt-2 pl-2",
             ),
             # Skills and Looking For
             rx.vstack(
-                rx.text("Skills Needed:", class_name="font-semibold text-gray-700"),
+                rx.text("Skills Needed:",size = "3" ,  class_name="font-bold text-sky-400 ml-2"),
                 rx.flex(
                     rx.foreach(
                         startup.skills_list,
@@ -253,7 +334,7 @@ def show_startup(startup: StartupGroup):
                     wrap="wrap",
                     spacing="1",
                 ),
-                rx.text("Looking For:", class_name="font-semibold text-gray-700 pt-2"),
+                rx.text("Looking For:",size ="3", class_name="font-bold text-sky-400 ml-2"),
                 rx.flex(
                     rx.foreach(
                         startup.looking_for_list,
@@ -271,8 +352,8 @@ def show_startup(startup: StartupGroup):
             # Footer with stats and actions
             rx.hstack(
                 rx.vstack(
-                    rx.text(f"Members: {startup.member_count}", class_name="text-gray-600"),
-                    rx.text(f"Stage: {startup.stage}", class_name="text-gray-600"),
+                    rx.text(f"Members: {startup.member_count}", class_name="font-bold text-black ml-2"),
+                    rx.text(f"Stage: {startup.stage}", class_name="font-bold text-black ml-2 mb-2"),
                     align_items="start",
                 ),
                 rx.spacer(),
@@ -284,7 +365,7 @@ def show_startup(startup: StartupGroup):
                             color_scheme="grass",
                             variant="outline",
                             is_disabled=True,
-                            class_name="bg-sky-50 text-gray-700 hover:bg-sky-100 px-6 py-2 rounded-lg font-medium",
+                            class_name="bg-green-50 text-gray-700 hover:bg-green-100 px-6 py-2 rounded-lg font-medium",
                         ),
                         rx.button(
                             "Join Group",
@@ -295,7 +376,7 @@ def show_startup(startup: StartupGroup):
                     rx.button(
                         "View Details",
                         on_click=lambda: SearchState.show_group_details(startup),
-                        class_name="bg-gray-600 text-white hover:bg-gray-700 px-6 py-2 rounded-lg font-medium",
+                        class_name="bg-gray-600 text-white hover:bg-gray-700 px-6 py-2 rounded-lg font-medium mr-3",
                     ),
                     spacing="4",
                 ),
@@ -326,7 +407,7 @@ def details_modal():
                     SearchState.selected_group.name,
                     "Group Details"
                 ),
-                class_name="text-2xl font-bold text-sky-600",
+                class_name="text-3xl font-bold w-full text-sky-600 text-center font-mono"
             ),
             rx.dialog.description(
                 rx.vstack(
@@ -343,17 +424,17 @@ def details_modal():
                                 SearchState.selected_group.owner.username[0].upper(),
                                 ""
                             ),
-                            size="4",
+                            size="5",
                         ),
                         rx.vstack(
                             rx.cond(
                                 SearchState.selected_group,
-                                rx.text(f"Created by {SearchState.selected_group.owner.username}", class_name="font-semibold"),
+                                rx.text(f"Created by {SearchState.selected_group.owner.username}", class_name="font-semibold text-gray-600"),
                                 rx.text("")
                             ),
                             rx.cond(
                                 SearchState.selected_group,
-                                rx.text(f"Role: {SearchState.selected_group.user_role_display}", class_name="text-gray-600"),
+                                rx.text(f"Role: {SearchState.selected_group.user_role_display}", class_name="text-sky-600"),
                                 rx.text("")
                             ),
                             align_items="start",
@@ -362,21 +443,21 @@ def details_modal():
                     ),
                     # Pitch and Description
                     rx.vstack(
-                        rx.text("Pitch", class_name="text-xl font-semibold text-gray-700 mb-2"),
+                        rx.text("Pitch", class_name="text-xl font-bold text-sky-600 mb-2"),
                         rx.cond(
                             SearchState.selected_group,
                             rx.text(
                                 SearchState.selected_group.pitch,
-                                class_name="text-gray-600 mb-4",
+                                class_name="text-black mb-4",
                             ),
                             rx.text("")
                         ),
-                        rx.text("Description", class_name="text-xl font-semibold text-gray-700 mb-2"),
+                        rx.text("Description", class_name="text-xl font-bold text-sky-600 mb-2"),
                         rx.cond(
                             SearchState.selected_group,
                             rx.text(
                                 SearchState.selected_group.description,
-                                class_name="text-gray-600 mb-4",
+                                class_name="text-black mb-4",
                             ),
                             rx.text("")
                         ),
@@ -384,7 +465,7 @@ def details_modal():
                     ),
                     # Skills and Looking For
                     rx.vstack(
-                        rx.text("Skills Needed", class_name="text-xl font-semibold text-gray-700 mb-2"),
+                        rx.text("Skills Needed", class_name="text-xl font-bold text-sky-600 mb-2"),
                         rx.cond(
                             SearchState.selected_group,
                             rx.flex(
@@ -400,7 +481,7 @@ def details_modal():
                             ),
                             rx.text("")
                         ),
-                        rx.text("Looking For", class_name="text-xl font-semibold text-gray-700 mb-2 mt-4"),
+                        rx.text("Looking For", class_name="text-xl font-bold text-sky-600 mb-2 mt-4"),
                         rx.cond(
                             SearchState.selected_group,
                             rx.flex(
@@ -420,10 +501,10 @@ def details_modal():
                     ),
                     # Project Details
                     rx.vstack(
-                        rx.text("Project Details", class_name="text-xl font-semibold text-gray-700 mb-2"),
+                        rx.text("Project Details", class_name="text-xl font-bold text-sky-600 mb-2"),
                         rx.hstack(
                             rx.vstack(
-                                rx.text("Stage", class_name="font-semibold text-gray-700"),
+                                rx.text("Stage", class_name="font-semibold text-black"),
                                 rx.cond(
                                     SearchState.selected_group,
                                     rx.text(
@@ -450,7 +531,7 @@ def details_modal():
                                     SearchState.selected_group,
                                     rx.text(
                                         f"${SearchState.selected_group.investment_needed}",
-                                        class_name="text-gray-600",
+                                        class_name="text-green-600",
                                     ),
                                     rx.text("")
                                 ),
@@ -461,7 +542,7 @@ def details_modal():
                     ),
                     # Members
                     rx.vstack(
-                        rx.text("Team Members", class_name="text-xl font-semibold text-gray-700 mb-2"),
+                        rx.text("Team Members", class_name="text-xl font-bold text-sky-600 mb-2"),
                         rx.cond(
                             SearchState.selected_group,
                             rx.vstack(
@@ -474,9 +555,9 @@ def details_modal():
                                             size="3",
                                         ),
                                         rx.vstack(
-                                            rx.text(member.username, class_name="font-medium"),
+                                            rx.text(member.username, class_name="font-medium text-black"),
                                             rx.text(f"Skills: {member.skills}", class_name="text-sm text-gray-600"),
-                                            rx.text(f"Industry: {member.industry}", class_name="text-sm text-gray-600"),
+                                            rx.text(f"Industry: {member.industry}", class_name="text-sm text-gray-600 mb-2"),
                                             align_items="start",
                                         ),
                                         spacing="3",
@@ -507,13 +588,64 @@ def details_modal():
         open=SearchState.show_details_modal,
     )
 
+def notification():
+    """Custom notification component."""
+    return rx.cond(
+        SearchState.show_notification,
+        rx.box(
+            rx.hstack(
+                rx.cond(
+                    SearchState.notification_type == "success",
+                    rx.icon("check", color="white", size=6),
+                    rx.icon("alert-triangle", color="white", size=6)
+                ),
+                rx.vstack(
+                    rx.text(
+                        SearchState.notification_title,
+                        font_weight="bold",
+                        color="white",
+                    ),
+                    rx.text(
+                        SearchState.notification_message,
+                        color="white",
+                    ),
+                    align_items="start",
+                ),
+                rx.spacer(),
+                rx.button(
+                    rx.icon("x", size=4),
+                    on_click=SearchState.hide_notification,
+                    variant="ghost",
+                    color_scheme="gray",
+                ),
+                width="100%",
+                spacing="3",
+            ),
+            position="fixed",
+            bottom="4",
+            right="4",
+            max_width="400px",
+            p="4",
+            border_radius="md",
+            z_index="1000",
+            shadow="lg",
+            bg=rx.cond(
+                SearchState.notification_type == "success",
+                "green.500",
+                "red.500"
+            ),
+            opacity="0.95",
+        ),
+        rx.fragment()
+    )
+
 def search_page() -> rx.Component:
     return rx.hstack(
         sidebar(SearchState),
         rx.box(
             rx.container(
                 rx.vstack(
-                    rx.heading("Startup Groups", size="9", mb=8, class_name="text-sky-400"),
+                    rx.heading("Startup Groups", size="9", mb=8, class_name="text-sky-300 font-serif"),
                     rx.hstack(
                         rx.input(
                             placeholder="Search groups...",
@@ -582,6 +714,7 @@ def search_page() -> rx.Component:
             class_name="flex-1 min-h-screen bg-gray-800 flex flex-col items-center px-4 overflow-hidden",
         ),
         details_modal(),
+        notification(),
         align_items="stretch",
         spacing="0",
         width="full",
