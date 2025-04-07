@@ -37,6 +37,9 @@ from .serializers import (
     PasswordResetConfirmSerializer,
 )
 
+from django.core.mail import EmailMultiAlternatives
+from datetime import datetime
+
 
 class AuthViewSet(viewsets.ViewSet):
     """ViewSet for authentication-related actions"""
@@ -992,6 +995,8 @@ class PasswordResetRequestView(generics.GenericAPIView):
     serializer_class = PasswordResetRequestSerializer
     permission_classes = [AllowAny]
 
+    # In views.py, modify the PasswordResetRequestView
+
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
@@ -1006,31 +1011,94 @@ class PasswordResetRequestView(generics.GenericAPIView):
                 # Build reset URL
                 reset_url = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}/"
 
-                # Create email content
-                email_subject = "Reset your password"
+                # Create improved HTML email content
                 email_body = f"""
-                    <html>
-                    <body>
-                    <h2>Password Reset Request</h2>
-                    <p>Hi {user.username},</p>
-                    <p>You requested a password reset for your account. Please click the link below to reset your password:</p>
-                    <p><a href="{reset_url}">Reset Password</a></p>
-                    <p>If you didn't request this, please ignore this email.</p>
-                    <p>This link will expire in 1 hour.</p>
-                    <br>
-                    <p>Best regards,<br>Your Application Team</p>
-                    </body>
-                    </html>
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        body {{
+                            font-family: Arial, sans-serif;
+                            line-height: 1.6;
+                            color: #333;
+                            max-width: 600px;
+                            margin: 0 auto;
+                            padding: 20px;
+                            background-color: #f4f4f4;
+                        }}
+                        .container {{
+                            background-color: white;
+                            border-radius: 8px;
+                            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                            padding: 20px;
+                        }}
+                        .header {{
+                            background-color: #007bff;
+                            color: white;
+                            text-align: center;
+                            padding: 10px;
+                            border-radius: 4px;
+                            margin-bottom: 20px;
+                        }}
+                        .content {{
+                            padding: 15px;
+                        }}
+                        .reset-link {{
+                            display: block;
+                            background-color: #007bff;
+                            color: white;
+                            text-align: center;
+                            padding: 10px;
+                            text-decoration: none;
+                            border-radius: 4px;
+                            margin: 20px 0;
+                        }}
+                        .footer {{
+                            text-align: center;
+                            color: #666;
+                            font-size: 12px;
+                            margin-top: 20px;
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h2>Password Reset</h2>
+                        </div>
+                        <div class="content">
+                            <p>Hi {user.username},</p>
+                            <p>You have requested to reset your password for Startup Hub. Click the button below to reset your password:</p>
+                            
+                            <a href="{reset_url}" class="reset-link">Reset Password</a>
+                            
+                            <p>If you did not request this password reset, please ignore this email or contact support if you have concerns.</p>
+                            
+                            <p>This password reset link will expire in 1 hour.</p>
+                        </div>
+                        <div class="footer">
+                            <p>© {datetime.now().year} Startup Hub. All rights reserved.</p>
+                            <p>If the button doesn't work, copy and paste this link:</p>
+                            <p>{reset_url}</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
                 """
 
-                # Send email
-                send_mail(
-                    email_subject,
-                    email_body,
-                    settings.DEFAULT_FROM_EMAIL,
-                    [user.email],
-                    fail_silently=False,
+                # Send email using EmailMultiAlternatives for HTML support
+                from django.core.mail import EmailMultiAlternatives
+                from datetime import datetime
+
+                email = EmailMultiAlternatives(
+                    subject="Reset Your Startup Hub Password",
+                    body="Plain text fallback for email clients that don't support HTML",
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    to=[user.email],
                 )
+                email.attach_alternative(email_body, "text/html")
+                email.send()
 
                 return Response(
                     {"message": "Password reset email has been sent."},
