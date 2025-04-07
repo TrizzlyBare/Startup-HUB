@@ -232,3 +232,5 @@ ALLOWED_UPLOAD_EXTENSIONS = {
     "audio": ["mp3", "wav", "ogg"],
     "document": ["pdf", "doc", "docx", "txt"],
 }
+
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
