@@ -31,6 +31,11 @@ urlpatterns += [
         ),
         name="handle-join-request",
     ),
+    path(
+        "startup-ideas/<pk>/project-join-requests/",
+        StartupIdeaViewSet.as_view({"get": "project_join_requests"}),
+        name="project-join-requests",
+    ),
 ]
 
 # The routes generated include:
@@ -56,3 +61,4 @@ urlpatterns += [
 # POST /startup-ideas/{id}/upload-image/ - Upload an image for a startup
 # POST /startup-ideas/{id}/upload-pitch-deck/ - Upload a pitch deck
 # DELETE /startup-ideas/{id}/remove-image/ - Remove an image
+# GET /startup-ideas/{id}/project-join-requests/ - Get all join requests for a specific project
