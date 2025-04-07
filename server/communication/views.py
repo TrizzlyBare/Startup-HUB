@@ -37,6 +37,9 @@ from rest_framework import permissions
 from .models import Room, Message
 from .serializers import MessageSerializer
 
+# Import WebRTCConfig from the right location
+from .webrtc_config import WebRTCConfig
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -699,3 +702,49 @@ class FindRoomByNameView(APIView):
 
         serializer = RoomSerializer(rooms, many=True)
         return Response({"rooms": serializer.data})
+
+
+class WebRTCConfigView(APIView):
+    """
+    View to provide WebRTC configuration for a specific room
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, room_id):
+        """
+        Get WebRTC configuration for a room
+        """
+        try:
+            # Check if the room exists and the user has access to it
+            room = Room.objects.get(
+                id=room_id, communication_participants__user=request.user
+            )
+
+            # Generate WebRTC configuration
+            config = {
+                "room_config": {
+                    "room_id": str(room_id),
+                    "name": room.name,
+                    "type": room.room_type,
+                },
+                "ice_servers": WebRTCConfig.get_ice_servers(),
+                "media_constraints": WebRTCConfig.get_media_constraints(),
+                "token": request.auth.key if request.auth else None,
+            }
+
+            return Response(config)
+
+        except Room.DoesNotExist:
+            return Response(
+                {
+                    "error": f"Room with id {room_id} does not exist or you don't have access"
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception as e:
+            logger.error(f"Error getting WebRTC config: {str(e)}")
+            return Response(
+                {"error": f"Failed to get WebRTC configuration: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
