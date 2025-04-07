@@ -316,8 +316,17 @@ class AuthState(BaseState):
             if not self.email:
                 raise Exception("Please enter your email address.")
             
-            # TODO: Implement forgot password endpoint
-            self.success = "If an account exists with this email, password reset instructions will be sent."
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.API_BASE_URL}/password-reset/request/",
+                    json={"email": self.email}
+                )
+                
+                if response.status_code == 200:
+                    self.success = "If an account exists with this email, password reset instructions will be sent."
+                else:
+                    # Use a generic message for security
+                    self.success = "If an account exists with this email, password reset instructions will be sent."
             
         except Exception as e:
             self.error = str(e)
@@ -352,6 +361,95 @@ class AuthState(BaseState):
             print(f"Error in debug_auth_token: {e}")
             self.auth_debug_result = f"Auth debug error: {str(e)}"
             return {"error": str(e)}
+
+class ResetPasswordState(BaseState):
+    """State for password reset confirmation."""
+    new_password: str = ""
+    confirm_password: str = ""
+    error: Optional[str] = None
+    success: Optional[str] = None
+    is_loading: bool = False
+    user_id: str = ""
+    reset_token: str = ""
+    debug_info: str = ""
+    
+    # Add API endpoint
+    API_BASE_URL = "http://100.95.107.24:8000/api/auth"
+
+    @rx.var
+    def has_valid_params(self) -> bool:
+        """Check if we have valid parameters."""
+        is_valid = bool(self.user_id and self.reset_token)
+        print(f"Checking params validity - user_id: {self.user_id}, token: {self.reset_token}, is_valid: {is_valid}")
+        return is_valid
+
+    def on_mount(self):
+        """Called when the component mounts."""
+        # Get route parameters directly
+        route_params = self.router.page.params
+        print(f"Route params: {route_params}")
+        
+        # Update state with route parameters
+        if route_params:
+            self.user_id = route_params.get("uid", "")
+            self.reset_token = route_params.get("token", "")
+            self.debug_info = f"User ID: {self.user_id}\nToken: {self.reset_token}"
+            print(f"Updated state with params - user_id: {self.user_id}, token: {self.reset_token}")
+
+    def clear_messages(self):
+        """Clear error and success messages."""
+        self.error = None
+        self.success = None
+
+    async def handle_reset_password(self):
+        """Handle password reset confirmation."""
+        print(f"Handling reset password - user_id: {self.user_id}, token: {self.reset_token}")
+        self.clear_messages()
+        self.is_loading = True
+        
+        try:
+            if not self.new_password or not self.confirm_password:
+                raise Exception("Please fill in all fields.")
+            
+            if self.new_password != self.confirm_password:
+                raise Exception("Passwords do not match.")
+            
+            if not self.user_id or not self.reset_token:
+                raise Exception("Invalid reset link. Please request a new password reset.")
+            
+            async with httpx.AsyncClient() as client:
+                # Print request data for debugging
+                request_data = {
+                    "uid": self.user_id,  # Changed from user_id to uid
+                    "token": self.reset_token,
+                    "new_password": self.new_password
+                }
+                print(f"Sending reset request with data: {request_data}")
+                
+                response = await client.post(
+                    f"{self.API_BASE_URL}/password-reset/confirm/",
+                    json=request_data
+                )
+                
+                print(f"Reset password response status: {response.status_code}")
+                print(f"Reset password response: {response.text}")
+                
+                if response.status_code == 200:
+                    self.success = "Password has been reset successfully. You will be redirected to login."
+                    return rx.call_script("""
+                        setTimeout(() => {
+                            window.location.href = '/login';
+                        }, 2000);
+                    """)
+                else:
+                    error_data = response.json()
+                    raise Exception(error_data.get("error", "Password reset failed. Please try again."))
+            
+        except Exception as e:
+            print(f"Reset password error: {str(e)}")
+            self.error = str(e)
+        finally:
+            self.is_loading = False
 
 def login_form() -> rx.Component:
     return rx.vstack(
@@ -567,7 +665,138 @@ def register_page() -> rx.Component:
         class_name="min-h-screen flex justify-center items-center bg-gray-900 px-4"
     )
 
+def reset_password_form() -> rx.Component:
+    """Render the reset password form."""
+    return rx.vstack(
+        rx.text("Reset Password", class_name="text-2xl font-bold text-gray-900 mb-6"),
+        
+        # Debug info
+        rx.text(
+            f"Debug - User ID: {ResetPasswordState.user_id}, Token: {ResetPasswordState.reset_token}",
+            class_name="text-xs text-gray-500 mb-4"
+        ),
+        
+        # Error and success messages
+        rx.cond(
+            ResetPasswordState.error,
+            rx.text(ResetPasswordState.error, class_name="text-red-500 text-sm"),
+            rx.text("", class_name="hidden"),
+        ),
+        rx.cond(
+            ResetPasswordState.success,
+            rx.text(ResetPasswordState.success, class_name="text-green-500 text-sm"),
+            rx.text("", class_name="hidden"),
+        ),
+        
+        rx.input(
+            placeholder="New Password",
+            type="password",
+            value=ResetPasswordState.new_password,
+            on_change=ResetPasswordState.set_new_password,
+            class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-500"
+        ),
+        
+        rx.input(
+            placeholder="Confirm New Password",
+            type="password",
+            value=ResetPasswordState.confirm_password,
+            on_change=ResetPasswordState.set_confirm_password,
+            class_name="w-full px-4 py-2 border rounded-lg text-base bg-white border-gray-300 text-gray-900 placeholder-gray-500"
+        ),
+        
+        rx.button(
+            rx.cond(
+                ResetPasswordState.is_loading,
+                rx.spinner(),
+                rx.text("Reset Password"),
+            ),
+            class_name="bg-blue-600 text-white w-full py-2 rounded-lg font-semibold text-base hover:bg-blue-700 transition-colors",
+            on_click=ResetPasswordState.handle_reset_password,
+            is_loading=ResetPasswordState.is_loading
+        ),
+        
+        spacing="4",
+        class_name="w-full max-w-md p-8"
+    )
+
+@rx.page(route="/reset-password")
+def reset_password_page() -> rx.Component:
+    """Password reset page that handles the reset password form."""
+    return rx.box(
+        rx.vstack(
+            # Debug display
+            rx.box(
+                rx.vstack(
+                    rx.heading("Debug Information:", size="4", class_name="text-gray-700"),
+                    rx.text("Current URL Parameters:", class_name="text-sm text-gray-600 mt-2"),
+                    rx.code_block(
+                        ResetPasswordState.debug_info,
+                        class_name="text-xs bg-gray-50 p-2 rounded"
+                    ),
+                    rx.text(
+                        f"Has Valid Params: {ResetPasswordState.has_valid_params}",
+                        class_name="text-sm text-gray-600"
+                    ),
+                    class_name="space-y-2"
+                ),
+                class_name="bg-gray-100 p-4 rounded-lg mb-4 w-full"
+            ),
+            
+            rx.hstack(
+                # Left box - Reset password form
+                rx.box(
+                    rx.vstack(
+                        rx.cond(
+                            ResetPasswordState.has_valid_params,
+                            reset_password_form(),
+                            rx.text("Invalid reset link. Please request a new password reset.", class_name="text-red-500"),
+                        ),
+                        class_name="w-full"
+                    ),
+                    class_name="w-1/2 h-[600px] rounded-l-2xl overflow-hidden flex items-center justify-center bg-white"
+                ),
+                
+                # Right box - Image
+                rx.box(
+                    rx.image(
+                        src="/Logo.png",
+                        class_name="w-full h-full object-cover"
+                    ),
+                    class_name="w-1/2 h-[600px] rounded-r-2xl overflow-hidden"
+                ),
+                
+                class_name="w-full max-w-4xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden"
+            ),
+            width="100%",
+            align_items="center",
+        ),
+        class_name="min-h-screen flex justify-center items-center bg-gray-900 px-4",
+        on_mount=ResetPasswordState.on_mount
+    )
+
 # Initialize the app with both routes
 app = rx.App()
-app.add_page(login_page)
-app.add_page(register_page)
+
+# Add pages with explicit route names
+app.add_page(login_page, route="/login")
+app.add_page(register_page, route="/register")
+app.add_page(reset_password_page, route="/reset-password")
+
+# Add debug route for testing
+@rx.page(route="/reset-password-test")
+def reset_password_test() -> rx.Component:
+    """Test page for reset password route."""
+    return rx.box(
+        rx.text("Reset Password Test Page", class_name="text-2xl font-bold"),
+        rx.text("This is a test page to verify routing is working.", class_name="text-gray-600"),
+        class_name="min-h-screen flex flex-col justify-center items-center bg-gray-900 text-white"
+    )
+
+app.add_page(reset_password_test, route="/reset-password-test")
+
+# Debug print route information
+print("=== Route Debug Information ===")
+print("Reset Password Route: /reset-password")
+print("Test Route: /reset-password-test")
+print("Login Route: /login")
+print("Register Route: /register")
