@@ -7,7 +7,6 @@ from .views import (
     DirectRoomView,
     RoomMessagesView,
     UsernameLoginView,
-    WebRTCConfigView,
 )
 
 # Import room finding views
@@ -78,10 +77,5 @@ urlpatterns = [
     # Removed the redundant send_message path
     path(
         "rooms/create_direct_chat/", DirectRoomView.as_view(), name="create-direct-chat"
-    ),
-    path(
-        "rooms/<uuid:room_id>/webrtc-config/",
-        WebRTCConfigView.as_view(),
-        name="room-webrtc-config",
     ),
 ]

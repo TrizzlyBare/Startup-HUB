@@ -1,8 +1,6 @@
 from django.urls import re_path
 from . import webrtc
 from .chat_consumer import ChatConsumer  # Import our unified consumer
-from .webrtc_consumer import WebRTCSignalingConsumer
-
 
 websocket_urlpatterns = [
     # Username-based WebSocket route
@@ -17,13 +15,9 @@ websocket_urlpatterns = [
         ChatConsumer.as_asgi(),
         name="room_communication",
     ),
-    # # WebRTC signaling (unchanged)
-    # re_path(
-    #     r"ws/webrtc/(?P<room_id>[0-9a-f-]+)/$",
-    #     webrtc.WebRTCSignalingConsumer.as_asgi(),
-    # ),
+    # WebRTC signaling (unchanged)
     re_path(
         r"ws/webrtc/(?P<room_id>[0-9a-f-]+)/$",
-        WebRTCSignalingConsumer.as_asgi(),
+        webrtc.WebRTCSignalingConsumer.as_asgi(),
     ),
 ]

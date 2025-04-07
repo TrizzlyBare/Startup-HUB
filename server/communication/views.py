@@ -12,8 +12,6 @@ from django.utils import timezone
 from datetime import timedelta
 import uuid
 
-from .webrtc_config import WebRTCConfig
-
 from .models import Room, Message, Participant, CallLog, CallInvitation, MediaFile
 from .serializers import (
     RoomSerializer,
@@ -701,19 +699,3 @@ class FindRoomByNameView(APIView):
 
         serializer = RoomSerializer(rooms, many=True)
         return Response({"rooms": serializer.data})
-
-
-class WebRTCConfigView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request, room_id):
-        config = {
-            "room_config": {
-                "room_id": str(room_id),
-                # other room details
-            },
-            "ice_servers": WebRTCConfig.get_ice_servers(),
-            "media_constraints": WebRTCConfig.get_media_constraints(),
-            "token": request.auth.key if request.auth else None,
-        }
-        return Response(config)
