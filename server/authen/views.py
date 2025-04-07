@@ -1010,7 +1010,9 @@ class PasswordResetRequestView(generics.GenericAPIView):
                 token = default_token_generator.make_token(user)
 
                 # Build reset URL
-                reset_url = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}/"
+                reset_url = (
+                    f"{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}"
+                )
 
                 # Create improved HTML email content
                 email_body = f"""
