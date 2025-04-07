@@ -701,3 +701,54 @@ class StartupIdeaViewSet(viewsets.ModelViewSet):
 
         serializer = JoinRequestSerializer(join_request)
         return Response(serializer.data)
+
+    def get_object_for_request_to_join(self):
+        """
+        Special method to get a project object when a user is requesting to join it.
+        This allows accessing projects the user is not yet a member of.
+        """
+        # Get the pk from the URL
+        pk = self.kwargs.get("pk")
+
+        # Try to get the project directly from the database (without ownership restrictions)
+        project = get_object_or_404(StartupIdea, pk=pk)
+        return project
+
+    @action(detail=True, methods=["post"])
+    def request_to_join(self, request, pk=None):
+        """Request to join a project"""
+        # Use the special method to get the project
+        startup = self.get_object_for_request_to_join()
+
+        # Rest of the method remains the same
+        if startup.members.filter(id=request.user.id).exists():
+            return Response(
+                {"error": "You are already a member of this project"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if startup.user == request.user:
+            return Response(
+                {"error": "You are the owner of this project"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        existing_request = JoinRequest.objects.filter(
+            project=startup, user=request.user, status="pending"
+        ).first()
+
+        if existing_request:
+            return Response(
+                {"error": "You already have a pending request to join this project"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        join_request = JoinRequest.objects.create(
+            project=startup, user=request.user, message=request.data.get("message", "")
+        )
+
+        # Send email notification to the project owner
+        send_join_request_notification(join_request)
+
+        serializer = JoinRequestSerializer(join_request)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
