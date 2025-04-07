@@ -38,7 +38,6 @@ class StartupGroup(rx.Base):
     images: List[str]
     website: str
     funding_stage: str
-    investment_needed: str
     members: List[Member]
     member_count: int
     created_at: str
@@ -60,6 +59,7 @@ class SearchState(rx.State):
     total_count: int = 0
     next_page: Optional[str] = None
     previous_page: Optional[str] = None
+    profile_username: str = ""
     
     # Notification states
     show_notification: bool = False
@@ -70,12 +70,21 @@ class SearchState(rx.State):
     async def on_mount(self):
         """Fetch all projects when the page loads."""
         print("Search page mounted - fetching all projects...")
+        # Get username from local storage
+        username = await rx.call_script("localStorage.getItem('username')")
+        if username:
+            self.profile_username = username
         await self.search_startups()
+
+    def go_back(self):
+        """Navigate back to the matcher page."""
+        return rx.redirect("/match/from-profile/username/")
 
     async def search_startups(self):
         """Search for startup groups based on the query."""
         self.is_loading = True
         print(f"\n=== Loading Projects ===")
+        print(f"Search query: {self.search_query}")
         
         try:
             # Get token from AuthState
@@ -93,12 +102,17 @@ class SearchState(rx.State):
                 "Content-Type": "application/json",
                 "Authorization": f"Token {auth_token}"
             }
-            print(f"Making API request to: {self.API_URL}/startup-profile/startup-ideas/all-projects/")
+            
+            # Add search query to URL if present
+            base_url = f"{self.API_URL}/startup-profile/startup-ideas/all-projects/"
+            url = f"{base_url}?search={self.search_query}" if self.search_query else base_url
+            
+            print(f"Making API request to: {url}")
             
             async with httpx.AsyncClient() as client:
-                # Get all projects without any filters
+                # Get projects with search filter
                 response = await client.get(
-                    f"{self.API_URL}/startup-profile/startup-ideas/all-projects/",
+                    url,
                     headers=headers
                 )
                 
@@ -152,7 +166,6 @@ class SearchState(rx.State):
                                 images=images_list,
                                 website=item["website"],
                                 funding_stage=item["funding_stage"],
-                                investment_needed=item["investment_needed"],
                                 members=[
                                     Member(
                                         id=member["id"],
@@ -525,17 +538,17 @@ def details_modal():
                                     rx.text("")
                                 ),
                             ),
-                            rx.vstack(
-                                rx.text("Investment Needed", class_name="font-semibold text-gray-700"),
-                                rx.cond(
-                                    SearchState.selected_group,
-                                    rx.text(
-                                        f"${SearchState.selected_group.investment_needed}",
-                                        class_name="text-green-600",
-                                    ),
-                                    rx.text("")
-                                ),
-                            ),
+                            # rx.vstack(
+                            #     rx.text("Investment Needed", class_name="font-semibold text-gray-700"),
+                            #     rx.cond(
+                            #         SearchState.selected_group,
+                            #         rx.text(
+                            #             f"${SearchState.selected_group.investment_needed}",
+                            #             class_name="text-green-600",
+                            #         ),
+                            #         rx.text("")
+                            #     ),
+                            # ),
                             spacing="8",
                         ),
                         align_items="start",
@@ -643,9 +656,33 @@ def search_page() -> rx.Component:
     return rx.hstack(
         sidebar(SearchState),
         rx.box(
-            rx.container(
+            rx.box(
                 rx.vstack(
-                    rx.heading("Startup Groups", size="9", mb=8, class_name="text-sky-300 font-serif"),
+                    rx.hstack(
+                        rx.button(
+                            rx.icon(
+                                "arrow-left",
+                                class_name="w-8 h-8 text-white hover:text-sky-300 transition-colors"
+                            ),
+                            on_click=rx.call_script("""
+                                const username = localStorage.getItem('username');
+                                window.location.href = `/match/from-profile/${username}/`;
+                            """),
+                            class_name="bg-transparent hover:bg-transparent absolute top-4 left-4",
+                        ),
+                        rx.heading(
+                            "Startup Groups", 
+                            size="9", 
+                            class_name="text-sky-300 font-serif mb-2",
+                            text_align="center",
+                            width="100%"
+                        ),
+                        position="relative",
+                        width="100%",
+                        mb=8,
+                        pt=4,
+                        class_name="mt-4"
+                    ),
                     rx.hstack(
                         rx.input(
                             placeholder="Search groups...",
@@ -670,9 +707,7 @@ def search_page() -> rx.Component:
                         spacing="4",
                         width="100%",
                     ),
-                    # Add a spacer here to create more vertical distance
-                    rx.box(height="24px"), 
-                    # Wrap the results in a scrollable container
+                    rx.box(height="24px"),
                     rx.box(
                         rx.cond(
                             SearchState.is_loading,
@@ -689,29 +724,28 @@ def search_page() -> rx.Component:
                                     ),
                                     columns="2",
                                     template_columns="repeat(2, 1fr)",
-                                    gap="40px",
+                                    gap="20px",
                                     width="100%",
                                 ),
                                 rx.text("No results found. Try a different search term.", color="gray.300", padding="40px"),
                             ),
                         ),
                         width="100%",
-                        height="calc(100vh - 200px)",  # Fixed height with space for header and search
-                        overflow_y="auto",  # Enable vertical scrolling
-                        padding_top="10px", 
-                        padding_bottom="40px",
+                        height="calc(100vh - 200px)",
+                        overflow_y="auto",
                     ),
                     spacing="4",
                     width="100%",
                     height="100%",
                     align="center",
                 ),
-                py=8,
-                px="8",
-                max_width="1400px",
+                width="100%",
                 height="100%",
+                padding_x="40px",
             ),
-            class_name="flex-1 min-h-screen bg-gray-800 flex flex-col items-center px-4 overflow-hidden",
+            class_name="flex-1 min-h-screen bg-gray-800 flex flex-col items-center overflow-hidden",
+            width="100%",
+            padding="0",
         ),
         details_modal(),
         notification(),

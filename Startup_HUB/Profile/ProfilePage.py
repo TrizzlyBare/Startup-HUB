@@ -1034,7 +1034,7 @@ def profile_display() -> rx.Component:
                     # My Projects Button
                     rx.button(
                         "My Projects",
-                        on_click=rx.redirect(f"/my-projects/user/{State.profile_username}"),
+                        on_click=rx.redirect(f"/my-projects/"),
                         class_name="px-6 py-3 text-lg bg-blue-600 text-white rounded-xl bg-sky-600 hover:bg-sky-500 hover:scale-105 transition-all duration-200 font-bold",
                     ),
                     spacing="4"
@@ -1424,18 +1424,16 @@ def profile_page() -> rx.Component:
                 """),
                 
                 # Page content
-                rx.hstack(
+                rx.box(
                     rx.heading(
                         "Profile information",
                         size="9",
                         color="white",
-                        class_name="mb-4 mt-4 ml-10"
+                        class_name="p-8"
                     ),
-                    rx.spacer(),
                     width="100%",
                     class_name="bg-sky-600"
                 ),
-                
                 
                 # Profile content
                 profile_display(),
@@ -1448,11 +1446,10 @@ def profile_page() -> rx.Component:
                         on_click=rx.redirect(f"/match/from-profile/{State.profile_username}"),
                         class_name="px-9 py-6 text-lg bg-cyan-600 text-white rounded-xl hover:bg-sky-700 hover:scale-110 transition-all duration-200 mt-4 font-bold"
                     ),
+                    rx.spacer(),
                     width="100%",
                     margin_top="4",
-                    padding_right="24",
-                    justify="end",
-                    padding_left="20%",
+                    justify="center",
                     class_name="px-40 py-3"
                 ),
                 
@@ -1460,13 +1457,14 @@ def profile_page() -> rx.Component:
                 edit_form(),
                 width="100%",
                 padding="4",
+                spacing="0",
             ),
             width="100%",
-            padding="4",
+            padding="0",
             height="100vh"
         ),
         on_mount=State.on_mount,
-        class_name="min-h-screen bg-gray-900 py-8 items-center justify-center"
+        class_name="min-h-screen bg-gray-900"
     )
 
 @rx.page(route="/profile")

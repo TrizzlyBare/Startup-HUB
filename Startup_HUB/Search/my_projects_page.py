@@ -9,7 +9,7 @@ def show_project(project: rx.Var[Project]) -> rx.Component:
         rx.vstack(
             # Project header and description section
             rx.vstack(
-                rx.heading(project.name, size="7",border_radius="3xl" , class_name="text-sky-600 w-full font-bold p-2 bg-sky-200 round-3xl font-mono"),
+                rx.heading(project.name, size="7",border_radius="3xl" , class_name="text-sky-600 w-full font-bold p-2 bg-sky-200 rounded-t-lg font-mono"),
                 rx.text(
                     f"->{project.description}",
                     noOfLines=3,
@@ -302,58 +302,58 @@ def edit_project_modal() -> rx.Component:
         open=MyProjectsState.show_edit_modal,
     )
 
-def join_request_modal() -> rx.Component:
-    """Create join request modal."""
-    return rx.dialog.root(
-        rx.dialog.content(
-            rx.dialog.title(
-                "Request to Join Project",
-                class_name="text-3xl font-bold mb-4 text-sky-600",
-            ),
-            rx.dialog.description(
-                rx.vstack(
-                    # Error message display
-                    rx.cond(
-                        MyProjectsState.error,
-                        rx.text(
-                            MyProjectsState.error,
-                            class_name="text-red-500 mb-4 p-2 bg-red-50 rounded-lg",
-                        ),
-                    ),
-                    rx.text_area(
-                        placeholder="Why do you want to join this project?",
-                        value=MyProjectsState.join_request_message,
-                        on_change=MyProjectsState.set_join_request_message,
-                        height="120px",
-                        class_name="w-full p-2 border rounded-lg bg-white text-black",
-                    ),
-                    rx.hstack(
-                        rx.button(
-                            "Cancel",
-                            on_click=MyProjectsState.toggle_join_requests_modal,
-                            class_name="px-6 py-2 bg-red-600 hover:bg-red-700 rounded-lg",
-                        ),
-                        rx.button(
-                            "Send Request",
-                            on_click=MyProjectsState.send_join_request,
-                            class_name="px-6 py-2 bg-green-600 text-white hover:bg-green-700 rounded-lg",
-                        ),
-                        spacing="4",
-                        justify="end",
-                        width="100%",
-                        margin_top="6",
-                    ),
-                    spacing="6",
-                    padding="4",
-                ),
-                width="100%",
-            ),
-            max_width="600px",
-            width="90vw",
-            class_name="bg-white p-8 rounded-xl shadow-2xl border border-gray-200",
-        ),
-        open=MyProjectsState.show_join_requests_modal,
-    )
+# def join_request_modal() -> rx.Component:
+#     """Create join request modal."""
+#     return rx.dialog.root(
+#         rx.dialog.content(
+#             rx.dialog.title(
+#                 "Request to Join Project",
+#                 class_name="text-3xl font-bold mb-4 text-sky-600",
+#             ),
+#             rx.dialog.description(
+#                 rx.vstack(
+#                     # Error message display
+#                     rx.cond(
+#                         MyProjectsState.error,
+#                         rx.text(
+#                             MyProjectsState.error,
+#                             class_name="text-red-500 mb-4 p-2 bg-red-50 rounded-lg",
+#                         ),
+#                     ),
+#                     rx.text_area(
+#                         placeholder="Why do you want to join this project?",
+#                         value=MyProjectsState.join_request_message,
+#                         on_change=MyProjectsState.set_join_request_message,
+#                         height="120px",
+#                         class_name="w-full p-2 border rounded-lg bg-white text-black",
+#                     ),
+#                     rx.hstack(
+#                         rx.button(
+#                             "Cancel",
+#                             on_click=MyProjectsState.toggle_join_requests_modal,
+#                             class_name="px-6 py-2 bg-red-600 hover:bg-red-700 rounded-lg",
+#                         ),
+#                         rx.button(
+#                             "Send Request",
+#                             on_click=MyProjectsState.send_join_request,
+#                             class_name="px-6 py-2 bg-green-600 text-white hover:bg-green-700 rounded-lg",
+#                         ),
+#                         spacing="4",
+#                         justify="end",
+#                         width="100%",
+#                         margin_top="6",
+#                     ),
+#                     spacing="6",
+#                     padding="4",
+#                 ),
+#                 width="100%",
+#             ),
+#             max_width="600px",
+#             width="90vw",
+#             class_name="bg-white p-8 rounded-xl shadow-2xl border border-gray-200",
+#         ),
+#         open=MyProjectsState.show_join_requests_modal,
+#     )
 
 def join_requests_modal() -> rx.Component:
     """Modal to display join requests for a project."""
@@ -463,8 +463,10 @@ def join_requests_modal() -> rx.Component:
             max_width="600px",
             width="90vw",
             class_name="bg-white p-8 rounded-xl shadow-2xl border border-gray-200",
+            style={"position": "fixed", "top": "50%", "left": "50%", "transform": "translate(-50%, -50%)", "zIndex": "1000"},
         ),
         open=MyProjectsState.show_join_requests_modal,
+        style={"backgroundColor": "transparent", "& [data-dialog-overlay]": {"background": "transparent"}},
     )
 
 @rx.page(route="/my-projects")
@@ -535,7 +537,7 @@ def my_projects_page() -> rx.Component:
                 ),
                 create_project_modal(),
                 edit_project_modal(),
-                join_request_modal(),
+                # join_request_modal(),
                 join_requests_modal(),  # Add the join requests modal
                 flex_grow="1",  # Makes content take remaining space
                 overflow_y="auto",

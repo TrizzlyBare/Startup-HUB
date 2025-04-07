@@ -1812,7 +1812,7 @@ def profile_popup() -> rx.Component:
                             on_click=MatchState.close_profile_popup,
                             size="3",
                             color="red",
-                            class_name="bg-white hover:bg-red-100 hover:text-red-600 transition-transform transform hover:scale-105 duration-200"
+                            class_name="bg-white hover:bg-red-100 hover:text-red-600 transition-transform transform hover:scale-105 duration-200 mt-2 mr-2"
                         ),
                         width="100%",
                     ),
@@ -1844,14 +1844,14 @@ def profile_popup() -> rx.Component:
                                 rx.text("Bio:", 
                                     font_weight="bold", 
                                     font_size="1.2em",
-                                    class_name="text-sky-600 ml-2"
+                                    class_name="text-sky-600 ml-7"
                                 ),
                                 rx.text(
                                     MatchState.view_profile_data.get("bio", "No bio available"),
                                     font_size="1.1em",
                                     padding="3",
                                     bg="gray.50",
-                                    class_name="text-black ml-2 "
+                                    class_name="text-black ml-7 rounded-2xl"
                                 ),
                                 width="100%",
                                 margin_top="3",
@@ -1863,13 +1863,13 @@ def profile_popup() -> rx.Component:
                                     rx.text("Industry:", 
                                         font_weight="bold", 
                                         font_size="1.2em",
-                                        class_name="text-sky-600 ml-2",
+                                        class_name="text-sky-600 ml-7",
                                     ),
                                     rx.text(
                                         MatchState.view_profile_data.get("industry", "Not specified"),
                                         font_size="1.1em",
                                         padding="3",
-                                        class_name="ml-2 text-sky-500"
+                                        class_name="ml-7 text-sky-500"
                                     ),
                                     width="50%",
                                 ),
@@ -1877,13 +1877,13 @@ def profile_popup() -> rx.Component:
                                     rx.text("Experience:", 
                                         font_weight="bold", 
                                         font_size="1.2em",
-                                        class_name="text-sky-600 ml-2",
+                                        class_name="text-sky-600 ml-7",
                                     ),
                                     rx.text(
                                         MatchState.view_profile_data.get("experience", "Not specified"),
                                         font_size="1.1em",
                                         padding="3",
-                                        class_name="ml-2 text-sky-500"
+                                        class_name="ml-7 text-sky-500"
                                     ),
                                     width="50%",
                                 ),
@@ -1896,13 +1896,13 @@ def profile_popup() -> rx.Component:
                                 rx.text("Skills:", 
                                     font_weight="bold", 
                                     font_size="1.5em",
-                                    class_name="text-sky-700 ml-2",
+                                    class_name="text-sky-700 ml-7",
                                 ),
                                 rx.text(
                                     MatchState.view_profile_data.get("skills_formatted", "No skills listed"),
                                     font_size="1.0em",
                                     padding="3",
-                                    class_name="ml-2 text-black"
+                                    class_name="ml-7 text-black"
                                 ),
                                 width="100%",
                                 margin_bottom="4",
@@ -1912,13 +1912,13 @@ def profile_popup() -> rx.Component:
                                 rx.text("Past Projects:", 
                                     font_weight="bold", 
                                     font_size="1.2em",
-                                    class_name="text-sky-700 ml-2",
+                                    class_name="text-sky-700 ml-7",
                                 ),
                                 rx.text(
                                     MatchState.view_profile_data.get("past_projects_formatted", "No past projects listed"),
                                     font_size="1.1em",
                                     padding="3",
-                                    class_name="ml-2 text-black"
+                                    class_name="ml-7 text-black"
                                 ),
                                 width="100%",
                                 margin_bottom="4",
@@ -1928,13 +1928,13 @@ def profile_popup() -> rx.Component:
                                 rx.text("Career Summary:", 
                                     font_weight="bold", 
                                     font_size="1.2em",
-                                    class_name="text-sky-700 ml-2",
+                                    class_name="text-sky-700 ml-7",
                                 ),
                                 rx.text(
                                     MatchState.view_profile_data.get("career_summary", "No career summary"),
                                     font_size="1.0em",
                                     padding="3",
-                                    class_name="ml-2 text-black mb-2"
+                                    class_name="ml-7 text-black mb-5"
                                 ),
                                 width="100%",
                             ),
@@ -1956,6 +1956,7 @@ def profile_popup() -> rx.Component:
                     bg="white",
                     border_radius="lg",
                     box_shadow="xl",
+                    class_name="rounded-3xl",
                 ),
                 position="fixed",
                 top="0",
@@ -1964,6 +1965,7 @@ def profile_popup() -> rx.Component:
                 height="100%",
                 z_index="1000",
                 bg="rgba(0,0,0,0.7)",
+                
             ),
         ),
         rx.fragment(),
