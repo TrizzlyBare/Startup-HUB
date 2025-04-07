@@ -64,3 +64,43 @@ class BearerTokenAuthMiddleware(MiddlewareMixin):
             pass
 
         return None
+
+
+from channels.db import database_sync_to_async
+from django.contrib.auth.models import AnonymousUser
+from rest_framework.authtoken.models import Token
+from django.utils.deprecation import MiddlewareMixin
+
+
+class WebSocketTokenAuthMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        # Add user to scope
+        scope["user"] = await self.get_user(scope)
+
+        # Continue with next middleware or application
+        return await self.app(scope, receive, send)
+
+    async def get_user(self, scope):
+        # Extract token from query string or headers
+        query_string = scope.get("query_string", b"").decode()
+        headers = dict(scope.get("headers", []))
+
+        token_key = None
+        if "token" in query_string:
+            token_key = query_string.split("=")[-1]
+
+        auth_header = headers.get(b"authorization", b"").decode()
+        if auth_header.startswith("Bearer "):
+            token_key = auth_header.split(" ")[1]
+
+        if token_key:
+            try:
+                token = await database_sync_to_async(Token.objects.get)(key=token_key)
+                return token.user
+            except Token.DoesNotExist:
+                pass
+
+        return AnonymousUser()
