@@ -415,24 +415,18 @@ def join_requests_modal() -> rx.Component:
                                                 rx.hstack(
                                                     rx.button(
                                                         "Accept",
-                                                        on_click=lambda: MyProjectsState.accept_join_request(request.id, request.sender_id),
+                                                        on_click=lambda: [
+                                                            MyProjectsState.accept_join_request(request.id, request.sender_id),
+                                                            MyProjectsState.delete_join_request(request.id)
+                                                        ],
                                                         class_name="bg-green-600 text-white hover:bg-green-700 px-4 py-2 rounded-lg",
                                                     ),
                                                     rx.button(
                                                         "Reject",
-                                                        on_click=lambda: MyProjectsState.reject_join_request(request.id),
+                                                        on_click=lambda: MyProjectsState.delete_join_request(request.id),
                                                         class_name="bg-red-600 text-white hover:bg-red-700 px-4 py-2 rounded-lg",
                                                     ),
                                                     spacing="4",
-                                                ),
-                                            ),
-                                            # Delete button for accepted requests
-                                            rx.cond(
-                                                request.status == "accepted",
-                                                rx.button(
-                                                    "Delete Request",
-                                                    on_click=lambda: MyProjectsState.delete_join_request(request.id),
-                                                    class_name="bg-gray-600 text-white hover:bg-gray-700 px-4 py-2 rounded-lg",
                                                 ),
                                             ),
                                             justify="end",

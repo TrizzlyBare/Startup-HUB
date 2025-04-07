@@ -250,10 +250,6 @@ class SearchState(rx.State):
                     print(f"Successfully sent request to join group: {target_group.name}")
                     # Update UI to show request sent
                     target_group.join_requested = True
-                    self.show_success_notification(
-                        "Request Sent", 
-                        f"Successfully sent join request to {target_group.name}. The owner will be notified by email."
-                    )
                 else:
                     print(f"Failed to send join request. Status: {response.status_code}, Response: {response.text}")
                     self.error = f"Failed to send join request: {response.text}"
