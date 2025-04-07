@@ -1334,6 +1334,10 @@ class ChatState(rx.State):
                             content = msg.get("content", "")
                             sent_at = msg.get("sent_at", "")
                             
+                            # Ensure content is not None
+                            if content is None:
+                                content = ""
+                            
                             # Check if we need to update our username from message data
                             if self.username == "user" and self.auth_token:
                                 # If we have a token, we can try to identify which messages are ours
@@ -1486,6 +1490,10 @@ class ChatState(rx.State):
                 for msg in sorted_messages:
                     sender = msg.get("sender", {}).get("username", "unknown")
                     content = msg.get("content", "")
+                    
+                    # Ensure content is not None
+                    if content is None:
+                        content = ""
                     
                     # Determine if the message is from the current user
                     is_current_user = sender == self.username
@@ -1998,10 +2006,13 @@ def rooms_list() -> rx.Component:
     )
 
 def message_display(sender: str, message: str) -> rx.Component:
-    # Just check if the message string starts with "/_upload"
+    # First check if message is None or empty and provide a default
+    safe_message = message if message is not None else ""
+    
+    # Now check if the message string starts with "/_upload"
     # Without using rx.is_instance since it doesn't exist in this Reflex version
     is_upload = rx.cond(
-        message.startswith("/_upload"),
+        safe_message.startswith("/_upload"),
         True,
         False
     )
@@ -2036,12 +2047,12 @@ def message_display(sender: str, message: str) -> rx.Component:
                 rx.cond(
                     is_upload,
                     rx.image(
-                        src=rx.cond(message != "", message, ""),
+                        src=rx.cond(safe_message != "", safe_message, ""),
                         max_width="200px",
                         border_radius="15px"
                     ),
                     rx.text(
-                        rx.cond(message != "", message, ""), 
+                        rx.cond(safe_message != "", safe_message, ""), 
                         color=rx.cond(is_current_user, "white", "#333333")
                     )
                 ),
