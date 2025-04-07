@@ -1009,16 +1009,18 @@ class PasswordResetRequestView(generics.GenericAPIView):
                 # Create email content
                 email_subject = "Reset your password"
                 email_body = f"""
-                Hi {user.username},
-                
-                You requested a password reset for your account. Please follow this link to reset your password:
-                
-                {reset_url}
-                
-                If you didn't request this, you can safely ignore this email.
-                
-                Thanks,
-                Your Application Team
+                    <html>
+                    <body>
+                    <h2>Password Reset Request</h2>
+                    <p>Hi {user.username},</p>
+                    <p>You requested a password reset for your account. Please click the link below to reset your password:</p>
+                    <p><a href="{reset_url}">Reset Password</a></p>
+                    <p>If you didn't request this, please ignore this email.</p>
+                    <p>This link will expire in 1 hour.</p>
+                    <br>
+                    <p>Best regards,<br>Your Application Team</p>
+                    </body>
+                    </html>
                 """
 
                 # Send email
