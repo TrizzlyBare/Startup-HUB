@@ -997,6 +997,8 @@ class PasswordResetRequestView(generics.GenericAPIView):
 
     # In views.py, modify the PasswordResetRequestView
 
+    from datetime import datetime
+
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
