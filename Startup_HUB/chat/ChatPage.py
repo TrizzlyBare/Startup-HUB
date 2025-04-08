@@ -888,13 +888,15 @@ class ChatState(rx.State):
             
         # Connect to chat WebSocket using JavaScript
         rx.call_script(f"""
+            // Only run on client side
+            if (typeof window === 'undefined') return;
+            
             // Close existing connection if any
             if (window.chatSocket && window.chatSocket.readyState !== WebSocket.CLOSED) {{
                 window.chatSocket.close();
             }}
             
             // Create new WebSocket connection for chat with call functionality
-            // Based on the API docs, the WebSocket URL should be: ws/room/{room_id}/
             const wsBaseUrl = '{self.WS_BASE_URL}';
             const roomId = '{self.current_room_id}';
             const wsUrl = `${{wsBaseUrl}}/room/${{roomId}}/`;
@@ -935,6 +937,40 @@ class ChatState(rx.State):
                         // Handle call response (accept/decline)
                         handleCallResponse(data);
                         break;
+                    case 'start_call':
+                        // Handle incoming call start
+                        console.log('Received start_call notification:', data);
+                        if (data.caller_username !== state.username) {{
+                            console.log('Setting up incoming call');
+                            // Update state in a way that won't cause hydration issues
+                            setTimeout(() => {{
+                                state.current_chat_user = data.caller_username;
+                                state.call_type = data.call_type || 'audio';
+                                state.show_incoming_call = true;
+                                state.call_invitation_id = data.invitation_id;
+                                state.incoming_caller = data.caller_username;
+                                
+                                // Play ringtone
+                                const ringtone = new Audio('/ringtone.mp3');
+                                ringtone.loop = true;
+                                ringtone.play().catch(e => console.log('Error playing ringtone:', e));
+                                window.incomingCallRingtone = ringtone;
+                            }}, 0);
+                        }}
+                        break;
+                    case 'end_call':
+                        // Handle call end
+                        console.log('Received end_call notification:', data);
+                        if (window.incomingCallRingtone) {{
+                            window.incomingCallRingtone.pause();
+                            window.incomingCallRingtone = null;
+                        }}
+                        setTimeout(() => {{
+                            state.show_incoming_call = false;
+                            state.show_calling_popup = false;
+                            state.is_call_connected = false;
+                        }}, 0);
+                        break;
                     case 'error':
                         console.error('Chat WebSocket error:', data.message);
                         state.error_message = data.message;
@@ -963,7 +999,7 @@ class ChatState(rx.State):
                 if (!message) return;
                 
                 // Check if the message is from current user
-                const isCurrentUser = message.sender.username === '{self.username}';
+                const isCurrentUser = message.sender.username === state.username;
                 
                 // Add message to chat history
                 console.log(`Adding message from ${{message.sender.username}}`);
@@ -998,17 +1034,29 @@ class ChatState(rx.State):
                 const callType = data.call_type;
                 const invitationId = data.invitation_id;
                 
-                // Show incoming call notification - you'll need to create this UI component
-                state.current_chat_user = caller;
-                state.call_type = callType;
-                state.show_incoming_call = true;
-                state.call_invitation_id = invitationId;
-                
-                // Play ringtone
-                const ringtone = new Audio('/static/ringtone.mp3');
-                ringtone.loop = true;
-                ringtone.play();
-                window.currentRingtone = ringtone;
+                // Update state in a way that won't cause hydration issues
+                setTimeout(() => {{
+                    // Show incoming call notification
+                    state.current_chat_user = caller;
+                    state.call_type = callType;
+                    state.show_incoming_call = true;
+                    state.call_invitation_id = invitationId;
+                    state.incoming_caller = caller;
+                    
+                    // Play ringtone
+                    const ringtone = new Audio('/ringtone.mp3');
+                    ringtone.loop = true;
+                    ringtone.play().catch(e => console.log('Error playing ringtone:', e));
+                    window.incomingCallRingtone = ringtone;
+                    
+                    // Force UI update
+                    state = {{...state}};
+                    console.log('Call notification state updated:', {{
+                        show_incoming_call: state.show_incoming_call,
+                        current_chat_user: state.current_chat_user,
+                        incoming_caller: state.incoming_caller
+                    }});
+                }}, 0);
             }}
             
             // Function to handle call response
@@ -1018,141 +1066,128 @@ class ChatState(rx.State):
                 // Get response details
                 const response = data.response;
                 
-                if (response === 'accept') {{
-                    // Call was accepted, continue with establishing connection
-                    console.log('Call accepted');
-                    // Hide calling popup and show call UI
-                    state.show_calling_popup = false;
-                    if (state.call_type === 'video') {{
-                        state.show_video_popup = true;
-                    }} else {{
-                        state.show_call_popup = true;
+                // Update state in a way that won't cause hydration issues
+                setTimeout(() => {{
+                    if (response === 'accept') {{
+                        // Call was accepted, continue with establishing connection
+                        console.log('Call accepted');
+                        // Hide calling popup and show call UI
+                        state.show_calling_popup = false;
+                        if (state.call_type === 'video') {{
+                            state.show_video_popup = true;
+                        }} else {{
+                            state.show_call_popup = true;
+                        }}
+                        // Force UI update
+                        state = {{...state}};
+                    }} else if (response === 'decline') {{
+                        // Call was declined
+                        console.log('Call declined');
+                        // Hide calling popup
+                        state.show_calling_popup = false;
+                        state.error_message = 'Call declined';
+                        state.incoming_caller = '';
+                        
+                        // Stop media streams
+                        if (window.localStream) {{
+                            window.localStream.getTracks().forEach(track => track.stop());
+                        }}
+                        // Force UI update
+                        state = {{...state}};
                     }}
-                }} else if (response === 'decline') {{
-                    // Call was declined
-                    console.log('Call declined');
-                    // Hide calling popup
-                    state.show_calling_popup = false;
-                    state.error_message = 'Call declined';
-                    
-                    // Stop media streams
-                    if (window.localStream) {{
-                        window.localStream.getTracks().forEach(track => track.stop());
-                    }}
-                }}
+                }}, 0);
             }}
         """)
         self.is_connected = True
 
     @rx.event
     async def initialize_peer_connection(self):
-        """Initialize WebRTC peer connection."""
-        # First get WebRTC configuration if needed
-        if not self.webrtc_config:
-            await self.get_webrtc_config()
-            
+        """Initialize WebRTC peer connection with debug logging."""
+        print("[WebRTC Debug] Initializing peer connection")
         rx.call_script("""
-            // Initialize WebRTC peer connection
-            function initializePeerConnection() {
-                // Convert ice_servers format to RTCConfiguration
-                const iceServers = state.ice_servers.map(server => ({
-                    urls: server.urls
-                }));
-                
-                // If no ice servers are available, use Google's public STUN servers
-                if (iceServers.length === 0) {
-                    iceServers.push({
-                        urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302']
-                    });
-                }
-                
-                // Create RTCPeerConnection
-                window.peerConnection = new RTCPeerConnection({
-                    iceServers: iceServers
-                });
-                
-                // Handle ICE candidate events
-                window.peerConnection.onicecandidate = event => {
-                    if (event.candidate) {
-                        // Send ICE candidate to remote peer via signaling server
-                        if (window.signalingSocket && window.signalingSocket.readyState === WebSocket.OPEN) {
-                            window.signalingSocket.send(JSON.stringify({
-                                type: 'ice_candidate',
-                                candidate: event.candidate
-                            }));
-                        }
-                    }
-                };
-                
-                // Handle ICE connection state changes
-                window.peerConnection.oniceconnectionstatechange = event => {
-                    console.log('ICE connection state:', window.peerConnection.iceConnectionState);
-                    if (window.peerConnection.iceConnectionState === 'connected' || 
-                        window.peerConnection.iceConnectionState === 'completed') {
-                        state.is_call_connected = true;
-                        state.show_calling_popup = false;
-                    } else if (window.peerConnection.iceConnectionState === 'disconnected' || 
-                               window.peerConnection.iceConnectionState === 'failed' || 
-                               window.peerConnection.iceConnectionState === 'closed') {
-                        state.is_call_connected = false;
-                    }
-                };
-                
-                // Handle track events (remote streams)
-                window.peerConnection.ontrack = event => {
-                    console.log('Remote track received:', event.track.kind);
-                    // Set the remote stream
-                    window.remoteStream = event.streams[0];
+            // WebRTC Debug Logger
+            const webrtcDebug = {
+                log: function(message, data = null) {
+                    const timestamp = new Date().toISOString();
+                    console.log(`[WebRTC Debug] ${timestamp} - ${message}`, data || '');
                     
-                    // Update UI with remote stream
-                    if (event.track.kind === 'audio') {
-                        const remoteAudio = document.getElementById('remote-audio');
-                        if (remoteAudio) {
-                            remoteAudio.srcObject = window.remoteStream;
-                        }
-                    } else if (event.track.kind === 'video') {
-                        const remoteVideo = document.getElementById('remote-video');
-                        if (remoteVideo) {
-                            remoteVideo.srcObject = window.remoteStream;
-                        }
+                    // Update debug info in localStorage
+                    const debugInfo = JSON.parse(localStorage.getItem('webrtc_debug') || '[]');
+                    debugInfo.push({ timestamp, message, data });
+                    if (debugInfo.length > 100) debugInfo.shift(); // Keep last 100 logs
+                    localStorage.setItem('webrtc_debug', JSON.stringify(debugInfo));
+                }
+            };
+
+            // Initialize WebRTC with debug
+            try {
+                webrtcDebug.log('Creating RTCPeerConnection');
+                const configuration = {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ]
+                };
+                window.peerConnection = new RTCPeerConnection(configuration);
+
+                // Connection state changes
+                window.peerConnection.onconnectionstatechange = function() {
+                    webrtcDebug.log('Connection state changed', {
+                        state: window.peerConnection.connectionState
+                    });
+                };
+
+                // ICE connection state changes
+                window.peerConnection.oniceconnectionstatechange = function() {
+                    webrtcDebug.log('ICE connection state changed', {
+                        state: window.peerConnection.iceConnectionState
+                    });
+                };
+
+                // ICE gathering state changes
+                window.peerConnection.onicegatheringstatechange = function() {
+                    webrtcDebug.log('ICE gathering state changed', {
+                        state: window.peerConnection.iceGatheringState
+                    });
+                };
+
+                // ICE candidate events
+                window.peerConnection.onicecandidate = function(event) {
+                    if (event.candidate) {
+                        webrtcDebug.log('New ICE candidate', {
+                            candidate: event.candidate.candidate,
+                            sdpMid: event.candidate.sdpMid,
+                            sdpMLineIndex: event.candidate.sdpMLineIndex
+                        });
                     }
                 };
-                
-                // Create data channel for messages
-                window.dataChannel = window.peerConnection.createDataChannel('chat', {
-                    ordered: true
+
+                // Track events
+                window.peerConnection.ontrack = function(event) {
+                    webrtcDebug.log('Track received', {
+                        kind: event.track.kind,
+                        id: event.track.id
+                    });
+                };
+
+                // Negotiation needed events
+                window.peerConnection.onnegotiationneeded = function() {
+                    webrtcDebug.log('Negotiation needed');
+                };
+
+                webrtcDebug.log('RTCPeerConnection initialized successfully');
+            } catch (error) {
+                webrtcDebug.log('Error initializing RTCPeerConnection', {
+                    error: error.toString()
                 });
-                
-                window.dataChannel.onopen = () => {
-                    console.log('Data channel opened');
-                };
-                
-                window.dataChannel.onmessage = event => {
-                    console.log('Data channel message:', event.data);
-                    // Process data channel messages if needed
-                };
-                
-                window.peerConnection.ondatachannel = event => {
-                    window.receiveChannel = event.channel;
-                    window.receiveChannel.onmessage = event => {
-                        console.log('Received message:', event.data);
-                        // Process received messages if needed
-                    };
-                };
-                
-                return window.peerConnection;
-            }
-            
-            // Initialize peer connection if it doesn't exist
-            if (!window.peerConnection) {
-                window.peerConnection = initializePeerConnection();
+                console.error('Error initializing peer connection:', error);
             }
         """)
-        
+
     @rx.event
     async def start_call(self):
-        """Start an audio call in the current room."""
+        """Start an audio call with debug logging."""
         if not self.current_room_id:
+            print("[WebRTC Debug] Error: No active chat room")
             self.error_message = "No active chat room"
             return
             
@@ -1160,106 +1195,98 @@ class ChatState(rx.State):
         self.auth_token = await self.get_token()
         
         if not self.auth_token:
-            print("Not authenticated - cannot start call")
+            print("[WebRTC Debug] Error: Not authenticated")
             self.error_message = "Not authenticated. Please log in."
             return
             
         try:
-            # 1. Get WebRTC configuration
-            await self.get_webrtc_config()
-            
-            # 2. Connect to signaling WebSocket
-            await self.connect_webrtc_signaling()
-            
-            # 3. Initialize peer connection
+            print("[WebRTC Debug] Starting audio call initialization")
+            # Initialize WebRTC peer connection
             await self.initialize_peer_connection()
             
-            # 4. Set up the media stream and start call
-            self.call_type = "audio"
-            
+            # Get media stream with debug
             rx.call_script("""
-                // Start audio call
-                navigator.mediaDevices.getUserMedia({
-                    audio: true,
-                    video: false
-                }).then(stream => {
-                    // Store local stream
-                    window.localStream = stream;
-                    
-                    // Update UI with local stream
-                    const localAudio = document.getElementById('local-audio');
-                    if (localAudio) {
-                        localAudio.srcObject = stream;
-                    }
-                    
-                    // Add tracks to peer connection
-                    stream.getAudioTracks().forEach(track => {
-                        window.peerConnection.addTrack(track, stream);
-                    });
-                    
-                    // Create and send offer
-                    window.peerConnection.createOffer()
-                        .then(offer => window.peerConnection.setLocalDescription(offer))
-                        .then(() => {
-                            // Send offer to remote peer via signaling server
-                            if (window.signalingSocket && window.signalingSocket.readyState === WebSocket.OPEN) {
-                                window.signalingSocket.send(JSON.stringify({
-                                    type: 'offer',
-                                    offer: window.peerConnection.localDescription
-                                }));
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Error creating offer:', error);
-                            state.error_message = 'Error starting call';
+                webrtcDebug.log('Requesting audio media stream');
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(stream => {
+                        webrtcDebug.log('Audio stream obtained', {
+                            trackCount: stream.getTracks().length,
+                            tracks: stream.getTracks().map(track => ({
+                                kind: track.kind,
+                                id: track.id,
+                                enabled: track.enabled,
+                                muted: track.muted
+                            }))
                         });
-                    
-                    // Show call UI
-                    state.show_call_popup = true;
-                    state.call_duration = 0;
-                    state.show_calling_popup = true;
-                    
-                }).catch(error => {
-                    console.error('Error accessing microphone:', error);
-                    state.error_message = 'Error accessing microphone. Please check your permissions.';
-                });
+                        
+                        window.localStream = stream;
+                        // Add stream to peer connection
+                        stream.getTracks().forEach(track => {
+                            window.peerConnection.addTrack(track, stream);
+                            webrtcDebug.log('Track added to peer connection', {
+                                kind: track.kind,
+                                id: track.id
+                            });
+                        });
+                    })
+                    .catch(error => {
+                        webrtcDebug.log('Error accessing media devices', {
+                            error: error.toString()
+                        });
+                        console.error('Error accessing media devices:', error);
+                        state.error_message = 'Error accessing microphone. Please check permissions.';
+                    });
             """)
             
-            # 5. Notify server about call start using the correct API endpoint
+            print("[WebRTC Debug] Sending start call notification to server")
+            # Send start call notification to server
             headers = {
                 "Authorization": f"Token {self.auth_token}",
                 "Content-Type": "application/json"
             }
             
             async with httpx.AsyncClient() as client:
-                # Using your exact API endpoint format
                 response = await client.post(
                     f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/start_call/",
-                    json={"call_type": "audio"},
+                    json={
+                        "call_type": "audio",
+                        "action": "start"
+                    },
                     headers=headers,
                     follow_redirects=True
                 )
                 
-                if self.debug_log_api_calls:
-                    print(f"Call start API response: {response.status_code}")
+                print(f"[WebRTC Debug] Call start API response: {response.status_code}")
                 
-                # Also send message via WebSocket if we have a connection
-                rx.call_script("""
-                    // Send call notification over chat WebSocket if available
-                    if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {
-                        window.chatSocket.send(JSON.stringify({
-                            type: 'start_call',
-                            call_type: 'audio'
-                        }));
-                    }
-                """)
-                
-            # Start tracking call duration
-            await self.start_call_timer()
-            
+                if response.status_code in [200, 201]:
+                    print("[WebRTC Debug] Call started successfully")
+                    # Show calling popup
+                    self.show_calling_popup = True
+                    self.call_type = "audio"
+                    
+                    # Send WebSocket notification to other participants
+                    rx.call_script(f"""
+                        if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
+                            const notification = {{
+                                type: 'start_call',
+                                call_type: 'audio',
+                                caller_username: '{self.username}',
+                                room_id: '{self.current_room_id}'
+                            }};
+                            webrtcDebug.log('Sending WebSocket notification', notification);
+                            window.chatSocket.send(JSON.stringify(notification));
+                        }}
+                    """)
+                    
+                    # Start call timer
+                    await self.start_call_timer()
+                else:
+                    print(f"[WebRTC Debug] Error starting call: {response.status_code}")
+                    self.error_message = "Failed to start call"
+                    
         except Exception as e:
-            self.error_message = f"Error starting call: {str(e)}"
-            print(f"Error starting call: {str(e)}")
+            print(f"[WebRTC Debug] Error in start_call: {str(e)}")
+            self.error_message = str(e)
 
     @rx.event
     async def start_video_call(self):
@@ -1289,51 +1316,47 @@ class ChatState(rx.State):
             # 4. Set up the media stream and start call
             self.call_type = "video"
             
-            rx.call_script("""
-                // Start video call
-                navigator.mediaDevices.getUserMedia({
+            media_element_id = "local-video" if self.call_type == "video" else "local-audio"
+            use_video = "true" if self.call_type == "video" else "false"
+            rx.call_script(f"""
+                // Get media stream based on call type
+                navigator.mediaDevices.getUserMedia({{
                     audio: true,
-                    video: true
-                }).then(stream => {
+                    video: {use_video}
+                }}).then(stream => {{
                     // Store local stream
                     window.localStream = stream;
                     
                     // Update UI with local stream
-                    const localVideo = document.getElementById('local-video');
-                    if (localVideo) {
-                        localVideo.srcObject = stream;
-                    }
+                    const mediaElement = document.getElementById("{media_element_id}");
+                    if (mediaElement) {{
+                        mediaElement.srcObject = stream;
+                    }}
                     
                     // Add tracks to peer connection
-                    stream.getTracks().forEach(track => {
+                    stream.getTracks().forEach(track => {{
                         window.peerConnection.addTrack(track, stream);
-                    });
+                    }});
                     
-                    // Create and send offer
-                    window.peerConnection.createOffer()
-                        .then(offer => window.peerConnection.setLocalDescription(offer))
-                        .then(() => {
-                            // Send offer to remote peer via signaling server
-                            if (window.signalingSocket && window.signalingSocket.readyState === WebSocket.OPEN) {
-                                window.signalingSocket.send(JSON.stringify({
-                                    type: 'offer',
-                                    offer: window.peerConnection.localDescription
-                                }));
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Error creating offer:', error);
-                            state.error_message = 'Error starting video call';
-                        });
-                    
-                    // Show video call UI
-                    state.show_video_popup = true;
-                    state.show_calling_popup = true;
-                    
-                }).catch(error => {
-                    console.error('Error accessing camera/microphone:', error);
-                    state.error_message = 'Error accessing camera/microphone. Please check your permissions.';
-                });
+                    // Show appropriate call UI
+                    state.show_incoming_call = false;
+                    state.show_call_popup = true;
+                    if ("{self.call_type}" === "video") {{
+                        state.show_video_popup = true;
+                    }}
+                }}).catch(error => {{
+                    console.error("Error accessing media devices:", error);
+                    state.error_message = "Error accessing media devices. Please check your permissions.";
+                    // Clean up on error
+                    if (window.peerConnection) {{
+                        window.peerConnection.close();
+                        window.peerConnection = null;
+                    }}
+                    if (window.localStream) {{
+                        window.localStream.getTracks().forEach(track => track.stop());
+                        window.localStream = null;
+                    }}
+                }});
             """)
             
             # 5. Notify server about call start using the correct API endpoint
@@ -1374,65 +1397,82 @@ class ChatState(rx.State):
     
     @rx.event
     async def end_call(self):
-        """End an audio call."""
-        # Stop local media streams
-        rx.call_script("""
-            // Stop all tracks in the local stream
-            if (window.localStream) {
-                window.localStream.getTracks().forEach(track => track.stop());
-                window.localStream = null;
-            }
-            
-            // Close peer connection
-            if (window.peerConnection) {
-                window.peerConnection.close();
-                window.peerConnection = null;
-            }
-            
-            // Close data channel
-            if (window.dataChannel) {
-                window.dataChannel.close();
-                window.dataChannel = null;
-            }
-            
-            // Close signaling connection
-            if (window.signalingSocket) {
-                window.signalingSocket.close();
-                window.signalingSocket = null;
-            }
-        """)
-        
-        self.show_call_popup = False
-        self.show_calling_popup = False
-        self.is_call_connected = False
-        self.signaling_connected = False
-        
-        # Notify server about call end
-        if self.current_room_id:
-            try:
-                # Get authentication token
-                self.auth_token = await self.get_token()
+        """End an audio call with debug logging."""
+        try:
+            print("[WebRTC Debug] Ending call")
+            # Clean up WebRTC resources
+            rx.call_script("""
+                webrtcDebug.log('Cleaning up WebRTC resources');
                 
-                if not self.auth_token:
-                    print("Not authenticated - cannot end call properly")
-                    return
-                    
-                # Set up headers
-                headers = {
-                    "Authorization": f"Token {self.auth_token}",
-                    "Content-Type": "application/json"
+                // Stop all tracks in local stream
+                if (window.localStream) {
+                    webrtcDebug.log('Stopping local stream tracks');
+                    window.localStream.getTracks().forEach(track => {
+                        track.stop();
+                        webrtcDebug.log('Track stopped', {
+                            kind: track.kind,
+                            id: track.id
+                        });
+                    });
+                    window.localStream = null;
                 }
                 
-                # Use AsyncClient for HTTP requests
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/end_call/",
-                        headers=headers,
-                        follow_redirects=True
-                    )
-            except Exception as e:
-                print(f"Error ending call: {str(e)}")
-        yield
+                // Close peer connection
+                if (window.peerConnection) {
+                    webrtcDebug.log('Closing peer connection');
+                    window.peerConnection.close();
+                    window.peerConnection = null;
+                }
+                
+                webrtcDebug.log('WebRTC cleanup completed');
+            """)
+            
+            print("[WebRTC Debug] Sending end call notification to server")
+            # Send end call notification to server
+            headers = {
+                "Authorization": f"Token {self.auth_token}",
+                "Content-Type": "application/json"
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/start_call/",
+                    json={
+                        "call_type": "audio",
+                        "action": "end"
+                    },
+                    headers=headers,
+                    follow_redirects=True
+                )
+                
+                print(f"[WebRTC Debug] Call end API response: {response.status_code}")
+                
+                if response.status_code in [200, 201]:
+                    print("[WebRTC Debug] Call ended successfully")
+                    # Update UI state
+                    self.show_calling_popup = False
+                    self.show_call_popup = False
+                    self.call_duration = 0
+                    
+                    # Send WebSocket notification
+                    rx.call_script(f"""
+                        if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
+                            const notification = {{
+                                type: 'end_call',
+                                call_type: 'audio',
+                                room_id: '{self.current_room_id}'
+                            }};
+                            webrtcDebug.log('Sending end call WebSocket notification', notification);
+                            window.chatSocket.send(JSON.stringify(notification));
+                        }}
+                    """)
+                else:
+                    print(f"[WebRTC Debug] Error ending call: {response.status_code}")
+                    self.error_message = "Failed to end call"
+                    
+        except Exception as e:
+            print(f"[WebRTC Debug] Error in end_call: {str(e)}")
+            self.error_message = str(e)
 
     @rx.event
     async def end_video_call(self):
@@ -2084,7 +2124,6 @@ class ChatState(rx.State):
             }
             
             async with httpx.AsyncClient() as client:
-                # Send call response using REST API with your exact API format
                 response = await client.post(
                     f"{self.API_BASE_URL}/communication/call-response/",
                     json={
@@ -2095,15 +2134,18 @@ class ChatState(rx.State):
                     follow_redirects=True
                 )
                 
+                if response.status_code not in [200, 201]:
+                    raise Exception(f"Failed to accept call: {response.status_code}")
+                
                 if self.debug_log_api_calls:
                     print(f"Call accept API response: {response.status_code}")
             
-            # 2. Also send response via WebSocket
+            # 2. Stop ringtone and send WebSocket response
             rx.call_script(f"""
                 // Stop ringtone if playing
-                if (window.currentRingtone) {{
-                    window.currentRingtone.pause();
-                    window.currentRingtone = null;
+                if (window.incomingCallRingtone) {{
+                    window.incomingCallRingtone.pause();
+                    window.incomingCallRingtone = null;
                 }}
                 
                 // Send call response over WebSocket
@@ -2122,10 +2164,11 @@ class ChatState(rx.State):
             # 4. Initialize peer connection
             await self.initialize_peer_connection()
             
-            # 5. Set up media based on call type and prepare to receive the call
+            # 5. Set up media based on call type
             if self.call_type == "video":
+                # Video call setup
                 rx.call_script("""
-                    // Start video call
+                    // Get media stream for video call
                     navigator.mediaDevices.getUserMedia({
                         audio: true,
                         video: true
@@ -2134,9 +2177,9 @@ class ChatState(rx.State):
                         window.localStream = stream;
                         
                         // Update UI with local stream
-                        const localVideo = document.getElementById('local-video');
-                        if (localVideo) {
-                            localVideo.srcObject = stream;
+                        const mediaElement = document.getElementById('local-video');
+                        if (mediaElement) {
+                            mediaElement.srcObject = stream;
                         }
                         
                         // Add tracks to peer connection
@@ -2146,15 +2189,26 @@ class ChatState(rx.State):
                         
                         // Show video call UI
                         state.show_incoming_call = false;
+                        state.show_call_popup = true;
                         state.show_video_popup = true;
                     }).catch(error => {
-                        console.error('Error accessing camera/microphone:', error);
-                        state.error_message = 'Error accessing camera/microphone. Please check your permissions.';
+                        console.error('Error accessing video devices:', error);
+                        state.error_message = 'Error accessing camera. Please check your permissions.';
+                        // Clean up on error
+                        if (window.peerConnection) {
+                            window.peerConnection.close();
+                            window.peerConnection = null;
+                        }
+                        if (window.localStream) {
+                            window.localStream.getTracks().forEach(track => track.stop());
+                            window.localStream = null;
+                        }
                     });
                 """)
             else:
+                # Audio call setup
                 rx.call_script("""
-                    // Start audio call
+                    // Get media stream for audio call
                     navigator.mediaDevices.getUserMedia({
                         audio: true,
                         video: false
@@ -2163,31 +2217,43 @@ class ChatState(rx.State):
                         window.localStream = stream;
                         
                         // Update UI with local stream
-                        const localAudio = document.getElementById('local-audio');
-                        if (localAudio) {
-                            localAudio.srcObject = stream;
+                        const mediaElement = document.getElementById('local-audio');
+                        if (mediaElement) {
+                            mediaElement.srcObject = stream;
                         }
                         
                         // Add tracks to peer connection
-                        stream.getAudioTracks().forEach(track => {
+                        stream.getTracks().forEach(track => {
                             window.peerConnection.addTrack(track, stream);
                         });
                         
-                        // Show call UI
+                        // Show audio call UI
                         state.show_incoming_call = false;
                         state.show_call_popup = true;
                     }).catch(error => {
-                        console.error('Error accessing microphone:', error);
+                        console.error('Error accessing audio devices:', error);
                         state.error_message = 'Error accessing microphone. Please check your permissions.';
+                        // Clean up on error
+                        if (window.peerConnection) {
+                            window.peerConnection.close();
+                            window.peerConnection = null;
+                        }
+                        if (window.localStream) {
+                            window.localStream.getTracks().forEach(track => track.stop());
+                            window.localStream = null;
+                        }
                     });
                 """)
-                
+            
             # 6. Start call timer
             await self.start_call_timer()
             
         except Exception as e:
             self.error_message = f"Error accepting call: {str(e)}"
             print(f"Error accepting call: {str(e)}")
+            # Clean up state
+            self.show_incoming_call = False
+            self.call_invitation_id = ""
             
     @rx.event
     async def decline_call(self):
@@ -2212,7 +2278,6 @@ class ChatState(rx.State):
             }
             
             async with httpx.AsyncClient() as client:
-                # Send call response using REST API with your exact API format
                 response = await client.post(
                     f"{self.API_BASE_URL}/communication/call-response/",
                     json={
@@ -2223,15 +2288,18 @@ class ChatState(rx.State):
                     follow_redirects=True
                 )
                 
+                if response.status_code not in [200, 201]:
+                    raise Exception(f"Failed to decline call: {response.status_code}")
+                
                 if self.debug_log_api_calls:
                     print(f"Call decline API response: {response.status_code}")
             
-            # 2. Also send response via WebSocket
+            # 2. Stop ringtone and send WebSocket response
             rx.call_script(f"""
                 // Stop ringtone if playing
-                if (window.currentRingtone) {{
-                    window.currentRingtone.pause();
-                    window.currentRingtone = null;
+                if (window.incomingCallRingtone) {{
+                    window.incomingCallRingtone.pause();
+                    window.incomingCallRingtone = null;
                 }}
                 
                 // Send call response over WebSocket
@@ -2244,14 +2312,19 @@ class ChatState(rx.State):
                 }}
             """)
             
-            # 3. Hide incoming call UI
+            # 3. Clean up state
             self.show_incoming_call = False
             self.call_invitation_id = ""
+            self.incoming_caller = ""
+            self.call_type = "audio"
             
         except Exception as e:
             self.error_message = f"Error declining call: {str(e)}"
             print(f"Error declining call: {str(e)}")
-        
+            # Still clean up state even if there's an error
+            self.show_incoming_call = False
+            self.call_invitation_id = ""
+
     @rx.event
     async def on_room_open(self):
         """Connect to the chat WebSocket when a room is opened."""
@@ -2509,6 +2582,7 @@ class ChatState(rx.State):
         self.signaling_connected = True
 
 def calling_popup() -> rx.Component:
+    """Component for showing the calling popup."""
     return rx.cond(
         ChatState.show_calling_popup,
         rx.box(
@@ -2530,6 +2604,7 @@ def calling_popup() -> rx.Component:
                         font_weight="bold",
                         color="#333333",
                         margin_bottom="10px",
+                        text_align="center",
                     ),
                     rx.text(
                         rx.cond(
@@ -2540,6 +2615,7 @@ def calling_popup() -> rx.Component:
                         font_size="18px",
                         color="#666666",
                         margin_bottom="20px",
+                        text_align="center",
                     ),
                     rx.hstack(
                         rx.button(
@@ -2561,30 +2637,42 @@ def calling_popup() -> rx.Component:
                             },
                             transition="all 0.2s ease-in-out",
                         ),
+                        justify_content="center",
+                        width="100%",
                     ),
                     align_items="center",
                     justify_content="center",
+                    width="340px",
+                    height="400px",
+                    bg="white",
+                    border_radius="20px",
+                    padding="30px",
+                    position="fixed",
+                    top="50%",
+                    left="50%",
+                    transform="translate(-50%, -50%)",
+                    box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
+                    z_index="1000",
+                    css={
+                        "@keyframes pulse": {
+                            "0%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0.7)"},
+                            "70%": {"box-shadow": "0 0 0 10px rgba(128, 208, 234, 0)"},
+                            "100%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0)"}
+                        }
+                    },
                 ),
-                width="340px",
-                height="400px",
-                bg="white",
-                border_radius="20px",
-                padding="30px",
-                position="fixed",
-                top="50%",
-                left="50%",
-                transform="translate(-50%, -50%)",
-                box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
-                z_index="1000",
-                css={
-                    "@keyframes pulse": {
-                        "0%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0.7)"},
-                        "70%": {"box-shadow": "0 0 0 10px rgba(128, 208, 234, 0)"},
-                        "100%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0)"}
-                    }
-                },
             ),
+            position="fixed",
+            top="0",
+            left="0",
+            width="100%",
+            height="100%",
+            bg="rgba(0, 0, 0, 0.5)",
+            display="flex",
+            justify_content="center",
+            align_items="center",
         ),
+        None,
     )
 
 def call_popup() -> rx.Component:
@@ -2630,12 +2718,12 @@ def call_popup() -> rx.Component:
                         margin_bottom="10px",
                     ),
                     # Call duration - fix format string
-                    rx.text(
-                        "Call time: " + str(ChatState.call_duration // 60) + ":" + str(ChatState.call_duration % 60),
-                        color="gray.500",
-                        font_size="18px",
-                        margin_bottom="15px",
-                    ),
+                    # rx.text(
+                    #     "Call time: " + str(ChatState.call_duration // 60) + ":" + str(ChatState.call_duration % 60),
+                    #     color="gray.500",
+                    #     font_size="18px",
+                    #     margin_bottom="15px",
+                    # ),
                     rx.hstack(
                         rx.button(
                             rx.cond(
@@ -3554,7 +3642,7 @@ def user_header() -> rx.Component:
     )
 
 def incoming_call_popup() -> rx.Component:
-    """Popup component for incoming calls."""
+    """Component for showing incoming call popup."""
     return rx.cond(
         ChatState.show_incoming_call,
         rx.box(
@@ -3576,6 +3664,7 @@ def incoming_call_popup() -> rx.Component:
                         font_weight="bold",
                         color="#333333",
                         margin_bottom="10px",
+                        text_align="center",
                     ),
                     rx.text(
                         rx.cond(
@@ -3586,24 +3675,9 @@ def incoming_call_popup() -> rx.Component:
                         font_size="18px",
                         color="#666666",
                         margin_bottom="20px",
+                        text_align="center",
                     ),
                     rx.hstack(
-                        rx.button(
-                            rx.icon("phone-x"),
-                            on_click=ChatState.decline_call,
-                            border_radius="50%",
-                            bg="#ff4444",
-                            color="white",
-                            width="60px",
-                            height="60px",
-                            padding="0",
-                            margin_right="20px",
-                            _hover={
-                                "bg": "#ff3333",
-                                "transform": "scale(1.1)",
-                            },
-                            transition="all 0.2s ease-in-out",
-                        ),
                         rx.button(
                             rx.icon("phone"),
                             on_click=ChatState.accept_call,
@@ -3614,36 +3688,64 @@ def incoming_call_popup() -> rx.Component:
                             height="60px",
                             padding="0",
                             _hover={
-                                "bg": "#43A047",
+                                "bg": "#45a049",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        rx.button(
+                            rx.icon("phone-off"),
+                            on_click=ChatState.decline_call,
+                            border_radius="50%",
+                            bg="#ff4444",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#ff3333",
                                 "transform": "scale(1.1)",
                             },
                             transition="all 0.2s ease-in-out",
                         ),
                         spacing="4",
+                        justify_content="center",
+                        width="100%",
                     ),
                     align_items="center",
                     justify_content="center",
+                    width="340px",
+                    height="400px",
+                    bg="white",
+                    border_radius="20px",
+                    padding="30px",
+                    position="fixed",
+                    top="50%",
+                    left="50%",
+                    transform="translate(-50%, -50%)",
+                    box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
+                    z_index="1000",
+                    css={
+                        "@keyframes pulse": {
+                            "0%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0.7)"},
+                            "70%": {"box-shadow": "0 0 0 10px rgba(128, 208, 234, 0)"},
+                            "100%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0)"}
+                        }
+                    },
                 ),
-                width="340px",
-                height="400px",
-                bg="white",
-                border_radius="20px",
-                padding="30px",
-                position="fixed",
-                top="50%",
-                left="50%",
-                transform="translate(-50%, -50%)",
-                box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
-                z_index="1000",
-                css={
-                    "@keyframes pulse": {
-                        "0%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0.7)"},
-                        "70%": {"box-shadow": "0 0 0 10px rgba(128, 208, 234, 0)"},
-                        "100%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0)"}
-                    }
-                },
             ),
+            position="fixed",
+            top="0",
+            left="0",
+            width="100%",
+            height="100%",
+            bg="rgba(0, 0, 0, 0.5)",
+            display="flex",
+            justify_content="center",
+            align_items="center",
+            on_click=ChatState.decline_call,  # Click outside to decline
         ),
+        None,
     )
 
 def chat_page() -> rx.Component:
