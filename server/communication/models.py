@@ -260,8 +260,10 @@ class CallInvitation(models.Model):
         return f"Call invite from {self.inviter.username} to {self.invitee.username}"
 
     def is_expired(self):
-        """Check if invitation has expired"""
-        return timezone.now() > self.expires_at
+        """Check if notification has expired"""
+        # Add some buffer time to account for processing delays
+        buffer_seconds = 2
+        return timezone.now() > self.expires_at - timedelta(seconds=buffer_seconds)
 
     def auto_expire(self):
         """Mark invitation as expired if it's past the expiration time"""

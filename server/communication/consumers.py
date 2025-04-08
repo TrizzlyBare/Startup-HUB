@@ -24,12 +24,11 @@ from django.utils import timezone
 from .models import Room, Participant, Message
 from .utils import MediaProcessor
 from django.core.cache import cache
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
-
-
 
 
 class CommunicationConsumer(AsyncJsonWebsocketConsumer):
@@ -1372,3 +1371,197 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 logger.error(f"Error getting user info: {str(e)}")
                 return None
         return user_info
+
+    # Add these new methods to the ChatConsumer class
+
+    async def room_call_announcement(self, event):
+        """Send room call announcement notification to WebSocket"""
+        await self.send_json(
+            {"type": "room_call_announcement", "notification": event["notification"]}
+        )
+
+    # Enhance the existing handle_incoming_call_status method
+    async def handle_incoming_call_status(self, content):
+        """Handle updates to incoming call notifications"""
+        notification_id = content.get("notification_id")
+        status = content.get("status")
+
+        if not notification_id or not status:
+            await self.send_json(
+                {"type": "error", "message": "notification_id and status are required"}
+            )
+            return
+
+        if status not in ["seen", "accepted", "declined", "missed", "ended"]:
+            await self.send_json(
+                {
+                    "type": "error",
+                    "message": f"Invalid status: {status}. Must be one of: seen, accepted, declined, missed, ended",
+                }
+            )
+            return
+
+        # Update notification status in database
+        notification = await self.update_call_notification_status(
+            notification_id, status
+        )
+
+        if notification:
+            # Notify caller about status update
+            caller_group_name = f"user_{notification['caller_id']}"
+            await self.channel_layer.group_send(
+                caller_group_name,
+                {"type": "call_notification_update", "notification": notification},
+            )
+
+            # If accepted, notify room about call being answered
+            if status == "accepted":
+                room_id = notification["room_id"]
+                call_message = await self.create_call_answered_message(
+                    room_id, notification["caller_id"], notification["call_type"]
+                )
+
+                if call_message:
+                    room_group_name = f"room_{room_id}"
+                    await self.channel_layer.group_send(
+                        room_group_name,
+                        {"type": "call_notification", "call": call_message},
+                    )
+
+            # If ended, notify about call ending
+            if status == "ended":
+                room_id = notification["room_id"]
+                # Update call message in database
+                call_message = await self.update_call_ended_message(
+                    room_id, notification["caller_id"], notification["call_type"]
+                )
+
+                if call_message:
+                    room_group_name = f"room_{room_id}"
+                    await self.channel_layer.group_send(
+                        room_group_name, {"type": "call_ended", "call": call_message}
+                    )
+        else:
+            await self.send_json(
+                {
+                    "type": "error",
+                    "message": f"Failed to update notification {notification_id}",
+                }
+            )
+
+    # Add new helper method for ending calls
+    @database_sync_to_async
+    def update_call_ended_message(self, room_id, caller_id, call_type):
+        """Update call message when a call is ended"""
+        from .models import Message, Room
+        from django.contrib.auth import get_user_model
+        from django.utils import timezone
+
+        User = get_user_model()
+
+        try:
+            room = Room.objects.get(id=room_id)
+            caller = User.objects.get(id=caller_id)
+
+            # Find the most recent answered call message
+            call_message = (
+                Message.objects.filter(
+                    room=room,
+                    sender=caller,
+                    message_type="call",
+                    call_type=call_type,
+                    call_status="answered",
+                )
+                .order_by("-sent_at")
+                .first()
+            )
+
+            if call_message:
+                # Calculate duration
+                duration = int((timezone.now() - call_message.sent_at).total_seconds())
+                call_message.call_duration = duration
+                call_message.call_status = "ended"
+                call_message.save()
+
+                return {
+                    "id": str(call_message.id),
+                    "room_id": str(call_message.room.id),
+                    "sender_id": str(call_message.sender.id),
+                    "sender": {
+                        "id": str(call_message.sender.id),
+                        "username": call_message.sender.username,
+                    },
+                    "message_type": "call",
+                    "call_type": call_type,
+                    "call_status": "ended",
+                    "call_duration": duration,
+                    "sent_at": call_message.sent_at.isoformat(),
+                }
+            return None
+        except (Room.DoesNotExist, User.DoesNotExist) as e:
+            logger.error(f"Room or user not found: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"Error ending call message: {str(e)}")
+            return None
+
+    @database_sync_to_async
+    def update_call_notification_status(self, notification_id, status):
+        """Update incoming call notification status"""
+        from .models import IncomingCallNotification
+
+        try:
+            # The error is here - fix the query structure to avoid positional args after keyword args
+            # The problem is likely in how you're constructing the filter conditions
+
+            # First get the notification by ID
+            try:
+                notification = IncomingCallNotification.objects.get(id=notification_id)
+
+                # Then check permissions separately
+                if notification.recipient != self.user:
+                    # Allow caller to update only for 'ended' status
+                    if (
+                        notification.caller != self.user
+                        or status != "ended"
+                        or notification.status != "accepted"
+                    ):
+                        logger.warning(
+                            f"User {self.user.id} not authorized to update notification {notification_id}"
+                        )
+                        return None
+
+                # Check if expired
+                old_status = notification.status
+                if notification.is_expired() and status not in ["missed", "ended"]:
+                    notification.status = "expired"
+                else:
+                    notification.status = status
+
+                notification.save()
+
+                logger.info(
+                    f"Updated call notification {notification_id} status from {old_status} to {status}"
+                )
+
+                # Return serialized notification
+                return {
+                    "id": str(notification.id),
+                    "caller_id": str(notification.caller.id),
+                    "caller_username": notification.caller.username,
+                    "recipient_id": str(notification.recipient.id),
+                    "recipient_username": notification.recipient.username,
+                    "room_id": str(notification.room.id),
+                    "room_name": notification.room.name,
+                    "call_type": notification.call_type,
+                    "status": notification.status,
+                    "created_at": notification.created_at.isoformat(),
+                    "expires_at": notification.expires_at.isoformat(),
+                }
+            except IncomingCallNotification.DoesNotExist:
+                logger.warning(f"Notification {notification_id} not found")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error updating notification status: {str(e)}")
+            return None

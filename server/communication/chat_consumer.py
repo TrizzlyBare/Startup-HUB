@@ -265,17 +265,33 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         from .models import IncomingCallNotification
 
         try:
-            notification = IncomingCallNotification.objects.get(
-                id=notification_id, recipient=self.user  # Must be the recipient
-            )
+            # Find the notification
+            notification = IncomingCallNotification.objects.get(id=notification_id)
+
+            # Check permissions - either recipient can update any status, or caller can update to 'ended' if status is 'accepted'
+            if notification.recipient != self.user:
+                if (
+                    notification.caller != self.user
+                    or status != "ended"
+                    or notification.status != "accepted"
+                ):
+                    logger.warning(
+                        f"User {self.user.id} not authorized to update notification {notification_id}"
+                    )
+                    return None
 
             # Check if expired
-            if notification.is_expired() and status != "missed":
+            old_status = notification.status
+            if notification.is_expired() and status not in ["missed", "ended"]:
                 notification.status = "expired"
             else:
                 notification.status = status
 
             notification.save()
+
+            logger.info(
+                f"Updated call notification {notification_id} status from {old_status} to {status}"
+            )
 
             # Return serialized notification
             return {
@@ -292,9 +308,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 "expires_at": notification.expires_at.isoformat(),
             }
         except IncomingCallNotification.DoesNotExist:
-            logger.warning(
-                f"Notification {notification_id} not found or user is not the recipient"
-            )
+            logger.warning(f"Notification {notification_id} not found")
             return None
         except Exception as e:
             logger.error(f"Error updating notification status: {str(e)}")

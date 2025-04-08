@@ -1212,7 +1212,6 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
 
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = IncomingCallNotificationSerializer
-    queryset = IncomingCallNotification.objects.all()
 
     def get_queryset(self):
         """Filter notifications to only those for the current user"""
@@ -1223,7 +1222,7 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
     def list(self, request):
         """Get active and recent incoming call notifications for the current user"""
         # Add debug logging
-        logger.debug(f"Retrieving call notifications for user {request.user.id}")
+        logger.info(f"Retrieving call notifications for user {request.user.id}")
 
         # First, expire any outdated notifications
         self._expire_outdated_notifications(request.user)
@@ -1239,44 +1238,31 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
         one_hour_ago = timezone.now() - timedelta(hours=1)
         recent_notifications = (
             IncomingCallNotification.objects.filter(
-                recipient=request.user, created_at__gte=one_hour_ago
+                Q(recipient=request.user) | Q(caller=request.user),
+                created_at__gte=one_hour_ago,
             )
             .exclude(id__in=[n.id for n in active_notifications])
             .order_by("-created_at")
         )
 
         # Debug logging
-        logger.debug(f"Found {active_notifications.count()} active notifications")
-        logger.debug(f"Found {recent_notifications.count()} recent notifications")
+        logger.info(f"Found {active_notifications.count()} active notifications")
+        logger.info(f"Found {recent_notifications.count()} recent notifications")
 
-        # Combine and serialize
+        # Serialize notifications
+        active_serializer = self.get_serializer(active_notifications, many=True)
+        recent_serializer = self.get_serializer(recent_notifications, many=True)
         all_notifications = list(active_notifications) + list(recent_notifications)
-        serializer = IncomingCallNotificationSerializer(all_notifications, many=True)
+        all_serializer = self.get_serializer(all_notifications, many=True)
 
         # Return with separate sections for active and recent
         return Response(
             {
-                "active": IncomingCallNotificationSerializer(
-                    active_notifications, many=True
-                ).data,
-                "recent": IncomingCallNotificationSerializer(
-                    recent_notifications, many=True
-                ).data,
-                "all": serializer.data,
+                "active": active_serializer.data,
+                "recent": recent_serializer.data,
+                "all": all_serializer.data,
             }
         )
-
-    def _expire_outdated_notifications(self, user):
-        """Helper method to expire outdated notifications"""
-        now = timezone.now()
-        expired_count = IncomingCallNotification.objects.filter(
-            recipient=user, status="pending", expires_at__lte=now
-        ).update(status="expired")
-
-        if expired_count > 0:
-            logger.debug(
-                f"Expired {expired_count} outdated notifications for user {user.id}"
-            )
 
     def create(self, request):
         """Create a new incoming call notification"""
@@ -1286,7 +1272,7 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
         device_token = request.data.get("device_token")
 
         # Add detailed debug logging
-        logger.debug(
+        logger.info(
             f"Creating call notification: caller={request.user.id}, recipient={recipient_id}, room={room_id}"
         )
 
@@ -1307,7 +1293,7 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
             User = get_user_model()
             try:
                 recipient = User.objects.get(id=recipient_id)
-                logger.debug(f"Found recipient: {recipient.username}")
+                logger.info(f"Found recipient: {recipient.username}")
             except User.DoesNotExist:
                 logger.error(f"Recipient user {recipient_id} not found")
                 return Response(
@@ -1318,7 +1304,7 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
             # Get room
             try:
                 room = Room.objects.get(id=room_id)
-                logger.debug(f"Found room: {room.name}")
+                logger.info(f"Found room: {room.name}")
             except Room.DoesNotExist:
                 logger.error(f"Room {room_id} not found")
                 return Response(
@@ -1352,7 +1338,7 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
             )
 
             if existing_notifications.exists():
-                logger.debug(
+                logger.info(
                     f"Cancelling {existing_notifications.count()} existing notifications"
                 )
                 existing_notifications.update(status="expired")
@@ -1371,10 +1357,10 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
                     device_token=device_token,
                 )
 
-                logger.debug(f"Created notification: {notification.id}")
+                logger.info(f"Created notification: {notification.id}")
 
             # Serialize notification
-            serializer = IncomingCallNotificationSerializer(notification)
+            serializer = self.get_serializer(notification)
 
             # Send notification via WebSocket to user
             channel_layer = get_channel_layer()
@@ -1384,16 +1370,23 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
                 user_group_name,
                 {"type": "incoming_call", "notification": serializer.data},
             )
-            logger.debug(f"Sent WebSocket notification to {user_group_name}")
+            logger.info(f"Sent WebSocket notification to {user_group_name}")
 
-            # If it's a direct room, also send to room group
+            # Also send as room_call_announcement to support frontend integration
+            room_group_name = f"room_{room.id}"
+            async_to_sync(channel_layer.group_send)(
+                room_group_name,
+                {"type": "room_call_announcement", "notification": serializer.data},
+            )
+            logger.info(f"Sent room_call_announcement to {room_group_name}")
+
+            # If it's a direct room, also send to room group as incoming_call
             if room.room_type == "direct":
-                room_group_name = f"room_{room.id}"
                 async_to_sync(channel_layer.group_send)(
                     room_group_name,
                     {"type": "incoming_call", "notification": serializer.data},
                 )
-                logger.debug(f"Sent WebSocket notification to room {room_group_name}")
+                logger.info(f"Sent WebSocket notification to room {room_group_name}")
 
             # Send push notification for mobile devices
             if device_token:
@@ -1405,7 +1398,7 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
                     room_name=room.name,
                     notification_id=notification.id,
                 )
-                logger.debug(f"Push notification sent: {push_sent}")
+                logger.info(f"Push notification sent: {push_sent}")
 
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -1418,31 +1411,43 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+    @transaction.atomic
     def update(self, request, pk=None):
         """Update notification status (accept, decline, etc.)"""
         try:
             # Find notification
             notification = self.get_object()
 
-            # Only recipient can update status
-            if request.user != notification.recipient:
+            # Only recipient can update status (with the exception of 'ended' status)
+            status_action = request.data.get("status")
+            if request.user != notification.recipient and (
+                status_action != "ended" or notification.status != "accepted"
+            ):
                 return Response(
-                    {"error": "Only the recipient can update notification status"},
+                    {
+                        "error": "Only the recipient can update notification status (except ending an accepted call)"
+                    },
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
             # Check if expired
-            if notification.is_expired():
+            if notification.is_expired() and status_action not in ["missed", "ended"]:
                 notification.status = "expired"
                 notification.save()
                 serializer = self.get_serializer(notification)
                 return Response(serializer.data)
 
             # Update status
-            status_action = request.data.get("status")
-            if status_action in ["seen", "accepted", "declined", "missed"]:
+            if status_action in ["seen", "accepted", "declined", "missed", "ended"]:
+                old_status = notification.status
                 notification.status = status_action
                 notification.save()
+
+                logger.info(
+                    f"Updated call notification {notification.id} status from {old_status} to {status_action}"
+                )
+
+                # Remaining implementation...
 
                 # Notify caller via WebSocket about the status update
                 channel_layer = get_channel_layer()
@@ -1460,9 +1465,6 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
 
                 # If accepted, create a Call message in the room
                 if status_action == "accepted":
-                    from .models import Message
-
-                    # Create call message
                     message = Message.objects.create(
                         room=notification.room,
                         sender=notification.caller,
@@ -1482,11 +1484,53 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
                         {"type": "call_notification", "call": message_serializer.data},
                     )
 
+                    logger.info(
+                        f"Created answered call message and sent notification for call {notification.id}"
+                    )
+
+                # If ended, calculate duration if it was accepted before
+                if status_action == "ended" and old_status == "accepted":
+                    # Find the related call message and update it
+                    try:
+                        call_message = (
+                            Message.objects.filter(
+                                room=notification.room,
+                                sender=notification.caller,
+                                message_type="call",
+                                call_type=notification.call_type,
+                                call_status="answered",
+                            )
+                            .order_by("-sent_at")
+                            .first()
+                        )
+
+                        if call_message:
+                            duration = int(
+                                (timezone.now() - call_message.sent_at).total_seconds()
+                            )
+                            call_message.call_duration = duration
+                            call_message.call_status = "ended"
+                            call_message.save()
+
+                            # Notify room about call ending
+                            message_serializer = MessageSerializer(call_message)
+                            room_group_name = f"room_{notification.room.id}"
+                            async_to_sync(channel_layer.group_send)(
+                                room_group_name,
+                                {"type": "call_ended", "call": message_serializer.data},
+                            )
+
+                            logger.info(
+                                f"Updated call message with duration {duration}s and sent call_ended notification"
+                            )
+                    except Exception as e:
+                        logger.error(f"Error updating call message: {str(e)}")
+
                 return Response(serializer.data)
             else:
                 return Response(
                     {
-                        "error": f"Invalid status: {status_action}. Must be one of: seen, accepted, declined, missed"
+                        "error": f"Invalid status: {status_action}. Must be one of: seen, accepted, declined, missed, ended"
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
@@ -1497,6 +1541,16 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
                 {"error": f"Failed to update notification: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+    def _expire_outdated_notifications(self, user):
+        """Helper method to expire outdated notifications"""
+        now = timezone.now()
+        expired_count = IncomingCallNotification.objects.filter(
+            status="pending", expires_at__lte=now
+        ).update(status="expired")
+
+        if expired_count > 0:
+            logger.info(f"Expired {expired_count} outdated notifications")
 
     @action(detail=False, methods=["GET"])
     def debug(self, request):
@@ -1540,10 +1594,10 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
                 "total_count": notifications.count(),
                 "status_counts": status_counts,
                 "should_be_expired_count": expired_count,
-                "expired_notifications": IncomingCallNotificationSerializer(
+                "expired_notifications": self.get_serializer(
                     expired_notifications, many=True
                 ).data,
-                "non_expired_notifications": IncomingCallNotificationSerializer(
+                "non_expired_notifications": self.get_serializer(
                     non_expired_notifications, many=True
                 ).data,
                 "current_time": now.isoformat(),
@@ -1564,4 +1618,43 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
 
         return Response(
             {"expired_count": count, "message": f"Expired {count} notifications"}
+        )
+
+    @action(detail=False, methods=["POST"])
+    def expire_all(self, request):
+        """Expire all pending notifications (for debugging)"""
+        if not request.user.is_staff:
+            return Response(
+                {"error": "Staff access required"}, status=status.HTTP_403_FORBIDDEN
+            )
+
+        count = IncomingCallNotification.objects.filter(
+            Q(recipient=request.user) | Q(caller=request.user), status="pending"
+        ).update(status="expired")
+
+        return Response(
+            {"expired_count": count, "message": f"Expired {count} notifications"}
+        )
+
+    # Add the new method here
+    @action(detail=False, methods=["GET"])
+    def active_calls(self, request):
+        """Show currently active calls for debugging"""
+        if not request.user.is_staff:
+            return Response(
+                {"error": "Staff access required"}, status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get all active notifications
+        active = IncomingCallNotification.objects.filter(
+            status__in=["pending", "seen", "accepted"], expires_at__gt=timezone.now()
+        ).order_by("-created_at")
+
+        serializer = self.get_serializer(active, many=True)
+        return Response(
+            {
+                "count": active.count(),
+                "calls": serializer.data,
+                "current_time": timezone.now().isoformat(),
+            }
         )
