@@ -2161,8 +2161,8 @@ class ChatState(rx.State):
 
     @rx.event
     async def start_call(self):
-        """Start an audio call with correct field names based on actual API error messages."""
-        print("[CRITICAL DEBUG] Starting audio call with corrected field names")
+        """Start an audio call with support for multiple API field naming conventions."""
+        print("[CRITICAL DEBUG] Starting audio call with both field naming formats")
         
         try:
             # Check if already in a call
@@ -2195,15 +2195,16 @@ class ChatState(rx.State):
             recipients = await self.get_room_recipients(self.current_room_id)
             recipient_id = recipients[0] if recipients else None
             
-            # Create API payload with the CORRECT field names
-            # Based on error message: "room_id is required" (not "room")
+            # Create API payload with BOTH field names to support different API versions
+            # Include both 'room' and 'room_id' to handle different API expectations
             payload = {
                 'recipient_id': recipient_id,
-                'room_id': self.current_room_id,  # Using room_id as specified in the error
+                'room': self.current_room_id,      # For API expecting 'room'
+                'room_id': self.current_room_id,   # For API expecting 'room_id' 
                 'call_type': 'audio',
                 'expires_at': expires_at
             }
-            print(f"[CRITICAL DEBUG] Final corrected payload: {payload}")
+            print(f"[CRITICAL DEBUG] Dual-field payload: {payload}")
             
             # Try with both token formats (Bearer and Token)
             auth_headers = [
@@ -2286,87 +2287,9 @@ class ChatState(rx.State):
             self.show_calling_popup = False
 
     @rx.event
-    async def announce_call_via_websocket(self, call_id: str, room_id: str, room_name: str, call_type: str, is_local_only: bool = False):
-        """Send WebSocket message to announce a call to all users in a room."""
-        print(f"[CRITICAL DEBUG] Announcing {call_type} call via WebSocket, ID: {call_id}")
-        
-        # Get username for notification
-        current_username = await self.get_username()
-        
-        # Set active call info in state
-        self.active_room_call = {
-            "id": call_id,
-            "room_id": room_id,
-            "room_name": room_name,
-            "call_type": call_type,
-            "started_by": current_username,
-            "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "is_local_only": is_local_only
-        }
-        
-        # Use JavaScript to send WebSocket message
-        rx.call_script(f"""
-            if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
-                console.log('[CRITICAL DEBUG] Sending room call announcement via WebSocket');
-                
-                // 1. Send API format message
-                const apiFormatMessage = {{
-                    type: 'room_call_announcement',
-                    notification: {{
-                        id: '{call_id}',
-                        caller: {{
-                            id: 'caller-id',
-                            username: '{current_username}'
-                        }},
-                        room: '{room_id}',
-                        room_name: '{room_name}',
-                        call_type: '{call_type}',
-                        status: 'pending',
-                        created_at: new Date().toISOString(),
-                        expires_at: new Date(Date.now() + 60000).toISOString()
-                    }}
-                }};
-                
-                console.log('[CRITICAL DEBUG] Sending API format message:', JSON.stringify(apiFormatMessage));
-                window.chatSocket.send(JSON.stringify(apiFormatMessage));
-                
-                // 2. Also send legacy format for compatibility
-                setTimeout(() => {{
-                    const legacyMessage = {{
-                        type: 'room_call_announcement',
-                        room_id: '{room_id}',
-                        room_name: '{room_name}',
-                        caller_username: '{current_username}',
-                        call_type: '{call_type}',
-                        invitation_id: '{call_id}'
-                    }};
-                    console.log('[CRITICAL DEBUG] Sending legacy format message:', JSON.stringify(legacyMessage));
-                    window.chatSocket.send(JSON.stringify(legacyMessage));
-                }}, 500);
-                
-                // 3. Also send a system message
-                setTimeout(() => {{
-                    const systemMessage = {{
-                        type: 'message',
-                        message: {{
-                            content: '{current_username} started a {call_type} call',
-                            sender: {{ username: 'System' }},
-                            sent_at: new Date().toISOString()
-                        }}
-                    }};
-                    console.log('[CRITICAL DEBUG] Sending system message');
-                    window.chatSocket.send(JSON.stringify(systemMessage));
-                }}, 1000);
-            }} else {{
-                console.error('[CRITICAL DEBUG] WebSocket not connected - cannot announce call');
-            }}
-        """)
-
-
-    @rx.event
     async def start_video_call(self):
-        """Start a video call with correct field names based on actual API error messages."""
-        print("[CRITICAL DEBUG] Starting video call with corrected field names")
+        """Start a video call with support for multiple API field naming conventions."""
+        print("[CRITICAL DEBUG] Starting video call with both field naming formats")
         
         try:
             # Check if already in a call
@@ -2399,15 +2322,16 @@ class ChatState(rx.State):
             recipients = await self.get_room_recipients(self.current_room_id)
             recipient_id = recipients[0] if recipients else None
             
-            # Create API payload with the CORRECT field names
-            # Based on error message: "room_id is required" (not "room")
+            # Create API payload with BOTH field names to support different API versions
+            # Include both 'room' and 'room_id' to handle different API expectations
             payload = {
                 'recipient_id': recipient_id,
-                'room_id': self.current_room_id,  # Using room_id as specified in the error
+                'room': self.current_room_id,      # For API expecting 'room'
+                'room_id': self.current_room_id,   # For API expecting 'room_id' 
                 'call_type': 'video',
                 'expires_at': expires_at
             }
-            print(f"[CRITICAL DEBUG] Final corrected payload: {payload}")
+            print(f"[CRITICAL DEBUG] Dual-field payload: {payload}")
             
             # Try with both token formats (Bearer and Token)
             auth_headers = [
@@ -2488,6 +2412,96 @@ class ChatState(rx.State):
             print(f"[CRITICAL DEBUG] Error starting video call: {str(e)}")
             self.error_message = f"Error starting video call: {str(e)}"
             self.show_calling_popup = False
+
+    @rx.event
+    async def announce_call_via_websocket(self, call_id: str, room_id: str, room_name: str, call_type: str, is_local_only: bool = False):
+        """Send WebSocket message to announce a call to all users in a room.
+        Enhanced version that supports multiple message formats for compatibility."""
+        print(f"[CRITICAL DEBUG] Announcing {call_type} call via WebSocket, ID: {call_id}")
+        
+        # Get username for notification
+        current_username = await self.get_username()
+        
+        # Set active call info in state
+        self.active_room_call = {
+            "id": call_id,
+            "room_id": room_id,
+            "room_name": room_name,
+            "call_type": call_type,
+            "started_by": current_username,
+            "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "is_local_only": is_local_only
+        }
+        
+        # Use JavaScript to send WebSocket message
+        rx.call_script(f"""
+            if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
+                console.log('[CRITICAL DEBUG] Sending room call announcement via WebSocket');
+                
+                // 1. Try Legacy Format (simplest and most likely to work)
+                const legacyMessage = {{
+                    type: 'room_call_announcement',
+                    room_id: '{room_id}',
+                    room_name: '{room_name}',
+                    caller_username: '{current_username}',
+                    call_type: '{call_type}',
+                    invitation_id: '{call_id}'
+                }};
+                console.log('[CRITICAL DEBUG] Sending legacy format message:', JSON.stringify(legacyMessage));
+                window.chatSocket.send(JSON.stringify(legacyMessage));
+                
+                // 2. Also try API format for compatibility
+                setTimeout(() => {{
+                    const apiFormatMessage = {{
+                        type: 'room_call_announcement',
+                        notification: {{
+                            id: '{call_id}',
+                            caller: {{
+                                id: 'user-id', 
+                                username: '{current_username}'
+                            }},
+                            room: '{room_id}',
+                            room_name: '{room_name}',
+                            call_type: '{call_type}',
+                            status: 'pending',
+                            created_at: new Date().toISOString(),
+                            expires_at: new Date(Date.now() + 60000).toISOString()
+                        }}
+                    }};
+                    console.log('[CRITICAL DEBUG] Sending API format message:', JSON.stringify(apiFormatMessage));
+                    window.chatSocket.send(JSON.stringify(apiFormatMessage));
+                }}, 300);
+                
+                // 3. Also send simplified notification (third format)
+                setTimeout(() => {{
+                    const simpleNotification = {{
+                        type: 'call_notification',
+                        call_type: '{call_type}',
+                        caller_username: '{current_username}',
+                        room_id: '{room_id}',
+                        invitation_id: '{call_id}'
+                    }};
+                    console.log('[CRITICAL DEBUG] Sending simplified notification:', JSON.stringify(simpleNotification));
+                    window.chatSocket.send(JSON.stringify(simpleNotification));
+                }}, 600);
+                
+                // 4. Also send a system message
+                setTimeout(() => {{
+                    const systemMessage = {{
+                        type: 'message',
+                        message: {{
+                            content: '{current_username} started a {call_type} call',
+                            sender: {{ username: 'System' }},
+                            sent_at: new Date().toISOString()
+                        }}
+                    }};
+                    console.log('[CRITICAL DEBUG] Sending system message');
+                    window.chatSocket.send(JSON.stringify(systemMessage));
+                }}, 900);
+            }} else {{
+                console.error('[CRITICAL DEBUG] WebSocket not connected - cannot announce call');
+            }}
+        """)
 
     @rx.event
     async def end_call(self):
