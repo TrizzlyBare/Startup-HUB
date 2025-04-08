@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from channels.db import database_sync_to_async
 import logging
 from django.db import transaction
 from rest_framework.pagination import PageNumberPagination
@@ -1077,17 +1078,24 @@ class IncomingCallNotificationView(APIView):
             }
         )
 
-    def _expire_outdated_notifications(self, user):
-        """Helper method to expire outdated notifications"""
+    @database_sync_to_async
+    def _expire_outdated_notifications(self):
+        """Efficiently expire outdated notifications with index-optimized query"""
         now = timezone.now()
-        expired_count = IncomingCallNotification.objects.filter(
-            recipient=user, status="pending", expires_at__lte=now
-        ).update(status="expired")
 
-        if expired_count > 0:
-            logger.debug(
-                f"Expired {expired_count} outdated notifications for user {user.id}"
-            )
+        try:
+            # Use a more efficient query with proper indexing
+            expired_count = IncomingCallNotification.objects.filter(
+                status__in=["pending", "seen"], expires_at__lte=now
+            ).update(status="expired")
+
+            if expired_count > 0:
+                logger.info(f"Expired {expired_count} outdated notifications")
+
+            return expired_count
+        except Exception as e:
+            logger.error(f"Error expiring notifications: {str(e)}")
+            return 0
 
     # Add these methods to IncomingCallNotificationView class
 
@@ -1221,20 +1229,17 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
 
     def list(self, request):
         """Get active and recent incoming call notifications for the current user"""
-        # Add debug logging
-        logger.info(f"Retrieving call notifications for user {request.user.id}")
-
         # First, expire any outdated notifications
-        self._expire_outdated_notifications(request.user)
+        self._expire_outdated_notifications()
 
-        # Get active notifications (not expired and not ended)
+        # Get active notifications
         active_notifications = IncomingCallNotification.objects.filter(
             recipient=request.user,
             status__in=["pending", "seen"],
             expires_at__gt=timezone.now(),
         ).order_by("-created_at")
 
-        # Also get recent notifications (within the last hour, regardless of status)
+        # Get recent notifications
         one_hour_ago = timezone.now() - timedelta(hours=1)
         recent_notifications = (
             IncomingCallNotification.objects.filter(
@@ -1245,26 +1250,38 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
             .order_by("-created_at")
         )
 
-        # Debug logging
-        logger.info(f"Found {active_notifications.count()} active notifications")
-        logger.info(f"Found {recent_notifications.count()} recent notifications")
+        # Standardized response format
+        response_data = {
+            "success": True,
+            "data": {
+                "active": self.get_serializer(active_notifications, many=True).data,
+                "recent": self.get_serializer(recent_notifications, many=True).data,
+                "all": self.get_serializer(
+                    list(active_notifications) + list(recent_notifications), many=True
+                ).data,
+            },
+            "meta": {
+                "activeCount": active_notifications.count(),
+                "recentCount": recent_notifications.count(),
+                "timestamp": timezone.now().isoformat(),
+            },
+        }
 
-        # Serialize notifications
-        active_serializer = self.get_serializer(active_notifications, many=True)
-        recent_serializer = self.get_serializer(recent_notifications, many=True)
-        all_notifications = list(active_notifications) + list(recent_notifications)
-        all_serializer = self.get_serializer(all_notifications, many=True)
-
-        # Return with separate sections for active and recent
-        return Response(
-            {
-                "active": active_serializer.data,
-                "recent": recent_serializer.data,
-                "all": all_serializer.data,
-            }
-        )
+        return Response(response_data)
 
     def create(self, request):
+
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {
+                    "success": False,
+                    "error": serializer.errors,
+                    "message": "Invalid data",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         """Create a new incoming call notification"""
         recipient_id = request.data.get("recipient_id")
         room_id = request.data.get("room_id")
@@ -1413,7 +1430,35 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def update(self, request, pk=None):
-        """Update notification status (accept, decline, etc.)"""
+        """Update notification status with comprehensive logging"""
+        notification = self.get_object()
+        status_action = request.data.get("status")
+
+        log_context = {
+            "notification_id": str(notification.id),
+            "user_id": str(request.user.id),
+            "old_status": notification.status,
+            "new_status": status_action,
+            "room_id": str(notification.room.id),
+        }
+
+        logger.info(f"Updating notification status", extra=log_context)
+
+        # Validation checks
+        if request.user != notification.recipient and (
+            status_action != "ended" or notification.status != "accepted"
+        ):
+            logger.warning(
+                f"Unauthorized status update attempt",
+                extra={**log_context, "error": "Unauthorized"},
+            )
+            return Response(
+                {
+                    "success": False,
+                    "message": "Only the recipient can update notification status",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
         try:
             # Find notification
             notification = self.get_object()
@@ -1534,6 +1579,11 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            
+        # logger.info(
+        #     f"Notification status updated successfully",
+        #     extra={**log_context, "status": "success"},
+        # )
 
         except Exception as e:
             logger.error(f"Error updating call notification: {str(e)}")
@@ -1542,15 +1592,43 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    def _expire_outdated_notifications(self, user):
-        """Helper method to expire outdated notifications"""
+    @database_sync_to_async
+    def _expire_outdated_notifications(self):
+        """Efficiently expire outdated notifications with index-optimized query"""
         now = timezone.now()
-        expired_count = IncomingCallNotification.objects.filter(
-            status="pending", expires_at__lte=now
-        ).update(status="expired")
 
-        if expired_count > 0:
-            logger.info(f"Expired {expired_count} outdated notifications")
+        try:
+            # Use a more efficient query with proper indexing
+            expired_count = IncomingCallNotification.objects.filter(
+                status__in=["pending", "seen"], expires_at__lte=now
+            ).update(status="expired")
+
+            if expired_count > 0:
+                logger.info(f"Expired {expired_count} outdated notifications")
+
+            return expired_count
+        except Exception as e:
+            logger.error(f"Error expiring notifications: {str(e)}")
+            return 0
+
+    # In apps.py or a management command
+    @classmethod
+    def cleanup_expired_notifications(cls):
+        """
+        Cleanup old expired notifications to keep the database efficient
+        """
+        try:
+            # Delete notifications that have been expired for more than 7 days
+            seven_days_ago = timezone.now() - timedelta(days=7)
+            deleted_count = IncomingCallNotification.objects.filter(
+                status="expired", updated_at__lt=seven_days_ago
+            ).delete()[0]
+
+            logger.info(f"Deleted {deleted_count} old expired notifications")
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Error cleaning up notifications: {str(e)}")
+            return 0
 
     @action(detail=False, methods=["GET"])
     def debug(self, request):
@@ -1649,7 +1727,30 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
                 {"error": "room_id is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
+        if not room_id:
+            return Response(
+                {
+                    "success": False,
+                    "errors": {"room_id": ["This field is required"]},
+                    "message": "room_id is required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
+            try:
+                room_uuid = uuid.UUID(str(room_id))
+                room = Room.objects.get(id=room_uuid)
+            except (ValueError, Room.DoesNotExist):
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"room_id": ["Invalid room ID or room not found"]},
+                        "message": "Room not found",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             # Get room
             room = Room.objects.get(id=room_id)
 
@@ -1724,13 +1825,20 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
             return Response(
                 {
                     "success": True,
-                    "message": f"Created {len(notifications)} call notifications",
-                    "notification_count": len(notifications),
-                    "first_notification": (
-                        self.get_serializer(notifications[0]).data
-                        if notifications
-                        else None
-                    ),
+                    "data": {
+                        "notifications": self.get_serializer(
+                            notifications, many=True
+                        ).data,
+                        "primaryNotification": (
+                            self.get_serializer(notifications[0]).data
+                            if notifications
+                            else None
+                        ),
+                    },
+                    "meta": {
+                        "count": len(notifications),
+                        "timestamp": timezone.now().isoformat(),
+                    },
                 },
                 status=status.HTTP_201_CREATED,
             )

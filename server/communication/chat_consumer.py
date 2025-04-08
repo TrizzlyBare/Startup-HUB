@@ -1,3 +1,5 @@
+import traceback
+import uuid
 from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
@@ -24,7 +26,19 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         """
         Handle WebSocket connection for both connection types
         """
+        connection_id = str(uuid.uuid4())[
+            :8
+        ]  # Generate short connection ID for tracking
+
         try:
+            logger.info(
+                f"[{connection_id}] WebSocket connection attempt",
+                extra={
+                    "connection_id": connection_id,
+                    "user_id": getattr(self.scope.get("user"), "id", "unknown"),
+                    "route_kwargs": self.scope["url_route"].get("kwargs", {}),
+                },
+            )
             # Get the authenticated user from the scope
             self.user = self.scope["user"]
 
@@ -61,12 +75,24 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             )
 
             logger.info(
-                f"User {self.user.id} connected to {self.connection_type} {self.identifier}"
+                f"[{connection_id}] WebSocket connection successful",
+                extra={
+                    "connection_id": connection_id,
+                    "user_id": str(self.user.id),
+                    "room_id": self.room_id,
+                },
             )
 
         except Exception as e:
-            logger.error(f"Connection error: {str(e)}")
-            await self.close(code=4000)  # Generic error
+            logger.error(
+                f"[{connection_id}] Connection error: {str(e)}",
+                extra={
+                    "connection_id": connection_id,
+                    "error": str(e),
+                    "traceback": traceback.format_exc(),
+                },
+            )
+            await self.close(code=4000)
 
     async def setup_room_connection(self):
         """Configure a room-based connection"""
@@ -354,18 +380,50 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             logger.error(f"Error creating call message: {str(e)}")
             return None
 
-    # Add WebSocket event handlers
+    # Add a reliable incoming_call handler
     async def incoming_call(self, event):
-        """Send incoming call notification to WebSocket"""
-        await self.send_json(
-            {"type": "incoming_call", "notification": event["notification"]}
-        )
+        """Send incoming call notification to WebSocket with reliability checks"""
+        try:
+            notification = event.get("notification")
+            if not notification:
+                logger.error("Received incoming_call event without notification data")
+                return
 
+            # Verify this notification is relevant to this user
+            if str(self.user.id) == notification.get("recipient_id") or str(
+                self.user.id
+            ) == notification.get("caller_id"):
+                await self.send_json(
+                    {"type": "incoming_call", "notification": notification}
+                )
+                logger.debug(f"Sent incoming_call to user {self.user.id}")
+        except Exception as e:
+            logger.error(f"Error in incoming_call handler: {str(e)}")
+
+    # Similar improvements for other event handlers
     async def call_notification_update(self, event):
-        """Send call notification update to WebSocket"""
-        await self.send_json(
-            {"type": "call_notification_update", "notification": event["notification"]}
-        )
+        try:
+            notification = event.get("notification")
+            if not notification:
+                return
+
+            await self.send_json(
+                {"type": "call_notification_update", "notification": notification}
+            )
+        except Exception as e:
+            logger.error(f"Error in call_notification_update handler: {str(e)}")
+
+    async def room_call_announcement(self, event):
+        try:
+            notification = event.get("notification")
+            if not notification:
+                return
+
+            await self.send_json(
+                {"type": "room_call_announcement", "notification": notification}
+            )
+        except Exception as e:
+            logger.error(f"Error in room_call_announcement handler: {str(e)}")
 
     # Database access methods
     @database_sync_to_async
