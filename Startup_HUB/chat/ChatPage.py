@@ -29,6 +29,7 @@ class ChatState(rx.State):
     show_video_popup: bool = False
     call_duration: int = 0
     is_muted: bool = False
+    remote_is_muted: bool = False
     is_camera_off: bool = False
     show_calling_popup: bool = False
     call_type: str = "audio"
@@ -2616,16 +2617,26 @@ class ChatState(rx.State):
         # Reuse the same end_call method
         await self.end_call()
 
+    @rx.event
     async def toggle_mute(self):
         """Toggle microphone mute state."""
         self.is_muted = not self.is_muted
         
-        # Update local stream audio tracks
+        # Update local stream audio tracks and notify peers
         rx.call_script("""
             if (window.localStream) {
                 window.localStream.getAudioTracks().forEach(track => {
                     track.enabled = !state.is_muted;
                 });
+                
+                // Notify peers about mute state change
+                if (window.peerConnection) {
+                    const data = {
+                        type: 'mute_state',
+                        is_muted: state.is_muted
+                    };
+                    window.peerConnection.send(JSON.stringify(data));
+                }
             }
         """)
         yield
@@ -4237,28 +4248,39 @@ def call_popup() -> rx.Component:
                         color="#333333",
                         margin_bottom="10px",
                     ),
-                    # Call status
-                    rx.text(
+                    # Call status and mute indicators
+                    rx.hstack(
+                        rx.text(
+                            rx.cond(
+                                ChatState.is_call_connected,
+                                "Connected",
+                                "Connecting..."
+                            ),
+                            color=rx.cond(
+                                ChatState.is_call_connected,
+                                "green.500",
+                                "orange.500"
+                            ),
+                            font_size="14px",
+                        ),
                         rx.cond(
-                            ChatState.is_call_connected,
-                            "Connected",
-                            "Connecting..."
+                            ChatState.is_muted,
+                            rx.box(
+                                rx.icon("mic-off"),
+                                color="red.500",
+                                margin_left="10px",
+                            ),
                         ),
-                        color=rx.cond(
-                            ChatState.is_call_connected,
-                            "green.500",
-                            "orange.500"
+                        rx.cond(
+                            ChatState.remote_is_muted,
+                            rx.box(
+                                rx.icon("mic-off"),
+                                color="red.500",
+                                margin_left="10px",
+                            ),
                         ),
-                        font_size="14px",
                         margin_bottom="10px",
                     ),
-                    # Call duration - fix format string
-                    # rx.text(
-                    #     "Call time: " + str(ChatState.call_duration // 60) + ":" + str(ChatState.call_duration % 60),
-                    #     color="gray.500",
-                    #     font_size="18px",
-                    #     margin_bottom="15px",
-                    # ),
                     rx.hstack(
                         rx.button(
                             rx.cond(
@@ -4294,10 +4316,81 @@ def call_popup() -> rx.Component:
                             },
                             transition="all 0.2s ease-in-out",
                         ),
+                        spacing="4",  # Changed from "20px" to "4"
+                    ),
+                    padding="20px",
+                    bg="white",
+                    border_radius="10px",
+                    box_shadow="0 4px 6px rgba(0, 0, 0, 0.1)",
+                ),
+                position="fixed",
+                top="50%",
+                left="50%",
+                transform="translate(-50%, -50%)",
+                z_index="1000",
+            ),
+        ),
+    )
+
+def video_call_popup() -> rx.Component:
+    return rx.cond(
+        ChatState.show_video_popup,
+        rx.box(
+            rx.center(
+                rx.vstack(
+                    # Video elements
+                    rx.html("""
+                        <video id="remote-video" autoplay playsinline></video>
+                        <video id="local-video" autoplay playsinline muted></video>
+                    """),
+                    rx.text(
+                        ChatState.current_chat_user,
+                        font_size="24px",
+                        font_weight="bold",
+                        color="#333333",
+                        margin_bottom="10px",
+                    ),
+                    # Call status and mute indicators
+                    rx.hstack(
+                        rx.text(
+                            rx.cond(
+                                ChatState.is_call_connected,
+                                "Connected",
+                                "Connecting..."
+                            ),
+                            color=rx.cond(
+                                ChatState.is_call_connected,
+                                "green.500",
+                                "orange.500"
+                            ),
+                            font_size="14px",
+                        ),
+                        rx.cond(
+                            ChatState.is_muted,
+                            rx.box(
+                                rx.icon("mic-off"),
+                                color="red.500",
+                                margin_left="10px",
+                            ),
+                        ),
+                        rx.cond(
+                            ChatState.remote_is_muted,
+                            rx.box(
+                                rx.icon("mic-off"),
+                                color="red.500",
+                                margin_left="10px",
+                            ),
+                        ),
+                        margin_bottom="10px",
+                    ),
+                    rx.hstack(
                         rx.button(
-                            rx.icon("volume-2"),
-                            # Fix: Replace lambda with a valid event handler or remove on_click
-                            # on_click=lambda: None,  # This was causing the error
+                            rx.cond(
+                                ChatState.is_muted,
+                                rx.icon("mic-off"),
+                                rx.icon("mic"),
+                            ),
+                            on_click=ChatState.toggle_mute,
                             border_radius="50%",
                             bg="#80d0ea",
                             color="white",
@@ -4310,62 +4403,13 @@ def call_popup() -> rx.Component:
                             },
                             transition="all 0.2s ease-in-out",
                         ),
-                        spacing="4",
-                    ),
-                    align_items="center",
-                    justify_content="center",
-                ),
-                width="340px",
-                height="450px",
-                bg="white",
-                border_radius="20px",
-                padding="30px",
-                position="fixed",
-                top="50%",
-                left="50%",
-                transform="translate(-50%, -50%)",
-                box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
-                z_index="1000",
-            ),
-            # Remove the on_mount call since we're now handling timer separately
-            # on_mount=ChatState.increment_call_duration,
-        ),
-    )
-
-def video_call_popup() -> rx.Component:
-    return rx.cond(
-        ChatState.show_video_popup,
-        rx.box(
-            rx.center(
-                rx.vstack(
-                    rx.box(
-                        rx.html("""
-                            <div class="video-container" style="position: relative; width: 100%; height: 300px; background-color: #000; border-radius: 10px; overflow: hidden;">
-                                <video id="remote-video" autoplay playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
-                                <div class="local-video-container" style="position: absolute; bottom: 10px; right: 10px; width: 120px; height: 90px; border-radius: 5px; overflow: hidden; border: 2px solid white;">
-                                    <video id="local-video" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover;"></video>
-                                </div>
-                            </div>
-                        """),
-                        width="100%",
-                        height="300px",
-                        margin_bottom="20px",
-                    ),
-                    rx.text(
-                        ChatState.current_chat_user,
-                        font_size="24px",
-                        font_weight="bold",
-                        color="#333333",
-                        margin_bottom="10px",
-                    ),
-                    rx.hstack(
                         rx.button(
                             rx.cond(
-                                ChatState.is_muted,
-                                rx.icon("mic-off"),
-                                rx.icon("mic"),
+                                ChatState.is_camera_off,
+                                rx.icon("video-off"),
+                                rx.icon("video"),
                             ),
-                            on_click=ChatState.toggle_mute,
+                            on_click=ChatState.toggle_camera,
                             border_radius="50%",
                             bg="#80d0ea",
                             color="white",
@@ -4393,62 +4437,17 @@ def video_call_popup() -> rx.Component:
                             },
                             transition="all 0.2s ease-in-out",
                         ),
-                        rx.button(
-                            rx.cond(
-                                ChatState.is_camera_off,
-                                rx.icon("video-off"),
-                                rx.icon("video"),
-                            ),
-                            on_click=ChatState.toggle_camera,
-                            border_radius="50%",
-                            bg="#80d0ea",
-                            color="white",
-                            width="60px",
-                            height="60px",
-                            padding="0",
-                            _hover={
-                                "bg": "#6bc0d9",
-                                "transform": "scale(1.1)",
-                            },
-                            transition="all 0.2s ease-in-out",
-                        ),
-                        spacing="4",
+                        spacing="4",  # Changed from "20px" to "4"
                     ),
-                    # Add connection status indicator
-                    rx.text(
-                        rx.cond(
-                            ChatState.is_call_connected,
-                            "Connected",
-                            "Connecting..."
-                        ),
-                        color=rx.cond(
-                            ChatState.is_call_connected,
-                            "green.500",
-                            "orange.500"
-                        ),
-                        font_size="14px",
-                        margin_top="10px",
-                    ),
-                    # Call duration with fixed format
-                    rx.text(
-                        "Call time: " + str(ChatState.call_duration // 60) + ":" + str(ChatState.call_duration % 60),
-                        color="gray.500",
-                        font_size="14px",
-                    ),
-                    align_items="center",
-                    justify_content="center",
-                    width="100%",
+                    padding="20px",
+                    bg="white",
+                    border_radius="10px",
+                    box_shadow="0 4px 6px rgba(0, 0, 0, 0.1)",
                 ),
-                width="600px",
-                height="500px",
-                bg="white",
-                border_radius="20px",
-                padding="30px",
                 position="fixed",
                 top="50%",
                 left="50%",
                 transform="translate(-50%, -50%)",
-                box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
                 z_index="1000",
             ),
         ),

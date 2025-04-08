@@ -140,6 +140,12 @@ async function createPeerConnection(userId) {
         });
     }
 
+    // Create data channel for signaling
+    const dataChannel = pc.createDataChannel('signaling');
+    dataChannel.onmessage = (event) => handleDataChannelMessage(event, userId);
+    dataChannel.onopen = () => console.log(`Data channel opened for ${userId}`);
+    dataChannel.onclose = () => console.log(`Data channel closed for ${userId}`);
+
     // Handle ICE candidates
     pc.onicecandidate = event => {
         if (event.candidate) {
@@ -289,6 +295,17 @@ function toggleAudio(enabled) {
         localStream.getAudioTracks().forEach(track => {
             track.enabled = enabled;
         });
+        
+        // Notify all peer connections about mute state change
+        Object.values(peerConnections).forEach(pc => {
+            if (pc.connectionState === 'connected') {
+                const data = {
+                    type: 'mute_state',
+                    is_muted: !enabled
+                };
+                pc.send(JSON.stringify(data));
+            }
+        });
     }
     
     return { success: true };
@@ -356,6 +373,23 @@ function closeAllConnections() {
     }
     
     return { success: true };
+}
+
+// Handle incoming data channel messages
+function handleDataChannelMessage(event, userId) {
+    try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'mute_state') {
+            // Update UI to reflect peer's mute state
+            const peerMuteIndicator = document.getElementById(`peer-mute-indicator-${userId}`);
+            if (peerMuteIndicator) {
+                peerMuteIndicator.style.display = data.is_muted ? 'block' : 'none';
+            }
+        }
+    } catch (error) {
+        console.error('Error handling data channel message:', error);
+    }
 }
 
 // Expose functions to be called from Python
