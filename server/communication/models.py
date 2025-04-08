@@ -1,3 +1,4 @@
+from datetime import timedelta
 from cloudinary.models import CloudinaryField
 import uuid
 from django.db import models
@@ -312,9 +313,13 @@ class IncomingCallNotification(models.Model):
     def __str__(self):
         return f"Call from {self.caller.username} to {self.recipient.username}"
 
+    # Update the IncomingCallNotification model methods
+
     def is_expired(self):
         """Check if notification has expired"""
-        return timezone.now() > self.expires_at
+        # Add some buffer time to account for processing delays
+        buffer_seconds = 2
+        return timezone.now() + timedelta(seconds=buffer_seconds) > self.expires_at
 
     def auto_expire(self):
         """Mark notification as expired if it's past the expiration time"""
@@ -323,3 +328,24 @@ class IncomingCallNotification(models.Model):
             self.save(update_fields=["status"])
             return True
         return False
+
+    @classmethod
+    def expire_outdated(cls):
+        """Class method to expire all outdated notifications"""
+        now = timezone.now()
+        return cls.objects.filter(status="pending", expires_at__lte=now).update(
+            status="expired"
+        )
+
+    @classmethod
+    def get_active_for_user(cls, user):
+        """Get active notifications for a user"""
+        # First expire any outdated notifications
+        cls.expire_outdated()
+
+        # Then get active ones
+        return cls.objects.filter(
+            recipient=user,
+            status__in=["pending", "seen"],
+            expires_at__gt=timezone.now(),
+        ).order_by("-created_at")

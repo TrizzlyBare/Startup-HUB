@@ -96,4 +96,16 @@ urlpatterns = [
         IncomingCallNotificationView.as_view(),
         name="update-incoming-call",
     ),
+    # Add these to urlpatterns in urls.py
+    # Debug endpoints for call notifications
+    path(
+        "incoming-calls/debug/",
+        IncomingCallNotificationView.as_view({"get": "debug"}),
+        name="debug-incoming-calls",
+    ),
+    path(
+        "incoming-calls/expire-all/",
+        IncomingCallNotificationView.as_view({"post": "expire_all"}),
+        name="expire-all-incoming-calls",
+    ),
 ]
