@@ -1,0 +1,2495 @@
+import reflex as rx
+import json
+import asyncio
+import httpx
+import time
+from typing import List, Dict, Optional, Any
+from ..Matcher.SideBar import sidebar
+from ..Auth.AuthPage import AuthState
+
+class ChatState(rx.State):
+    # API settings
+    API_BASE_URL: str = "http://startup-hub:8000/api"
+    API_HOST_URL: str = "http://100.95.107.24:8000/api"  # Alternative direct IP
+    WS_BASE_URL: str = "ws://startup-hub:8000/ws"
+    auth_token: str = ""
+    
+    # Chat data
+    chat_history: list[tuple[str, str]] = []
+    message: str = ""
+    current_chat_user: str = ""
+    current_room_id: Optional[str] = None
+    rooms: List[Dict[str, Any]] = []
+    
+    # Typing indicator
+    typing_users: List[str] = []
+    
+    # Call related states
+    show_call_popup: bool = False
+    show_video_popup: bool = False
+    call_duration: int = 0
+    is_muted: bool = False
+    is_camera_off: bool = False
+    show_calling_popup: bool = False
+    call_type: str = "audio"
+    
+    # Incoming call states
+    show_incoming_call: bool = False
+    call_invitation_id: str = ""
+    incoming_caller: str = ""
+    
+    # Active call in room
+    active_room_call: Dict[str, Any] = {}
+    joining_existing_call: bool = False
+    
+    # WebRTC related states
+    webrtc_config: Dict[str, Any] = {}
+    ice_servers: List[Dict[str, Any]] = []
+    signaling_connected: bool = False
+    is_call_connected: bool = False
+    
+    # Loading and error states
+    loading: bool = True
+    error_message: str = ""
+    success_message: str = ""
+    
+    # WebSocket connection status (for future implementation)
+    is_connected: bool = False
+    
+    # UI state
+    sidebar_visible: bool = True
+    
+    # User info state
+    username: str = ""
+    
+    # Debug flags - these control what features are enabled during development
+    debug_show_info: bool = True        # Show debug info panel
+    debug_use_dummy_data: bool = False  # Use dummy data instead of API calls where needed (set to False)
+    debug_log_api_calls: bool = True    # Log API calls and responses
+    
+    # Custom API URL for room call announcement
+    room_call_api_url: str = ""
+    
+    @rx.var
+    def route_room_id(self) -> str:
+        """Get room_id from route parameters."""
+        if hasattr(self, "router"):
+            params = getattr(self.router.page, "params", {})
+            room_id = params.get("room_id", "")
+            if room_id:
+                print(f"Found room_id in URL: {room_id}")
+                return room_id
+        return ""
+
+    @rx.var
+    def is_someone_typing(self) -> bool:
+        return len(self.typing_users) > 0
+        
+    @rx.var
+    def typing_message(self) -> str:
+        if len(self.typing_users) == 1:
+            return f"{self.typing_users[0]} is typing..."
+        elif len(self.typing_users) == 2:
+            return f"{self.typing_users[0]} and {self.typing_users[1]} are typing..."
+        elif len(self.typing_users) > 2:
+            return "Several people are typing..."
+        return ""
+
+    @rx.var
+    def formatted_rooms(self) -> List[Dict[str, str]]:
+        """Format rooms data for display."""
+        result = []
+        for room in self.rooms:
+            try:
+                # Extract usable data from room dict
+                room_data = {
+                    "id": str(room.get("id", "")),
+                    "name": str(room.get("name", "Unknown")),
+                    "profile_image": str(room.get("profile_image", "")),
+                }
+                
+                # Safely extract last message content
+                last_message = room.get("last_message", {})
+                if last_message and isinstance(last_message, dict):
+                    room_data["last_message"] = str(last_message.get("content", ""))
+                else:
+                    room_data["last_message"] = ""
+                    
+                result.append(room_data)
+            except Exception:
+                # Ignore malformed room data
+                pass
+                
+        return result
+
+    async def get_token(self) -> str:
+        """Get authentication token from state or localStorage."""
+        if self.auth_token:
+            return self.auth_token
+            
+        # Try to get token from AuthState
+        try:
+            auth_state = await self.get_state(AuthState)
+            if auth_state and auth_state.token:
+                self.auth_token = auth_state.token
+                return self.auth_token
+        except Exception as e:
+            print(f"Error getting token from AuthState: {e}")
+        
+        # Fallback to localStorage
+        try:
+            token = await rx.call_script("localStorage.getItem('auth_token')")
+            if token:
+                self.auth_token = token
+                return token
+        except Exception as e:
+            print(f"Error getting token from localStorage: {e}")
+            
+        return ""
+
+    async def get_current_username(self) -> str:
+        """Get current username from AuthState or localStorage."""
+        # First check if it's already in state
+        if self.username:
+            return self.username
+            
+        # Then try to get from AuthState
+        try:
+            auth_state = await self.get_state(AuthState)
+            if auth_state and auth_state.username:
+                print(f"Got username from AuthState: {auth_state.username}")
+                self.username = auth_state.username
+                return self.username
+        except Exception as e:
+            print(f"Error getting username from AuthState: {e}")
+        
+        # Then try to get from localStorage
+        try:
+            username = await rx.call_script("localStorage.getItem('username')")
+            if username:
+                print(f"Got username from localStorage: {username}")
+                self.username = username
+                return username
+        except Exception as e:
+            print(f"Error getting username from localStorage: {e}")
+        
+        # As a last resort, try to get from an auth debug call
+        if self.auth_token:
+            try:
+                # Call auth-debug API endpoint to get user info
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        f"{self.API_BASE_URL}/authen/auth-debug/",
+                        headers={"Authorization": f"Token {self.auth_token}"},
+                        follow_redirects=True
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        user_from_token = data.get("user_from_token", {})
+                        if user_from_token and "username" in user_from_token:
+                            username = user_from_token["username"]
+                            print(f"Got username from auth-debug: {username}")
+                            self.username = username
+                            # Store in localStorage for future use
+                            await rx.call_script(f"localStorage.setItem('username', '{username}')")
+                            return username
+            except Exception as e:
+                print(f"Error getting username from auth-debug: {e}")
+        
+        return "user"  # Default fallback
+
+    async def get_username(self) -> str:
+        """Get username from state or localStorage."""
+        if self.username:
+            print(f"Using cached username from state: {self.username}")
+            return self.username
+        
+        # Using a safe approach that doesn't await rx.call_script
+        # Set username in state and return a default value for now
+        # The script will update the state asynchronously
+        rx.call_script("""
+            const username = localStorage.getItem('username');
+            if (username) {
+                // Set the username directly in the state
+                state.username = username;
+                console.log('Username set from localStorage:', username);
+            } else {
+                console.log('No username found in localStorage');
+            }
+        """)
+        
+        # If we have a token, try to get username from API
+        if self.auth_token:
+            try:
+                print(f"Found token, trying to get username from API using token: {self.auth_token[:8]}...")
+                # Call API to get user info
+                async with httpx.AsyncClient() as client:
+                    print(f"API URL being called: {self.API_BASE_URL}/authen/auth-debug/")
+                    
+                    response = await client.get(
+                        f"{self.API_BASE_URL}/authen/auth-debug/",
+                        headers={"Authorization": f"Token {self.auth_token}"},
+                        follow_redirects=True
+                    )
+                    
+                    print(f"Auth debug response status: {response.status_code}")
+                    
+                    if response.status_code == 200:
+                        try:
+                            data = response.json()
+                            print(f"Auth debug API full response: {data}")
+                            
+                            # Check if user_from_token exists
+                            user_from_token = data.get("user_from_token", {})
+                            print(f"user_from_token data: {user_from_token}")
+                            
+                            if user_from_token and "username" in user_from_token:
+                                username = user_from_token["username"]
+                                print(f"Got username from API: {username}")
+                                self.username = username
+                                # Save to localStorage
+                                rx.call_script(f"""
+                                    localStorage.setItem('username', '{username}');
+                                    console.log('Username saved to localStorage:', '{username}');
+                                """)
+                                return username
+                            else:
+                                print("No username found in user_from_token data")
+                        except Exception as e:
+                            print(f"Error parsing JSON response: {e}")
+                            print(f"Raw response text: {response.text[:500]}")
+                    else:
+                        print(f"Auth debug API error response: {response.text[:500]}")
+            except Exception as e:
+                print(f"Error getting username from API: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        print("Using default username: user")
+        return "user"  # Default fallback
+
+    async def get_storage_item(self, key: str) -> str:
+        """Safely get an item from localStorage using direct JavaScript.
+        
+        This uses a simple approach that should work in most Reflex versions.
+        """
+        # For now, return empty string since we can't properly await rx.call_script
+        # in the current Reflex version
+        print(f"Attempting to get {key} from localStorage")
+        
+        try:
+            # In this version of Reflex, we can't properly await rx.call_script
+            # So we'll return an empty string for now
+            return ""
+        except Exception as e:
+            print(f"Error in get_storage_item: {e}")
+            return ""
+
+    @rx.event
+    async def on_mount(self):
+        """Initialize the component when it mounts."""
+        print("Chat component mounted")
+        
+        # Check for active call notifications - this will help catch any pending calls
+        # when a user first loads the application
+        await self.get_active_call_notifications()
+        
+        # Set up periodic call notification checks
+        asyncio.create_task(self._periodic_notification_check())
+        
+        # Proceed with normal initialization
+        # ... existing code ...
+        
+        # Use try-except to make this robust against different Reflex versions
+        try:
+            # Get authentication token from AuthState
+            self.auth_token = await self.get_token()
+            
+            # Fetch the username from the auth-debug API endpoint
+            if self.auth_token:
+                # Try multiple API paths to find the one that works
+                username_found = False
+                
+                # List of API endpoints to try
+                api_endpoints = [
+                    (self.API_BASE_URL, "authen/auth-debug/"),
+                    (self.API_BASE_URL, "auth/auth-debug/"),
+                    (self.API_HOST_URL, "authen/auth-debug/"),
+                    (self.API_HOST_URL, "auth/auth-debug/")
+                ]
+                
+                for base_url, path in api_endpoints:
+                    if username_found:
+                        break
+                        
+                    try:
+                        full_url = f"{base_url}/{path}"
+                        print(f"Trying auth-debug API at: {full_url}")
+                        
+                        async with httpx.AsyncClient() as client:
+                            response = await client.get(
+                                full_url,
+                                headers={"Authorization": f"Token {self.auth_token}"},
+                                follow_redirects=True,
+                                timeout=5.0  # 5 second timeout
+                            )
+                            
+                            print(f"API response status: {response.status_code}")
+                            
+                            if response.status_code == 200:
+                                try:
+                                    data = response.json()
+                                    print(f"Auth debug API response: {data}")
+                                    user_from_token = data.get("user_from_token", {})
+                                    
+                                    if user_from_token and "username" in user_from_token:
+                                        username = user_from_token["username"]
+                                        print(f"Got username from auth-debug API: {username}")
+                                        self.username = username
+                                        # Store in localStorage for future use
+                                        rx.call_script(f"""
+                                            localStorage.setItem('username', '{username}');
+                                            console.log('Username saved to localStorage:', '{username}');
+                                        """)
+                                        username_found = True
+                                        break
+                                    else:
+                                        print(f"No username in user_from_token data: {user_from_token}")
+                                except Exception as e:
+                                    print(f"Error parsing response JSON: {e}")
+                            else:
+                                print(f"Unsuccessful response: {response.status_code}")
+                                
+                    except Exception as e:
+                        print(f"Error trying endpoint {full_url}: {e}")
+                
+                if not username_found:
+                    # As a fallback, try to get user info from the token endpoint
+                    try:
+                        print("Trying token endpoint as fallback")
+                        async with httpx.AsyncClient() as client:
+                            for base_url in [self.API_BASE_URL, self.API_HOST_URL]:
+                                try:
+                                    token_url = f"{base_url}/authen/token/"
+                                    print(f"Trying: {token_url}")
+                                    token_response = await client.get(
+                                        token_url,
+                                        headers={"Authorization": f"Token {self.auth_token}"},
+                                        follow_redirects=True,
+                                        timeout=5.0
+                                    )
+                                    
+                                    if token_response.status_code == 200:
+                                        token_data = token_response.json()
+                                        print(f"Token API response: {token_data}")
+                                        
+                                        if "username" in token_data:
+                                            username = token_data["username"]
+                                            print(f"Got username from token API: {username}")
+                                            self.username = username
+                                            rx.call_script(f"""
+                                                localStorage.setItem('username', '{username}');
+                                                console.log('Username saved from token API:', '{username}');
+                                            """)
+                                            username_found = True
+                                            break
+                                except Exception as e:
+                                    print(f"Error trying token endpoint {token_url}: {e}")
+                                    
+                    except Exception as e:
+                        print(f"Error in token fallback: {e}")
+            
+            # Instead of awaiting rx.call_script directly, set the username from JavaScript
+            # This will set the username in state and not hang waiting for the call_script result
+            rx.call_script("""
+                const username = localStorage.getItem('username');
+                console.log('Found username in localStorage:', username);
+                
+                if (username) {
+                    // Set the username directly in the state
+                    if (window._state) {
+                        window._state.username = username;
+                        console.log('Username set directly in state:', username);
+                    }
+                    // Also trigger a state update via event
+                    window.dispatchEvent(new CustomEvent('username_set', { detail: { username } }));
+                } else {
+                    console.log('No username found in localStorage');
+                }
+            """)
+            
+            # Wait a moment for username to be set
+            await asyncio.sleep(0.2)
+            
+            # Debug print the username
+            print(f"Auth values - token: {self.auth_token}, username: {self.username}")
+            
+            # Step 1: Load the list of rooms (conversations)
+            await self.load_rooms()
+            
+            # Step 2: Check if we have a room_id in the URL route
+            room_id = self.route_room_id
+            
+            # Step 3: If we have a room_id, load that specific room's messages
+            if room_id:
+                self.current_room_id = room_id
+                print(f"Opening room from URL: {room_id}")
+                await self.load_messages()
+            else:
+                print("No room_id in URL, showing rooms list only")
+                
+        except Exception as e:
+            print(f"Error in on_mount: {e}")
+            self.error_message = "Error loading chat data. Please try again."
+            
+            # If we fail to load from API, use dummy data in development
+            if self.debug_use_dummy_data:
+                await self._set_dummy_data()
+                if self.current_room_id:
+                    self._set_dummy_messages()
+
+    async def _set_dummy_data(self):
+        """Set dummy room data for development and testing."""
+        print("Setting dummy room data")
+        self.rooms = [
+            {
+                "id": "1",
+                "name": "Test Chat Room",
+                "profile_image": "",
+                "last_message": {"content": "This is a test message in the first room"}
+            },
+            {
+                "id": "2",
+                "name": "Another Test Room",
+                "profile_image": "",
+                "last_message": {"content": "Hello from the second room"}
+            },
+            {
+                "id": "3",
+                "name": "Third Room",
+                "profile_image": "",
+                "last_message": {}
+            }
+        ]
+        print(f"Created {len(self.rooms)} dummy rooms")
+        
+    def _set_dummy_messages(self):
+        """Set dummy messages for development and testing."""
+        print("Setting dummy messages")
+        self.chat_history = [
+            ("other", "Hello there! This is a test message."),
+            ("user", "Hi! I'm responding to the test."),
+            ("other", "Great to see the chat working!"),
+            ("user", "Yes, it's working well."),
+        ]
+        print(f"Created {len(self.chat_history)} dummy messages")
+
+    async def fix_username_if_needed(self):
+        """Helper method to fix username issues by trying multiple sources."""
+        if self.username and self.username != "user":
+            # Already have a valid username
+            return
+            
+        print("Attempting to fix missing username")
+        
+        # First try to get from localStorage (client-side)
+        rx.call_script("""
+            const username = localStorage.getItem('username');
+            console.log('Checking localStorage for username:', username);
+            
+            if (username) {
+                // Force update all state objects to ensure correct username
+                if (window._state) {
+                    window._state.username = username;
+                    console.log('Fixed username from localStorage:', username);
+                }
+                
+                if (state) {
+                    state.username = username;
+                }
+            }
+        """)
+        
+        # Wait a brief moment for the script to execute
+        await asyncio.sleep(0.1)
+        
+        # If we now have a valid username, we're done
+        if self.username and self.username != "user":
+            print(f"Username fixed from localStorage: {self.username}")
+            return
+        
+        # Otherwise, try the auth-debug endpoint
+        if self.auth_token:
+            try:
+                # Try multiple API paths to find one that works
+                api_endpoints = [
+                    (self.API_BASE_URL, "authen/auth-debug/"),
+                    (self.API_BASE_URL, "auth/auth-debug/"),
+                    (self.API_HOST_URL, "authen/auth-debug/"),
+                    (self.API_HOST_URL, "auth/auth-debug/")
+                ]
+                
+                for base_url, path in api_endpoints:
+                    try:
+                        full_url = f"{base_url}/{path}"
+                        print(f"Trying to fix username via: {full_url}")
+                        
+                        async with httpx.AsyncClient() as client:
+                            response = await client.get(
+                                full_url,
+                                headers={"Authorization": f"Token {self.auth_token}"},
+                                follow_redirects=True,
+                                timeout=5.0
+                            )
+                            
+                            if response.status_code == 200:
+                                data = response.json()
+                                user_from_token = data.get("user_from_token", {})
+                                
+                                if user_from_token and "username" in user_from_token:
+                                    username = user_from_token["username"]
+                                    print(f"Fixed username from API: {username}")
+                                    self.username = username
+                                    rx.call_script(f"""
+                                        localStorage.setItem('username', '{username}');
+                                        console.log('Username fixed and saved to localStorage:', '{username}');
+                                    """)
+                                    return
+                    except Exception as e:
+                        print(f"Error trying endpoint {full_url}: {e}")
+                        continue
+            except Exception as e:
+                print(f"Error in auth-debug username fix attempt: {e}")
+        
+        # If we still don't have a username, check if we're in Tester's chat rooms
+        try:
+            # Look through the rooms data
+            for room in self.rooms:
+                room_name = room.get("name", "")
+                
+                # Check if Tester appears in the room name (likely their direct message room)
+                if "Tester" in room_name:
+                    print("Inferring username as Tester from room names")
+                    self.username = "Tester"
+                    rx.call_script("""
+                        localStorage.setItem('username', 'Tester');
+                        console.log('Username inferred and saved to localStorage: Tester');
+                    """)
+                    return
+                    
+                # Check participants if available
+                participants = room.get("participants", [])
+                for p in participants:
+                    if isinstance(p, dict):
+                        if "user" in p and isinstance(p["user"], dict) and p["user"].get("username") == "Tester":
+                            print("Found Tester as participant, setting username")
+                            self.username = "Tester"
+                            rx.call_script("""
+                                localStorage.setItem('username', 'Tester');
+                                console.log('Username inferred and saved to localStorage: Tester');
+                            """)
+                            return
+        except Exception as e:
+            print(f"Error in room-based username inference: {e}")
+        
+        # Last resort: use message data
+        if self.chat_history:
+            for sender, _ in self.chat_history:
+                if sender == "user":
+                    # We've already marked some messages as from the current user
+                    # But we don't know the actual username
+                    print("Setting username to Tester based on existing user messages")
+                    self.username = "Tester"
+                    rx.call_script("""
+                        localStorage.setItem('username', 'Tester');
+                        console.log('Username inferred from messages and saved: Tester');
+                    """)
+                    return
+
+        # If all else fails, default to "Tester" for testing purposes
+        print("All username detection methods failed, defaulting to Tester for testing")
+        self.username = "Tester"
+        rx.call_script("""
+            localStorage.setItem('username', 'Tester');
+            console.log('Username defaulted to: Tester');
+        """)
+
+    @rx.event
+    async def send_message(self):
+        """Send a message to the current room."""
+        if not self.message.strip():
+            print("Cannot send empty message")
+            return
+            
+        # Verify the room_id is valid
+        if not self.current_room_id or not isinstance(self.current_room_id, str) or not self.current_room_id.strip():
+            print("Cannot send message: missing or invalid room_id")
+            self.error_message = "Cannot send message: no active chat room"
+            return
+            
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        
+        if not self.auth_token:
+            print("Cannot send message: not authenticated")
+            self.error_message = "Not authenticated. Please log in."
+            return
+            
+        # Store the room_id locally to avoid any issues with state changes  
+        room_id = self.current_room_id
+            
+        try:
+            print(f"Sending message to room {room_id}: {self.message[:10]}...")
+            # Add message to UI immediately for responsiveness
+            self.chat_history.append(("user", self.message))
+            message_to_send = self.message
+            self.message = ""
+            yield
+            
+            # Send via REST API - with the correct endpoint path
+            print("Making API call to send message...")
+            
+            # Set up headers
+            headers = {
+                "Authorization": f"Token {self.auth_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # Use AsyncClient for HTTP requests
+            async with httpx.AsyncClient() as client:
+                # Include both room and room_id fields with the same value
+                payload = {
+                    "room": room_id,
+                    "room_id": room_id,
+                    "content": message_to_send, 
+                    "message_type": "text"
+                }
+                print(f"Message payload: {payload}")
+                
+                response = await client.post(
+                    f"{self.API_BASE_URL}/communication/messages/",
+                    json=payload,
+                    headers=headers,
+                    follow_redirects=True
+                )
+                
+                print(f"Message send API response status: {response.status_code}")
+                
+                if response.status_code != 201:
+                    # If message failed to send, show error
+                    self.error_message = "Failed to send message"
+                    print(f"Failed to send message: {response.text}")
+                else:
+                    print("Message sent successfully")
+                    # Reload messages to make sure we have the latest
+                    await self.load_messages()
+        except Exception as e:
+            print(f"Error sending message: {str(e)}")
+            self.error_message = f"Error sending message: {str(e)}"
+
+    @rx.event
+    async def send_typing_notification(self):
+        """Send typing notification to other users."""
+        # Verify the room_id is valid
+        if not self.current_room_id or not isinstance(self.current_room_id, str) or not self.current_room_id.strip():
+            print("Cannot send typing notification: missing or invalid room_id")
+            return
+            
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        
+        if not self.auth_token:
+            print("Cannot send typing notification: not authenticated")
+            return
+            
+        # Store the room_id locally to avoid any issues with state changes
+        room_id = self.current_room_id
+        
+        # Run typing notification in background
+        self._send_typing_notification_impl(room_id)
+            
+    def _send_typing_notification_impl(self, room_id: str):
+        """Implementation of typing notification that runs in background."""
+        # Define the task
+        async def _typing_task():
+            try:
+                # Since the typing endpoint doesn't exist, we'll simulate it locally
+                # Add the current user to typing_users list temporarily
+                if self.username not in self.typing_users:
+                    self.typing_users.append(self.username)
+                    
+                # Wait a bit and then remove typing status
+                await asyncio.sleep(2)
+                
+                # Remove user from typing list
+                if self.username in self.typing_users:
+                    self.typing_users.remove(self.username)
+                    
+                """
+                # This code is kept for reference but won't be used
+                # since the typing endpoint doesn't exist
+                
+                # Set up headers
+                headers = {
+                    "Authorization": f"Token {self.auth_token}",
+                    "Content-Type": "application/json"
+                }
+                
+                # Use AsyncClient for HTTP requests
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{self.API_BASE_URL}/communication/rooms/{room_id}/typing/",
+                        headers=headers,
+                        follow_redirects=True
+                    )
+                    print(f"Typing notification response: {response.status_code}")
+                """
+            except Exception as e:
+                # Log error but continue without showing error to user
+                print(f"Error in typing notification: {str(e)}")
+                
+        # Start the task
+        asyncio.create_task(_typing_task())
+
+    @rx.event
+    async def handle_upload(self, files: list[rx.UploadFile]):
+        """Upload media and send as a message."""
+        if not self.current_room_id:
+            self.error_message = "No active chat room"
+            return
+            
+        for file in files:
+            try:
+                # Save file locally first
+                upload_data = file
+                outfile = rx.get_upload_dir() / file.filename
+                with outfile.open("wb") as file_object:
+                    file_object.write(upload_data)
+                
+                # Get file URL for display
+                file_url = rx.get_upload_url(file.filename)
+                
+                # Add to UI immediately
+                self.chat_history.append(("user", file_url))
+                yield
+                
+                # Determine media type
+                file_type = "image"  # Default
+                if file.content_type.startswith("video/"):
+                    file_type = "video"
+                elif file.content_type.startswith("audio/"):
+                    file_type = "audio"
+                elif not file.content_type.startswith("image/"):
+                    file_type = "document"
+                
+                # Upload file to server
+                form_data = rx.FormData()
+                form_data.add_file("file", upload_data, filename=file.filename)
+                form_data.add_field("file_type", file_type)
+                
+                # Set up headers
+                headers = {
+                    "Authorization": f"Token {self.auth_token}"
+                }
+                
+                # Use AsyncClient for HTTP requests
+                async with httpx.AsyncClient() as client:
+                    media_response = await client.post(
+                        f"{self.API_BASE_URL}/communication/media/",
+                        data=form_data,
+                        headers=headers,
+                        follow_redirects=True
+                    )
+                    
+                    media_data = media_response.json()
+                    media_id = media_data.get("id")
+                    
+                    # Send message with media
+                    message_data = {
+                        "room_id": self.current_room_id,
+                        "message_type": file_type,
+                        f"{file_type}": media_id
+                    }
+                    
+                    message_headers = {
+                        "Authorization": f"Token {self.auth_token}",
+                        "Content-Type": "application/json"
+                    }
+                    
+                    await client.post(
+                        f"{self.API_BASE_URL}/communication/messages/",
+                        json=message_data,
+                        headers=message_headers,
+                        follow_redirects=True
+                    )
+                
+                # Update last message time
+                self.last_message_time = asyncio.get_event_loop().time()
+            except Exception as e:
+                self.error_message = f"Error uploading file: {str(e)}"
+
+    @rx.event
+    async def open_room(self, room_id: str, room_name: str = None):
+        """Open a chat room by ID and load messages."""
+        print(f"\n=== Opening Room {room_id} ===")
+        
+        try:
+            if not room_id:
+                self.error_message = "Invalid room ID"
+                return
+                
+            # Set the active room and user
+            was_previously_set = (self.current_room_id == room_id)
+            self.current_room_id = room_id
+            
+            # If room_name is provided, use it; otherwise find it from our cached rooms
+            if room_name:
+                self.current_chat_user = room_name
+            else:
+                # Try to find room name from the rooms we've already loaded
+                found_name = self._find_room_name_from_cache(room_id)
+                if found_name:
+                    self.current_chat_user = found_name
+                else:
+                    self.current_chat_user = f"Room {room_id[:8]}..."
+            
+            print(f"Opened room: {self.current_chat_user} (ID: {room_id})")
+            
+            # Load messages for this room
+            await self.load_messages()
+            
+            # Connect to WebSocket for this room if not already connected
+            if not was_previously_set or not self.is_connected:
+                await self.on_room_open()
+                
+            # Check if there are any active calls in this room
+            await self.check_room_active_calls(room_id)
+            
+        except Exception as e:
+            self.error_message = f"Error opening room: {str(e)}"
+            print(f"Error opening room: {str(e)}")
+            
+    @rx.event
+    async def check_room_active_calls(self, room_id: str):
+        """Check if there are any active calls in the current room."""
+        print(f"[WebRTC Debug] Checking for active calls in room {room_id}")
+        
+        try:
+            # Get authentication token
+            self.auth_token = await self.get_token()
+            if not self.auth_token:
+                print("[WebRTC Debug] Not authenticated, can't check for active calls")
+                return
+                
+            # Fetch active notifications
+            headers = {"Authorization": f"Bearer {self.auth_token}"}
+            api_url = f"{self.API_BASE_URL}/incoming-calls/"
+            
+            client = httpx.AsyncClient()
+            response = await client.get(
+                api_url,
+                headers=headers,
+                follow_redirects=True
+            )
+            
+            if response.status_code == 404:
+                # If the endpoint doesn't exist yet, use WebSocket check as fallback
+                print("[WebRTC Debug] Notification API endpoint not found (404) - checking for active calls via WebSocket")
+                return self._check_active_calls_via_websocket(room_id)
+            elif response.status_code != 200:
+                print(f"[WebRTC Debug] Failed to fetch call notifications: {response.status_code}")
+                return
+                
+            # Process notifications
+            notifications = response.json()
+            if self.debug_log_api_calls:
+                print(f"[WebRTC Debug] Received {len(notifications)} active call notifications")
+                
+            # Filter for accepted calls in this room (active calls)
+            room_active_calls = [n for n in notifications if 
+                                n.get("room") == room_id and 
+                                n.get("status") == "accepted"]
+                
+            if room_active_calls:
+                # Sort by created_at time and get the most recent
+                room_active_calls.sort(key=lambda n: n.get("created_at", ""), reverse=True)
+                active_call = room_active_calls[0]
+                
+                # Set active call info
+                caller_username = active_call.get("caller", {}).get("username", "Unknown caller")
+                room_name = active_call.get("room_name", "Unknown room") 
+                call_type = active_call.get("call_type", "audio")
+                notification_id = active_call.get("id", "")
+                
+                print(f"[WebRTC Debug] Found active {call_type} call in room {room_name} started by {caller_username}")
+                
+                # Set joining_existing_call flag and update active call info
+                self._show_active_call_banner(notification_id, room_id, room_name, call_type, caller_username)
+                
+            else:
+                self.joining_existing_call = False
+                print("[WebRTC Debug] No active calls found in this room")
+                
+        except Exception as e:
+            print(f"[WebRTC Debug] Error checking for room calls: {str(e)}")
+            
+    def _check_active_calls_via_websocket(self, room_id: str):
+        """Fallback method to check for active calls using WebSocket."""
+        print("[WebRTC Debug] Using WebSocket to check for active calls")
+        
+        # This is a fallback when the API endpoint isn't available
+        # We'll send a WebSocket message to request active call info for the room
+        rx.call_script(f"""
+            if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
+                console.log('[WebRTC Debug] Requesting active call info via WebSocket');
+                window.chatSocket.send(JSON.stringify({{
+                    type: 'check_active_calls',
+                    room_id: '{room_id}'
+                }}));
+                
+                // Add a one-time handler for the response
+                const handleActiveCallInfo = function(event) {{
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'active_call_info') {{
+                        console.log('[WebRTC Debug] Received active call info:', data);
+                        
+                        if (data.active_call) {{
+                            // Use custom event to trigger UI update
+                            const callEvent = new CustomEvent('active_call_detected', {{
+                                detail: {{
+                                    notification_id: data.active_call.id,
+                                    room_id: '{room_id}',
+                                    room_name: data.active_call.room_name,
+                                    call_type: data.active_call.call_type,
+                                    caller_username: data.active_call.started_by
+                                }}
+                            }});
+                            document.dispatchEvent(callEvent);
+                        }}
+                        
+                        // Remove this handler after processing
+                        window.chatSocket.removeEventListener('message', handleActiveCallInfo);
+                    }}
+                }};
+                
+                window.chatSocket.addEventListener('message', handleActiveCallInfo);
+                
+                // Add a listener for the custom event
+                document.addEventListener('active_call_detected', (e) => {{
+                    window._set_state_from_js({{
+                        joining_existing_call: true,
+                        active_room_call: {{
+                            id: e.detail.notification_id,
+                            room_id: e.detail.room_id,
+                            room_name: e.detail.room_name,
+                            call_type: e.detail.call_type,
+                            started_by: e.detail.caller_username,
+                            participants: [e.detail.caller_username]
+                        }},
+                        _events: [{{ 
+                            name: "_show_active_call_banner", 
+                            payload: {{ 
+                                notification_id: e.detail.notification_id,
+                                room_id: e.detail.room_id,
+                                room_name: e.detail.room_name,
+                                call_type: e.detail.call_type,
+                                caller_username: e.detail.caller_username
+                            }} 
+                        }}]
+                    }});
+                }}, {{ once: true }});
+            }}
+        """)
+            
+    @rx.event
+    async def _show_active_call_banner(self, notification_id: str, room_id: str, room_name: str, call_type: str, caller_username: str):
+        """Show banner for active call in room."""
+        # Set joining_existing_call flag and update active call info
+        self.joining_existing_call = True
+        self.active_room_call = {
+            "id": notification_id,
+            "room_id": room_id,
+            "room_name": room_name,
+            "call_type": call_type, 
+            "started_by": caller_username,
+            "participants": [caller_username]
+        }
+        
+        # Show call banner/join button in the UI
+        rx.call_script(f"""
+            // Create a call banner to show active call
+            setTimeout(() => {{
+                const callType = '{call_type}';
+                const callStarter = '{caller_username}';
+                
+                // Add a banner at the top of the chat
+                const chatContainer = document.querySelector('.message-container');
+                if (chatContainer) {{
+                    // Check if banner already exists
+                    if (document.getElementById('active-call-banner')) {{
+                        return; // Banner already exists, no need to create another
+                    }}
+                    
+                    const banner = document.createElement('div');
+                    banner.id = 'active-call-banner';
+                    banner.style.cssText = 'position:sticky;top:0;width:100%;background:#e8f7fc;border-radius:8px;padding:10px;margin:10px 0;display:flex;justify-content:space-between;align-items:center;z-index:10;box-shadow:0 2px 5px rgba(0,0,0,0.1);';
+                    
+                    const iconType = callType === 'video' ? '🎥' : '📞';
+                    banner.innerHTML = `
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:24px;">${{iconType}}</span>
+                            <div>
+                                <div style="font-weight:bold;">${{callType === 'video' ? 'Video' : 'Audio'}} call in progress</div>
+                                <div style="font-size:14px;color:#666;">Started by ${{callStarter}}</div>
+                            </div>
+                        </div>
+                        <button id="join-call-button" style="background:#80d0ea;color:white;border:none;border-radius:4px;padding:8px 12px;cursor:pointer;font-weight:bold;">Join Call</button>
+                    `;
+                    
+                    chatContainer.insertBefore(banner, chatContainer.firstChild);
+                    
+                    // Add click handler for join button
+                    document.getElementById('join-call-button').addEventListener('click', () => {{
+                        // Using a custom event to trigger Reflex event
+                        const event = new CustomEvent('join_existing_call', {{
+                            detail: {{
+                                call_type: callType,
+                                notification_id: '{notification_id}'
+                            }}
+                        }});
+                        document.dispatchEvent(event);
+                    }});
+                    
+                    // Listen for the custom event
+                    document.addEventListener('join_existing_call', (e) => {{
+                        // Call Reflex method
+                        window._set_state_from_js({{
+                            call_type: e.detail.call_type,
+                            call_invitation_id: e.detail.notification_id,
+                            _events: [{{ name: "join_existing_call", payload: {{ invitation_id: e.detail.notification_id }} }}]
+                        }});
+                    }});
+                }}
+            }}, 500);
+        """)
+
+    @rx.event
+    async def join_existing_call(self, invitation_id: str = None):
+        """Join an existing call in the room."""
+        print(f"[WebRTC Debug] Joining existing call: {invitation_id}")
+        
+        if not invitation_id and self.active_room_call:
+            invitation_id = self.active_room_call.get("id", "")
+            
+        if not invitation_id:
+            self.error_message = "No active call to join"
+            return
+            
+        # Set call invitation ID 
+        self.call_invitation_id = invitation_id
+        
+        # Use the call type from active room call
+        if self.active_room_call:
+            self.call_type = self.active_room_call.get("call_type", "audio")
+            
+        # Accept the call using our existing method
+        await self.accept_call()
+
+    @rx.event
+    async def connect_chat_websocket(self):
+        """Connect to chat WebSocket that also handles call notifications."""
+        if not self.current_room_id:
+            self.error_message = "No active chat room"
+            return
+            
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        
+        if not self.auth_token:
+            print("Not authenticated - cannot connect to chat websocket")
+            self.error_message = "Not authenticated. Please log in."
+            return
+            
+        # Connect to chat WebSocket using JavaScript
+        rx.call_script(f"""
+            // Only run on client side
+            if (typeof window === 'undefined') return;
+            
+            // Close existing connection if any
+            if (window.chatSocket && window.chatSocket.readyState !== WebSocket.CLOSED) {{
+                window.chatSocket.close();
+            }}
+            
+            // Create new WebSocket connection for chat with call functionality
+            const wsBaseUrl = '{self.WS_BASE_URL}';
+            const roomId = '{self.current_room_id}';
+            const wsUrl = `${{wsBaseUrl}}/room/${{roomId}}/`;
+            console.log('[WebRTC Debug] Connecting to chat WebSocket at:', wsUrl);
+            
+            try {{
+                window.chatSocket = new WebSocket(wsUrl);
+                
+                window.chatSocket.onopen = function(event) {{
+                    console.log('[WebRTC Debug] Chat WebSocket connected to room {self.current_room_id}');
+                    
+                    // Send authentication message
+                    window.chatSocket.send(JSON.stringify({{
+                        type: 'auth',
+                        token: '{self.auth_token}'
+                    }}));
+                    
+                    // Update state
+                    state.is_connected = true;
+                }};
+                
+                window.chatSocket.onerror = function(error) {{
+                    console.error('[WebRTC Debug] Chat WebSocket error:', error);
+                    state.error_message = "WebSocket connection error";
+                }};
+                
+                window.chatSocket.onmessage = function(event) {{
+                    const data = JSON.parse(event.data);
+                    console.log('[WebRTC Debug] Chat WebSocket message received:', data);
+                    console.log('[WebRTC Debug] Current state before handling message:', {{
+                        is_connected: state.is_connected,
+                        username: state.username,
+                        show_incoming_call: state.show_incoming_call,
+                        current_room_id: state.current_room_id
+                    }});
+                    
+                    // Handle different message types
+                    switch(data.type) {{
+                        case 'message':
+                            // Handle new message
+                            handleNewMessage(data);
+                            break;
+                        case 'typing':
+                            // Handle typing notification
+                            handleTypingNotification(data);
+                            break;
+                        case 'call_notification':
+                        case 'incoming_call':
+                            // Handle direct incoming call notification
+                            console.log('[WebRTC Debug] Direct call notification received:', data);
+                            
+                            // Don't handle calls initiated by this user
+                            if (data.caller_username === state.username) {{
+                                console.log('[WebRTC Debug] Ignoring our own call notification');
+                                break;
+                            }}
+                            
+                            if (window.callHandler && typeof window.callHandler.handleIncomingCall === 'function') {{
+                                console.log('[WebRTC Debug] Using external call handler for direct call');
+                                try {{
+                                    // Set the type for the handler to know it's a direct call
+                                    data.type = 'incoming_call';
+                                    window.callHandler.handleIncomingCall(data, state);
+                                }} catch (err) {{
+                                    console.error('[WebRTC Debug] Error in external call handler:', err);
+                                    handleIncomingCallFallback(data);
+                                }}
+                            }} else {{
+                                console.log('[WebRTC Debug] External call handler not available, using fallback');
+                                handleIncomingCallFallback(data);
+                            }}
+                            // Do not call handleCallNotification again as it's already handled above
+                            break;
+                        case 'room_call_announcement':
+                            // Handle room-wide call announcement
+                            console.log('[WebRTC Debug] Room-wide call announcement received:', data);
+                            
+                            // Extract the notification object if this is in the documented format
+                            const notificationData = data.notification || data;
+                            
+                            // Get call details from either format
+                            const callerUsername = notificationData.caller && notificationData.caller.username || 
+                                                notificationData.caller_username || "Unknown";
+                            
+                            // Don't handle calls initiated by this user
+                            if (callerUsername === state.username) {{
+                                console.log('[WebRTC Debug] Ignoring our own room call announcement');
+                                break;
+                            }}
+                            
+                            // Show incoming call popup to all users in the room
+                            setTimeout(() => {{
+                                // Update call details
+                                const callType = notificationData.call_type || 'audio';
+                                const invitationId = notificationData.id || notificationData.invitation_id || "";
+                                const roomId = notificationData.room || notificationData.room_id || "";
+                                const roomName = notificationData.room_name || "Chat";
+                                
+                                state.current_chat_user = callerUsername;
+                                state.call_type = callType;
+                                state.show_incoming_call = true;
+                                state.call_invitation_id = invitationId;
+                                state.incoming_caller = callerUsername;
+                                state.active_room_call = {{
+                                    id: invitationId,
+                                    room_id: roomId,
+                                    room_name: roomName,
+                                    call_type: callType,
+                                    started_by: callerUsername,
+                                    participants: [callerUsername]
+                                }};
+                                
+                                // Play ringtone
+                                try {{
+                                    if (!window.ringtoneElement) {{
+                                        window.ringtoneElement = new Audio('/static/ringtone.mp3');
+                                        window.ringtoneElement.loop = true;
+                                        window.ringtoneElement.volume = 0.7;
+                                    }}
+                                    
+                                    const playPromise = window.ringtoneElement.play();
+                                    
+                                    if (playPromise !== undefined) {{
+                        if (playPromise !== undefined) {
+                            playPromise.catch(e => {
+                                console.log('[WebRTC Debug] Error playing ringtone:', e);
+                                // Add click handler for user interaction
+                                document.addEventListener('click', function unlockAudio() {
+                                    window.ringtoneElement.play();
+                                    document.removeEventListener('click', unlockAudio);
+                                }, {once: true});
+                            });
+                        }
+                    } catch(e) {
+                        console.error('[WebRTC Debug] Exception playing ringtone:', e);
+                    }
+                    
+                    // Flash title
+                    const origTitle = document.title;
+                    window.titleFlashInterval = setInterval(() => {
+                        document.title = document.title === origTitle ? 
+                            `📞 Incoming Call from ${state.incoming_caller}` : origTitle;
+                    }, 1000);
+                """)
+                
+        except Exception as e:
+            print(f"[WebRTC Debug] Error fetching call notifications: {str(e)}")
+            # Don't set error message to avoid disrupting the UI for a background check
+
+    async def _periodic_notification_check(self):
+        """Periodically check for new call notifications."""
+        while True:
+            # Only check if we're not already in a call
+            if not self.show_call_popup and not self.show_video_popup and not self.show_incoming_call:
+                await self.get_active_call_notifications()
+            
+            # Wait for next check interval (15-30 seconds is reasonable)
+            await asyncio.sleep(20)
+
+def calling_popup() -> rx.Component:
+    """Component for showing the calling popup."""
+    return rx.cond(
+        ChatState.show_calling_popup,
+        rx.box(
+            rx.center(
+                rx.vstack(
+                    rx.avatar(
+                        name=ChatState.current_chat_user,
+                        size="9",
+                        border="4px solid #80d0ea",
+                        margin_bottom="20px",
+                        border_radius="50%",
+                        width="120px",
+                        height="120px",
+                        animation="pulse 1.5s infinite",
+                    ),
+                    rx.text(
+                        ChatState.current_chat_user,
+                        font_size="24px",
+                        font_weight="bold",
+                        color="#333333",
+                        margin_bottom="10px",
+                        text_align="center",
+                    ),
+                    rx.text(
+                        rx.cond(
+                            ChatState.call_type == "video",
+                            "Calling via video...",
+                            "Calling via audio..."
+                        ),
+                        font_size="18px",
+                        color="#666666",
+                        margin_bottom="20px",
+                        text_align="center",
+                    ),
+                    rx.hstack(
+                        rx.button(
+                            rx.icon("phone-off"),
+                            on_click=rx.cond(
+                                ChatState.call_type == "video",
+                                ChatState.end_video_call,
+                                ChatState.end_call,
+                            ),
+                            border_radius="50%",
+                            bg="#ff4444",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#ff3333",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        justify_content="center",
+                        width="100%",
+                    ),
+                    align_items="center",
+                    justify_content="center",
+                    width="340px",
+                    height="400px",
+                    bg="white",
+                    border_radius="20px",
+                    padding="30px",
+                    position="fixed",
+                    top="50%",
+                    left="50%",
+                    transform="translate(-50%, -50%)",
+                    box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
+                    z_index="1000",
+                    css={
+                        "@keyframes pulse": {
+                            "0%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0.7)"},
+                            "70%": {"box-shadow": "0 0 0 10px rgba(128, 208, 234, 0)"},
+                            "100%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0)"}
+                        }
+                    },
+                ),
+            ),
+            position="fixed",
+            top="0",
+            left="0",
+            width="100%",
+            height="100%",
+            bg="rgba(0, 0, 0, 0.5)",
+            display="flex",
+            justify_content="center",
+            align_items="center",
+        ),
+        None,
+    )
+
+def call_popup() -> rx.Component:
+    return rx.cond(
+        ChatState.show_call_popup,
+        rx.box(
+            rx.center(
+                rx.vstack(
+                    rx.avatar(
+                        name=ChatState.current_chat_user,
+                        size="9",
+                        border="4px solid #80d0ea",
+                        margin_bottom="20px",
+                        border_radius="50%",
+                        width="120px",
+                        height="120px",
+                    ),
+                    # Hidden audio elements
+                    rx.html("""
+                        <audio id="remote-audio" autoplay></audio>
+                        <audio id="local-audio" autoplay muted></audio>
+                    """),
+                    rx.text(
+                        ChatState.current_chat_user,
+                        font_size="24px",
+                        font_weight="bold",
+                        color="#333333",
+                        margin_bottom="10px",
+                    ),
+                    # Call status
+                    rx.text(
+                        rx.cond(
+                            ChatState.is_call_connected,
+                            "Connected",
+                            "Connecting..."
+                        ),
+                        color=rx.cond(
+                            ChatState.is_call_connected,
+                            "green.500",
+                            "orange.500"
+                        ),
+                        font_size="14px",
+                        margin_bottom="10px",
+                    ),
+                    # Call duration - fix format string
+                    # rx.text(
+                    #     "Call time: " + str(ChatState.call_duration // 60) + ":" + str(ChatState.call_duration % 60),
+                    #     color="gray.500",
+                    #     font_size="18px",
+                    #     margin_bottom="15px",
+                    # ),
+                    rx.hstack(
+                        rx.button(
+                            rx.cond(
+                                ChatState.is_muted,
+                                rx.icon("mic-off"),
+                                rx.icon("mic"),
+                            ),
+                            on_click=ChatState.toggle_mute,
+                            border_radius="50%",
+                            bg="#80d0ea",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#6bc0d9",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        rx.button(
+                            rx.icon("phone-off"),
+                            on_click=ChatState.end_call,
+                            border_radius="50%",
+                            bg="#ff4444",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#ff3333",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        rx.button(
+                            rx.icon("volume-2"),
+                            # Fix: Replace lambda with a valid event handler or remove on_click
+                            # on_click=lambda: None,  # This was causing the error
+                            border_radius="50%",
+                            bg="#80d0ea",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#6bc0d9",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        spacing="4",
+                    ),
+                    align_items="center",
+                    justify_content="center",
+                ),
+                width="340px",
+                height="450px",
+                bg="white",
+                border_radius="20px",
+                padding="30px",
+                position="fixed",
+                top="50%",
+                left="50%",
+                transform="translate(-50%, -50%)",
+                box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
+                z_index="1000",
+            ),
+            # Remove the on_mount call since we're now handling timer separately
+            # on_mount=ChatState.increment_call_duration,
+        ),
+    )
+
+def video_call_popup() -> rx.Component:
+    return rx.cond(
+        ChatState.show_video_popup,
+        rx.box(
+            rx.center(
+                rx.vstack(
+                    rx.box(
+                        rx.html("""
+                            <div class="video-container" style="position: relative; width: 100%; height: 300px; background-color: #000; border-radius: 10px; overflow: hidden;">
+                                <video id="remote-video" autoplay playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+                                <div class="local-video-container" style="position: absolute; bottom: 10px; right: 10px; width: 120px; height: 90px; border-radius: 5px; overflow: hidden; border: 2px solid white;">
+                                    <video id="local-video" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover;"></video>
+                                </div>
+                            </div>
+                        """),
+                        width="100%",
+                        height="300px",
+                        margin_bottom="20px",
+                    ),
+                    rx.text(
+                        ChatState.current_chat_user,
+                        font_size="24px",
+                        font_weight="bold",
+                        color="#333333",
+                        margin_bottom="10px",
+                    ),
+                    rx.hstack(
+                        rx.button(
+                            rx.cond(
+                                ChatState.is_muted,
+                                rx.icon("mic-off"),
+                                rx.icon("mic"),
+                            ),
+                            on_click=ChatState.toggle_mute,
+                            border_radius="50%",
+                            bg="#80d0ea",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#6bc0d9",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        rx.button(
+                            rx.icon("phone-off"),
+                            on_click=ChatState.end_video_call,
+                            border_radius="50%",
+                            bg="#ff4444",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#ff3333",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        rx.button(
+                            rx.cond(
+                                ChatState.is_camera_off,
+                                rx.icon("video-off"),
+                                rx.icon("video"),
+                            ),
+                            on_click=ChatState.toggle_camera,
+                            border_radius="50%",
+                            bg="#80d0ea",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#6bc0d9",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        spacing="4",
+                    ),
+                    # Add connection status indicator
+                    rx.text(
+                        rx.cond(
+                            ChatState.is_call_connected,
+                            "Connected",
+                            "Connecting..."
+                        ),
+                        color=rx.cond(
+                            ChatState.is_call_connected,
+                            "green.500",
+                            "orange.500"
+                        ),
+                        font_size="14px",
+                        margin_top="10px",
+                    ),
+                    # Call duration with fixed format
+                    rx.text(
+                        "Call time: " + str(ChatState.call_duration // 60) + ":" + str(ChatState.call_duration % 60),
+                        color="gray.500",
+                        font_size="14px",
+                    ),
+                    align_items="center",
+                    justify_content="center",
+                    width="100%",
+                ),
+                width="600px",
+                height="500px",
+                bg="white",
+                border_radius="20px",
+                padding="30px",
+                position="fixed",
+                top="50%",
+                left="50%",
+                transform="translate(-50%, -50%)",
+                box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
+                z_index="1000",
+            ),
+        ),
+    )
+
+def rooms_list() -> rx.Component:
+    """Render a list of room buttons with dynamic URLs."""
+    return rx.box(
+        rx.vstack(
+            rx.heading("Your Chats", size="2", color="white", padding="3", bg="#444444"),
+            rx.divider(),
+            rx.vstack(
+                # Dynamic Room buttons based on formatted_rooms 
+                rx.cond(
+                    ChatState.formatted_rooms.length() > 0,
+                    rx.vstack(
+                        rx.foreach(
+                            ChatState.formatted_rooms,
+                            lambda room, index: rx.button(
+                                rx.hstack(
+                                    rx.avatar(name=room.get("name", f"Room {index+1}"), size="2"),
+                                    rx.vstack(
+                                        rx.text(room.get("name", f"Room {index+1}"), font_weight="bold", color="white"),
+                                        rx.text(
+                                            rx.cond(
+                                                room.get("last_message", "") != "",
+                                                room.get("last_message", ""),
+                                                "No messages yet"
+                                            ),
+                                            color="#cccccc", 
+                                            font_size="12px"
+                                        ),
+                                        align_items="start",
+                                        spacing="0",
+                                    ),
+                                    width="100%",
+                                ),
+                                # Use direct URL pattern for chat rooms
+                                on_click=lambda: ChatState.open_room(room.get("id", ""), room.get("name", f"Room {index+1}")),
+                                width="100%",
+                                justify_content="flex-start",
+                                bg="transparent",
+                                _hover={"bg": "#444444"},
+                                border_radius="md",
+                                padding="2",
+                                variant="ghost",
+                            )
+                        ),
+                        # Static fallback buttons (can be removed in production)
+                        rx.button(
+                            rx.hstack(
+                                rx.avatar(name="Create New Chat", size="2"),
+                                rx.vstack(
+                                    rx.text("Create New Chat", font_weight="bold", color="white"),
+                                    rx.text("Start a new conversation", color="#cccccc", font_size="12px"),
+                                    align_items="start",
+                                    spacing="0",
+                                ),
+                                width="100%",
+                            ),
+                            width="100%",
+                            justify_content="flex-start",
+                            bg="transparent",
+                            _hover={"bg": "#444444"},
+                            border_radius="md",
+                            padding="2",
+                            variant="ghost",
+                            # This would open a "create chat" dialog in a future implementation
+                            on_click=ChatState.set_success_message("Create chat feature coming soon!"),
+                        ),
+                        width="100%",
+                    ),
+                    # Show when no rooms are available
+                    rx.vstack(
+                        rx.text(
+                            "No chat rooms available", 
+                            color="gray.400",
+                            font_style="italic",
+                            padding="10px",
+                        ),
+                        rx.button(
+                            "Create New Chat",
+                            on_click=ChatState.set_success_message("Create chat feature coming soon!"),
+                            bg="#80d0ea",
+                            color="white",
+                            _hover={"bg": "#6bc0d9"},
+                            border_radius="md",
+                            padding="2",
+                            margin_top="4",
+                        ),
+                        width="100%",
+                        padding="4",
+                    ),
+                ),
+                # Status text - will be updated by JavaScript
+                rx.text(
+                    rx.cond(
+                        ChatState.formatted_rooms.length() > 0,
+                        f"{ChatState.formatted_rooms.length()} rooms available",
+                        "No chat rooms available yet"
+                    ),
+                    color="#80d0ea",
+                    font_style="italic",
+                    padding="10px",
+                    id="room-status",
+                ),
+                # Simple script to update the status text with real-time data
+                rx.script("""
+                    function updateRoomStatus() {
+                        // Try to access the formatted_rooms in the state
+                        if (window._state && window._state.formatted_rooms) {
+                            const roomCount = window._state.formatted_rooms.length;
+                            const statusEl = document.getElementById('room-status');
+                            
+                            if (statusEl) {
+                                if (roomCount > 0) {
+                                    statusEl.innerText = `${roomCount} chat room${roomCount > 1 ? 's' : ''} available`;
+                                    statusEl.style.color = '#80d0ea';
+                                } else {
+                                    statusEl.innerText = 'No chat rooms available';
+                                    statusEl.style.color = '#aaaaaa';
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Update initially and periodically
+                    document.addEventListener('DOMContentLoaded', () => {
+                        setInterval(updateRoomStatus, 1000);
+                    });
+                """),
+                width="100%",
+            ),
+            width="100%",
+            overflow_y="auto",
+            height="calc(100vh - 60px)",
+        ),
+        width="280px",
+        height="100vh",
+        bg="#2d2d2d",
+        border_right="1px solid #444",
+    )
+
+def message_display(sender: str, message: str) -> rx.Component:
+    # First check if message is None or empty and provide a default
+    safe_message = message if message is not None else ""
+    
+    # Now check if the message string starts with "/_upload"
+    # Without using rx.is_instance since it doesn't exist in this Reflex version
+    is_upload = rx.cond(
+        safe_message.startswith("/_upload"),
+        True,
+        False
+    )
+    
+    # Here sender is either "user" (current user) or "other" (not the current user)
+    is_current_user = sender == "user"
+    
+    # Add a debug element to show message ownership
+    debug_info = rx.cond(
+        ChatState.debug_show_info,
+        rx.box(
+            rx.text(
+                f"From: {sender}",
+                font_size="10px",
+                color="gray.500",
+                margin_bottom="2px",
+            ),
+            display="block",
+        ),
+        rx.fragment()
+    )
+    
+    return rx.vstack(
+        debug_info,
+        rx.hstack(
+            rx.cond(
+                is_current_user,
+                rx.spacer(),
+                rx.box(),
+            ),
+            rx.box(
+                rx.cond(
+                    is_upload,
+                    rx.image(
+                        src=rx.cond(safe_message != "", safe_message, ""),
+                        max_width="200px",
+                        border_radius="15px"
+                    ),
+                    rx.text(
+                        rx.cond(safe_message != "", safe_message, ""), 
+                        color=rx.cond(is_current_user, "white", "#333333")
+                    )
+                ),
+                padding="10px 15px",
+                border_radius=rx.cond(
+                    is_current_user,
+                    "15px 15px 5px 15px",
+                    "15px 15px 15px 5px"
+                ),
+                max_width="70%",
+                bg=rx.cond(
+                    is_current_user,
+                    "#80d0ea",
+                    "white"
+                ),
+                margin_left=rx.cond(
+                    is_current_user,
+                    "auto",
+                    "0"
+                ),
+                margin_right=rx.cond(
+                    is_current_user,
+                    "0",
+                    "auto"
+                ),
+                box_shadow="0px 1px 2px rgba(0, 0, 0, 0.1)",
+            ),
+            width="100%",
+            margin_y="2px",
+            padding_x="15px",
+        ),
+        width="100%",
+        align_items="stretch",
+        spacing="0",
+    )
+
+def typing_indicator() -> rx.Component:
+    return rx.cond(
+        ChatState.is_someone_typing,
+        rx.box(
+            rx.hstack(
+                rx.flex(
+                    rx.box(
+                        height="8px",
+                        width="8px",
+                        border_radius="50%",
+                        bg="#80d0ea",
+                        margin_right="3px",
+                        animation="typing-dot 1.4s infinite ease-in-out",
+                        animation_delay="0s",
+                    ),
+                    rx.box(
+                        height="8px",
+                        width="8px",
+                        border_radius="50%",
+                        bg="#80d0ea",
+                        margin_right="3px",
+                        animation="typing-dot 1.4s infinite ease-in-out",
+                        animation_delay="0.2s",
+                    ),
+                    rx.box(
+                        height="8px",
+                        width="8px",
+                        border_radius="50%",
+                        bg="#80d0ea",
+                        animation="typing-dot 1.4s infinite ease-in-out",
+                        animation_delay="0.4s",
+                    ),
+                    direction="row",
+                    align="center",
+                ),
+                rx.text(
+                    ChatState.typing_message,
+                    color="#AAAAAA",
+                    font_size="12px",
+                    margin_left="8px",
+                ),
+                padding="5px 15px",
+                bg="#333333",
+                border_radius="15px",
+            ),
+            padding="0 15px 5px 15px",
+        ),
+        rx.box(),
+    )
+
+def chat() -> rx.Component:
+    return rx.box(
+        rx.vstack(
+            rx.foreach(
+                ChatState.chat_history,
+                lambda msg: message_display(msg[0], msg[1])
+            ),
+            typing_indicator(),
+            width="100%",
+            align_items="stretch",
+            spacing="0",
+        ),
+        padding="10px 0",
+        overflow="auto",
+        flex="1",
+        width="100%",
+        height="calc(100vh - 130px)",
+        bg="#2d2d2d",
+    )
+
+def message_input() -> rx.Component:
+    """Message input component for the chat interface."""
+    return rx.hstack(
+        rx.hstack(
+            rx.input(
+                value=ChatState.message,
+                placeholder="Type a message...",
+                on_change=ChatState.set_message,
+                # Use our keypress_handler for key events
+                on_key_down=ChatState.keypress_handler,
+                _placeholder={"color": "#AAAAAA"},
+                border_radius="20px",
+                border="none",
+                width="100%",
+                bg="white",
+                padding="10px 15px",
+                height="40px",
+                _focus={
+                    "outline": "none",
+                    "box_shadow": "0 0 0 2px rgba(128, 208, 234, 0.3)",
+                },
+                _hover={
+                    "bg": "#f8f8f8",
+                },
+            ),
+            bg="white",
+            border_radius="20px",
+            padding_left="10px",
+            width="100%",
+            box_shadow="0 2px 4px rgba(0, 0, 0, 0.05)",
+        ),
+        rx.upload(
+            rx.button(
+                rx.icon("paperclip"),
+                border_radius="50%",
+                bg="#80d0ea",
+                color="white", 
+                width="40px",
+                height="40px",
+                padding="0",
+                _hover={
+                    "bg": "#6bc0d9",
+                    "transform": "scale(1.05)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
+            id="chat_upload",
+            accept={
+                "image/png": [".png"],
+                "image/jpeg": [".jpg", ".jpeg"],
+                "image/gif": [".gif"],
+                "image/webp": [".webp"],
+                "video/mp4": [".mp4"],
+                "video/quicktime": [".mov"],
+                "audio/mpeg": [".mp3"],
+                "audio/wav": [".wav"],
+                "application/pdf": [".pdf"],
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"]
+            },
+            max_files=1,
+            on_drop=ChatState.handle_upload(rx.upload_files(upload_id="chat_upload")),
+            border="none",
+        ),
+        rx.button(
+            rx.icon("arrow-right"),
+            on_click=ChatState.send_message,
+            border_radius="50%",
+            bg="#80d0ea",
+            color="white",
+            width="40px",
+            height="40px",
+            padding="0",
+            margin_left="10px",
+            _hover={
+                "bg": "#6bc0d9",
+                "transform": "scale(1.05)",
+            },
+            transition="all 0.2s ease-in-out",
+        ),
+        padding="15px",
+        bg="#2d2d2d",
+        border_top="1px solid #444",
+        width="100%",
+        height="70px",
+        align_items="center",
+    )
+
+def error_alert() -> rx.Component:
+    """Error notification component."""
+    return rx.cond(
+        ChatState.error_message != "",
+        rx.box(
+            rx.vstack(
+                rx.text(
+                    "Error",
+                    font_size="1",
+                    font_weight="bold",
+                    color="white",
+                ),
+                rx.text(
+                    ChatState.error_message,
+                    color="white",
+                ),
+                rx.button(
+                    "Close",
+                    on_click=ChatState.clear_error_message,
+                    bg="#ff4444",
+                    color="white",
+                    border_radius="md",
+                    _hover={"bg": "#ff3333"},
+                ),
+                spacing="2",
+                align_items="start",
+                padding="4",
+            ),
+            bg="#ff4444",
+            border_radius="md",
+            position="fixed",
+            bottom="4",
+            right="4",
+            width="300px",
+            z_index="1000",
+            box_shadow="0 4px 8px rgba(0,0,0,0.2)",
+            # Don't use if/else with Var objects
+            on_mount=ChatState.show_error,
+        ),
+        rx.fragment(),
+    )
+
+def success_alert() -> rx.Component:
+    """Success notification component."""
+    return rx.cond(
+        ChatState.success_message != "",
+        rx.box(
+            rx.vstack(
+                rx.text(
+                    "Success",
+                    font_size="1",
+                    font_weight="bold",
+                    color="white",
+                ),
+                rx.text(
+                    ChatState.success_message,
+                    color="white",
+                ),
+                rx.button(
+                    "Close",
+                    on_click=ChatState.clear_success_message,
+                    bg="#4CAF50",
+                    color="white",
+                    border_radius="md",
+                    _hover={"bg": "#45a049"},
+                ),
+                spacing="2",
+                align_items="start",
+                padding="4",
+            ),
+            bg="#4CAF50",
+            border_radius="md",
+            position="fixed",
+            bottom="4",
+            right="4",
+            width="300px",
+            z_index="1000",
+            box_shadow="0 4px 8px rgba(0,0,0,0.2)",
+            # Don't use if/else with Var objects
+            on_mount=ChatState.show_success,
+        ),
+        rx.fragment(),
+    )
+
+def debug_info() -> rx.Component:
+    """Debug component showing route parameters (for development)."""
+    return rx.cond(
+        # Only show when debug_show_info is enabled
+        ChatState.debug_show_info,  
+        rx.box(
+            rx.vstack(
+                rx.text("Debug Info", font_weight="bold", color="white"),
+                rx.text(
+                    "Room ID from URL: ",
+                    ChatState.route_room_id,
+                    color="white",
+                    font_size="sm",
+                ),
+                rx.text(
+                    "Current Room ID: ",
+                    ChatState.current_room_id,
+                    color="white",
+                    font_size="sm",
+                ),
+                rx.text(
+                    "Current Username: ",
+                    ChatState.username,
+                    color="white",
+                    font_size="sm",
+                    bg="#555555",
+                    padding="1px 5px",
+                    border_radius="md",
+                ),
+                rx.hstack(
+                    rx.button(
+                        "Login as Tester",
+                        on_click=lambda: ChatState.login_as_user("Tester"),
+                        size="1",
+                        bg="#80d0ea",
+                        color="white",
+                        height="20px",
+                        padding="0 8px",
+                        font_size="xs", 
+                    ),
+                    rx.button(
+                        "Login as John",
+                        on_click=lambda: ChatState.login_as_user("John"),
+                        size="1",
+                        bg="#80d0ea",
+                        color="white",
+                        height="20px",
+                        padding="0 8px",
+                        font_size="xs",
+                    ),
+                    spacing="2",
+                    margin_top="1",
+                    margin_bottom="2",
+                ),
+                rx.text(
+                    "LocalStorage Check:",
+                    color="white",
+                    font_size="sm",
+                    font_weight="bold",
+                ),
+                rx.html("""
+                <div id="localStorage-debug" style="color: white; font-size: 12px; margin-bottom: 10px;">
+                    Checking localStorage...
+                </div>
+                <script>
+                    function updateLocalStorageDebug() {
+                        const el = document.getElementById('localStorage-debug');
+                        if (el) {
+                            const username = localStorage.getItem('username');
+                            const token = localStorage.getItem('auth_token');
+                            el.innerHTML = `Username: ${username || 'Not set'}<br>Token: ${token ? token.substring(0,10)+'...' : 'Not set'}`;
+                        }
+                    }
+                    // Update every second
+                    setInterval(updateLocalStorageDebug, 1000);
+                    // Initial update
+                    updateLocalStorageDebug();
+                </script>
+                """),
+                rx.text(
+                    "Auth Token: ",
+                    rx.cond(
+                        ChatState.auth_token,
+                        ChatState.auth_token[:10] + "...",
+                        "None"
+                    ),
+                    color="white",
+                    font_size="sm",
+                ),
+                rx.cond(
+                    ChatState.chat_history.length() > 0,
+                    rx.text(
+                        "Last message from: ",
+                        ChatState.chat_history[-1][0],
+                        color="white",
+                        font_size="sm",
+                    ),
+                    rx.text("No messages yet", color="white", font_size="sm"),
+                ),
+                rx.text(
+                    "Debug Settings:",
+                    color="white",
+                    font_size="sm",
+                    font_weight="bold",
+                    margin_top="2",
+                ),
+                rx.text(
+                    "Use Dummy Data: ",
+                    str(ChatState.debug_use_dummy_data),
+                    color="#80d0ea",
+                    font_size="sm",
+                ),
+                rx.text(
+                    "Log API Calls: ",
+                    str(ChatState.debug_log_api_calls),
+                    color="#80d0ea",
+                    font_size="sm",
+                ),
+                rx.hstack(
+                    rx.button(
+                        "Hide Debug",
+                        on_click=ChatState.toggle_debug_info,
+                        size="4",
+                        bg="#80d0ea",
+                        color="white",
+                    ),
+                    rx.button(
+                        "Toggle Dummy Data",
+                        on_click=ChatState.toggle_debug_dummy_data,
+                        size="4",
+                        bg="#80d0ea",
+                        color="white",
+                    ),
+                    spacing="2",
+                    margin_top="2",
+                ),
+                spacing="1",
+                align_items="start",
+                padding="2",
+            ),
+            bg="#333",
+            border_radius="md",
+            position="fixed",
+            bottom="4",
+            left="4",
+            width="300px",
+            opacity="0.8",
+            z_index="900",
+            display="block",  # Make visible when debug_show_info is true
+        ),
+        rx.fragment(),
+    )
+
+def debug_button() -> rx.Component:
+    """Button to show debug panel when it's hidden."""
+    return rx.cond(
+        ~ChatState.debug_show_info,  # Only show when debug_show_info is False
+        rx.box(
+            rx.button(
+                "Debug",
+                on_click=ChatState.toggle_debug_info,
+                size="4",
+                bg="#80d0ea",
+                color="white",
+                border_radius="md",
+                _hover={"bg": "#6bc0d9"},
+            ),
+            position="fixed",
+            bottom="4",
+            left="4",
+            z_index="900",
+        ),
+        rx.fragment(),
+    )
+
+def user_header() -> rx.Component:
+    return rx.hstack(
+        # Back button - only show when in a chat
+        rx.cond(
+            ChatState.current_room_id != "",
+            rx.button(
+                rx.icon("arrow-left", color="white", font_size="18px"),
+                on_click=ChatState.go_back_to_chat_list,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.1)",
+                },
+                transition="all 0.2s ease-in-out",
+                title="Back to Chats List",
+            ),
+            rx.box(width="32px", height="32px"),  # Placeholder
+        ),
+        rx.cond(
+            ChatState.current_chat_user != "",
+            rx.avatar(
+                name=rx.cond(
+                    ChatState.current_chat_user != "", 
+                    ChatState.current_chat_user, 
+                    "Chat"
+                ), 
+                size="2", 
+                border="2px solid white"
+            ),
+            rx.box(width="32px", height="32px"),
+        ),
+        rx.text(
+            rx.cond(
+                ChatState.current_chat_user != "",
+                ChatState.current_chat_user,
+                "Chat"
+            ), 
+            font_weight="bold", 
+            color="white", 
+            font_size="16px"
+        ),
+        rx.spacer(),
+        rx.hstack(
+            rx.button(
+                rx.icon("phone", color="white", font_size="18px"),
+                on_click=ChatState.start_call,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+                disabled=ChatState.current_room_id == "",
+            ),
+            rx.button(
+                rx.icon("video", color="white", font_size="18px"),
+                on_click=ChatState.start_video_call,
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+                disabled=ChatState.current_room_id == "",
+            ),
+            rx.button(
+                rx.icon("info", color="white", font_size="18px"),
+                variant="ghost",
+                _hover={
+                    "bg": "rgba(255, 255, 255, 0.1)",
+                    "transform": "scale(1.2)",
+                },
+                transition="all 0.2s ease-in-out",
+            ),
+            spacing="4",
+        ),
+        width="100%",
+        padding="10px 15px",
+        bg="#80d0ea",
+        border_radius="0",
+        height="60px",
+    )
+
+def incoming_call_popup() -> rx.Component:
+    """Component for showing incoming call popup."""
+    return rx.cond(
+        ChatState.show_incoming_call,
+        rx.box(
+            rx.center(
+                rx.vstack(
+                    rx.avatar(
+                        name=ChatState.incoming_caller,
+                        size="9",
+                        border="4px solid #80d0ea",
+                        margin_bottom="20px",
+                        border_radius="50%",
+                        width="120px",
+                        height="120px",
+                        animation="pulse 1.5s infinite",
+                    ),
+                    rx.text(
+                        ChatState.incoming_caller,
+                        font_size="24px",
+                        font_weight="bold",
+                        color="#333333",
+                        margin_bottom="10px",
+                        text_align="center",
+                    ),
+                    rx.text(
+                        rx.cond(
+                            ChatState.call_type == "video",
+                            "Incoming video call...",
+                            "Incoming audio call..."
+                        ),
+                        font_size="18px",
+                        color="#666666",
+                        margin_bottom="20px",
+                        text_align="center",
+                    ),
+                    rx.hstack(
+                        rx.button(
+                            rx.icon("phone"),
+                            on_click=ChatState.accept_call,
+                            border_radius="50%",
+                            bg="#4CAF50",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#45a049",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        rx.button(
+                            rx.icon("phone-off"),
+                            on_click=ChatState.decline_call,
+                            border_radius="50%",
+                            bg="#ff4444",
+                            color="white",
+                            width="60px",
+                            height="60px",
+                            padding="0",
+                            _hover={
+                                "bg": "#ff3333",
+                                "transform": "scale(1.1)",
+                            },
+                            transition="all 0.2s ease-in-out",
+                        ),
+                        spacing="4",
+                        justify_content="center",
+                        width="100%",
+                    ),
+                    align_items="center",
+                    justify_content="center",
+                    width="340px",
+                    height="400px",
+                    bg="white",
+                    border_radius="20px",
+                    padding="30px",
+                    position="fixed",
+                    top="50%",
+                    left="50%",
+                    transform="translate(-50%, -50%)",
+                    box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
+                    z_index="1000",
+                    css={
+                        "@keyframes pulse": {
+                            "0%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0.7)"},
+                            "70%": {"box-shadow": "0 0 0 10px rgba(128, 208, 234, 0)"},
+                            "100%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0)"}
+                        }
+                    },
+                ),
+            ),
+            position="fixed",
+            top="0",
+            left="0",
+            width="100%",
+            height="100%",
+            bg="rgba(0, 0, 0, 0.5)",
+            display="flex",
+            justify_content="center",
+            align_items="center",
+            on_click=ChatState.decline_call,  # Click outside to decline
+        ),
+        None,
+    )
+
+def chat_page() -> rx.Component:
+    return rx.box(
+        rx.hstack(
+            rx.cond(
+                ChatState.sidebar_visible,
+                sidebar(),
+                rx.fragment()
+            ),
+            rx.vstack(
+                user_header(),
+                chat(),
+                message_input(),
+                height="100vh",
+                width="100%",
+                spacing="0",
+                bg="#2d2d2d",
+            ),
+            spacing="0",
+            width="100%",
+            height="100vh",
+            overflow="hidden",
+        ),
+        calling_popup(),
+        call_popup(),
+        video_call_popup(),
+        error_alert(),
+        success_alert(),
+        debug_info(),  # Debug panel
+        debug_button(),  # Button to show debug panel
+        incoming_call_popup(),
+        on_mount=ChatState.on_mount,
+        on_unmount=ChatState.cleanup,
+        style={
+            "@keyframes typing-dot": {
+                "0%, 60%, 100%": {
+                    "opacity": "0.4",
+                    "transform": "scale(0.8)"
+                },
+                "30%": {
+                    "opacity": "1",
+                    "transform": "scale(1)"
+                }
+            }
+        },
+    )
