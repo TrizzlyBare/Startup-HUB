@@ -91,6 +91,20 @@ class UsernameLoginView(APIView):
             )
 
 
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, permissions
+from django.contrib.auth import get_user_model
+from rest_framework.authtoken.models import Token
+import uuid
+import logging
+from .models import Room, Participant
+from .serializers import RoomSerializer
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+
 class DirectRoomView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -122,53 +136,99 @@ class DirectRoomView(APIView):
         # Get user model
         User = get_user_model()
 
-        # Find recipient - don't try to use ID directly
         try:
-            # Check if it's a UUID format
-            try:
-                uuid_obj = uuid.UUID(recipient_id)
-                recipient = User.objects.get(id=uuid_obj)
-            except (ValueError, TypeError):
-                # Not a valid UUID, try to find user by username
-                recipient = User.objects.get(username=recipient_id)
+            # Advanced recipient identification
+            if isinstance(recipient_id, str):
+                try:
+                    # Remove any potential surrounding quotes or whitespace
+                    recipient_id = recipient_id.strip("'\"")
 
-        except User.DoesNotExist:
+                    # Try UUID first
+                    try:
+                        uuid_obj = uuid.UUID(str(recipient_id))
+                        recipient = User.objects.get(id=uuid_obj)
+                    except ValueError:
+                        # Not a valid UUID, try username
+                        recipient = User.objects.get(username=recipient_id)
+                except User.DoesNotExist:
+                    return Response(
+                        {
+                            "error": f"User with username '{recipient_id}' does not exist"
+                        },
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+
+            elif isinstance(recipient_id, int):
+                # If it's an integer, assume it's a user ID
+                try:
+                    recipient = User.objects.get(id=recipient_id)
+                except User.DoesNotExist:
+                    return Response(
+                        {"error": f"User with ID {recipient_id} does not exist"},
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+
+            else:
+                return Response(
+                    {
+                        "error": "Invalid recipient_id type. Must be a string (username/UUID) or integer (user ID)"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Extensive logging for debugging
+            logger.info(
+                f"Direct room request: sender={request.user.username}, recipient={recipient.username}"
+            )
+
+            # Check for existing direct message room
+            existing_room = (
+                Room.objects.filter(
+                    room_type="direct", communication_participants__user=request.user
+                )
+                .filter(communication_participants__user=recipient)
+                .first()
+            )
+
+            if existing_room:
+                logger.info(f"Existing room found: {existing_room.id}")
+                serializer = RoomSerializer(existing_room)
+                return Response(serializer.data)
+
+            # Ensure consistent room naming by sorting usernames
+            sorted_names = sorted([request.user.username, recipient.username])
+            room_name = f"Chat between {sorted_names[0]} and {sorted_names[1]}"
+
+            # Create new room with a valid UUID
+            room = Room.objects.create(
+                id=uuid.uuid4(),
+                name=room_name,
+                room_type="direct",
+            )
+
+            # Add participants
+            Participant.objects.create(user=request.user, room=room)
+            Participant.objects.create(user=recipient, room=room)
+
+            logger.info(f"Created new direct room: {room.id}")
+
+            serializer = RoomSerializer(room)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            # Catch-all for any unexpected errors
+            logger.error(
+                f"Error in creating direct room: {str(e)}",
+                extra={
+                    "recipient_id": recipient_id,
+                    "recipient_type": type(recipient_id).__name__,
+                    "user": request.user.username,
+                },
+            )
             return Response(
-                {"error": f"User with id or username '{recipient_id}' does not exist"},
-                status=status.HTTP_404_NOT_FOUND,
+                {"error": f"Unexpected error: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
-        # Rest of the existing code...
-        # Check for existing direct message room
-        existing_room = (
-            Room.objects.filter(
-                room_type="direct", communication_participants__user=request.user
-            )
-            .filter(communication_participants__user=recipient)
-            .first()
-        )
-
-        if existing_room:
-            serializer = RoomSerializer(existing_room)
-            return Response(serializer.data)
-
-        # Ensure consistent room naming by sorting usernames
-        sorted_names = sorted([request.user.username, recipient.username])
-        room_name = f"Chat between {sorted_names[0]} and {sorted_names[1]}"
-
-        # Create new room with a valid UUID
-        room = Room.objects.create(
-            id=uuid.uuid4(),
-            name=room_name,
-            room_type="direct",
-        )
-
-        # Add participants
-        Participant.objects.create(user=request.user, room=room)
-        Participant.objects.create(user=recipient, room=room)
-
-        serializer = RoomSerializer(room)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class RoomMessagesView(APIView):
@@ -1579,7 +1639,7 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            
+
         # logger.info(
         #     f"Notification status updated successfully",
         #     extra={**log_context, "status": "success"},
