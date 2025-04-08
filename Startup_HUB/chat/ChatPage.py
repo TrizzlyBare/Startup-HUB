@@ -873,46 +873,44 @@ class ChatState(rx.State):
 
     @rx.event
     async def connect_chat_websocket(self):
-        """Connect to chat WebSocket that also handles call notifications."""
+        """Connect to the chat WebSocket for the current room."""
         if not self.current_room_id:
             self.error_message = "No active chat room"
             return
             
         # Get authentication token
         self.auth_token = await self.get_token()
-        
         if not self.auth_token:
-            print("Not authenticated - cannot connect to chat websocket")
-            self.error_message = "Not authenticated. Please log in."
+            self.error_message = "Not authenticated"
             return
             
-        # Connect to chat WebSocket using JavaScript
+        room_id_str = str(self.current_room_id)
+        
+        # Get WebSocket URL
+        ws_protocol = "wss://" if "https:" in self.API_BASE_URL else "ws://"
+        ws_base = self.API_BASE_URL.replace("https://", "").replace("http://", "")
+        ws_url = f"{ws_protocol}{ws_base}/ws/chat/{room_id_str}/?token={self.auth_token}"
+        
+        # Connect to the WebSocket
         rx.call_script(f"""
-            // Only run on client side
-            if (typeof window === 'undefined') return;
-            
-            // Close existing connection if any
-            if (window.chatSocket && window.chatSocket.readyState !== WebSocket.CLOSED) {{
+            // Close any existing connection
+            if (window.chatSocket) {{
                 window.chatSocket.close();
+                window.chatSocket = null;
             }}
             
-            // Create new WebSocket connection for chat with call functionality
-            const wsBaseUrl = '{self.WS_BASE_URL}';
-            const roomId = '{self.current_room_id}';
-            const wsUrl = `${{wsBaseUrl}}/room/${{roomId}}/`;
-            console.log('Connecting to chat WebSocket at:', wsUrl);
+            // Create new WebSocket connection
+            window.chatSocket = new WebSocket("{ws_url}");
             
-            window.chatSocket = new WebSocket(wsUrl);
-            
-            window.chatSocket.onopen = function() {{
-                console.log('Chat WebSocket connection established');
-                // Send authentication message
-                window.chatSocket.send(JSON.stringify({{
-                    type: 'auth',
-                    token: '{self.auth_token}'
-                }}));
-                // Update state
+            window.chatSocket.onopen = function(event) {{
+                console.log('Chat WebSocket connected to room {room_id_str}');
                 state.is_connected = true;
+                
+                // Send join message
+                window.chatSocket.send(JSON.stringify({{
+                    type: 'join',
+                    room_id: '{room_id_str}'
+                }}));
             }};
             
             window.chatSocket.onmessage = function(event) {{
@@ -931,7 +929,11 @@ class ChatState(rx.State):
                         break;
                     case 'call_notification':
                         // Handle incoming call notification
-                        handleCallNotification(data);
+                        if (window.callHandler) {{
+                            window.callHandler.handleIncomingCall(data, state);
+                        }} else {{
+                            handleIncomingCallFallback(data);
+                        }}
                         break;
                     case 'call_response':
                         // Handle call response (accept/decline)
@@ -940,34 +942,40 @@ class ChatState(rx.State):
                     case 'start_call':
                         // Handle incoming call start
                         console.log('Received start_call notification:', data);
+                        // Don't handle calls initiated by this user
                         if (data.caller_username !== state.username) {{
-                            console.log('Setting up incoming call');
-                            // Update state in a way that won't cause hydration issues
-                            setTimeout(() => {{
-                                state.current_chat_user = data.caller_username;
-                                state.call_type = data.call_type || 'audio';
-                                state.show_incoming_call = true;
-                                state.call_invitation_id = data.invitation_id;
-                                state.incoming_caller = data.caller_username;
-                                
-                                // Play ringtone
-                                const ringtone = new Audio('/ringtone.mp3');
-                                ringtone.loop = true;
-                                ringtone.play().catch(e => console.log('Error playing ringtone:', e));
-                                window.incomingCallRingtone = ringtone;
-                            }}, 0);
+                            if (window.callHandler) {{
+                                window.callHandler.handleIncomingCall(data, state);
+                            }} else {{
+                                handleIncomingCallFallback(data);
+                            }}
                         }}
                         break;
                     case 'end_call':
                         // Handle call end
                         console.log('Received end_call notification:', data);
-                        if (window.incomingCallRingtone) {{
-                            window.incomingCallRingtone.pause();
-                            window.incomingCallRingtone = null;
+                        
+                        // Clean up call resources
+                        if (window.callHandler) {{
+                            window.callHandler.cleanupCall();
+                        }} else {{
+                            // Fallback cleanup
+                            if (window.ringtoneElement) {{
+                                window.ringtoneElement.pause();
+                                window.ringtoneElement.currentTime = 0;
+                            }}
+                            if (window.titleFlashInterval) {{
+                                clearInterval(window.titleFlashInterval);
+                                document.title = 'Chat';
+                            }}
                         }}
+                        
+                        // Update UI state
                         setTimeout(() => {{
                             state.show_incoming_call = false;
                             state.show_calling_popup = false;
+                            state.show_call_popup = false;
+                            state.show_video_popup = false;
                             state.is_call_connected = false;
                         }}, 0);
                         break;
@@ -1025,14 +1033,14 @@ class ChatState(rx.State):
                 }}, 3000);
             }}
             
-            // Function to handle call notification
-            function handleCallNotification(data) {{
-                console.log('Call notification received:', data);
+            // Function to handle incoming call (works for both call_notification and start_call)
+            function handleIncomingCall(data) {{
+                console.log('Incoming call received:', data);
                 
                 // Get call details
                 const caller = data.caller_username;
-                const callType = data.call_type;
-                const invitationId = data.invitation_id;
+                const callType = data.call_type || 'audio';
+                const invitationId = data.invitation_id || '';
                 
                 // Update state in a way that won't cause hydration issues
                 setTimeout(() => {{
@@ -1043,18 +1051,134 @@ class ChatState(rx.State):
                     state.call_invitation_id = invitationId;
                     state.incoming_caller = caller;
                     
+                    // Create audio element for ringtone
+                    if (!window.ringtoneElement) {{
+                        window.ringtoneElement = new Audio('/static/ringtone.mp3');
+                        window.ringtoneElement.loop = true;
+                    }}
+                    
                     // Play ringtone
-                    const ringtone = new Audio('/ringtone.mp3');
-                    ringtone.loop = true;
-                    ringtone.play().catch(e => console.log('Error playing ringtone:', e));
-                    window.incomingCallRingtone = ringtone;
+                    try {{
+                        window.ringtoneElement.play();
+                    }} catch(e) {{
+                        console.log('Error playing ringtone:', e);
+                    }}
+                    
+                    // Flash title
+                    const origTitle = document.title;
+                    window.titleFlashInterval = setInterval(() => {{
+                        document.title = document.title.includes('Incoming Call') ? 
+                            origTitle : '📞 Incoming Call from ' + caller;
+                    }}, 1000);
+                    
+                    // Force UI update
+                    state = {{...state}};
+                    console.log('Call notification state updated', {{
+                        show_incoming_call: state.show_incoming_call,
+                        incoming_caller: state.incoming_caller,
+                        call_type: state.call_type
+                    }});
+                }}, 0);
+            }}
+            
+            // Function to handle call notification
+            function handleCallNotification(data) {{
+                console.log('Call notification received:', data);
+                
+                // Get call details
+                const caller = data.caller_username;
+                const callType = data.call_type || 'audio';
+                const invitationId = data.invitation_id || '';
+                
+                // Update state in a way that won't cause hydration issues
+                setTimeout(() => {{
+                    // Show incoming call notification
+                    state.current_chat_user = caller;
+                    state.call_type = callType;
+                    state.show_incoming_call = true;
+                    state.call_invitation_id = invitationId;
+                    state.incoming_caller = caller;
+                    
+                    // Create and play ringtone with vibration
+                    if (!window.ringtoneElement) {{
+                        window.ringtoneElement = new Audio('/static/ringtone.mp3');
+                        window.ringtoneElement.loop = true;
+                        document.body.appendChild(window.ringtoneElement);
+                    }}
+                    
+                    // Try to play sound with fallbacks
+                    try {{
+                        window.ringtoneElement.play()
+                            .then(() => {{
+                                console.log('Ringtone playing');
+                                // Vibrate device if supported
+                                if ('vibrate' in navigator) {{
+                                    // Vibrate pattern: 500ms vibrate, 200ms pause, repeat
+                                    navigator.vibrate([500, 200, 500, 200, 500]);
+                                }}
+                            }})
+                            .catch(e => {{
+                                console.log('Error playing ringtone:', e);
+                                // Add click handler to unlock audio on user interaction
+                                const unlockAudio = () => {{
+                                    window.ringtoneElement.play()
+                                        .then(() => {{
+                                            if ('vibrate' in navigator) {{
+                                                navigator.vibrate([500, 200, 500]);
+                                            }}
+                                        }});
+                                    document.removeEventListener('click', unlockAudio);
+                                    document.removeEventListener('touchstart', unlockAudio);
+                                }};
+                                document.addEventListener('click', unlockAudio);
+                                document.addEventListener('touchstart', unlockAudio);
+                            }});
+                    }} catch(e) {{
+                        console.log('Exception playing ringtone:', e);
+                    }}
+                    
+                    // Flash title to get user attention
+                    const originalTitle = document.title;
+                    const titleFlash = setInterval(() => {{
+                        document.title = document.title === originalTitle ? 
+                            `📞 ${{callType === 'video' ? 'Video' : 'Audio'}} Call from ${{caller}}` : originalTitle;
+                    }}, 1000);
+                    
+                    // Store interval ID to clear later
+                    window.titleFlashInterval = titleFlash;
+                    
+                    // Show browser notification if possible
+                    if ('Notification' in window && Notification.permission === 'granted') {{
+                        const notification = new Notification(`Incoming ${{callType === 'video' ? 'Video' : 'Audio'}} Call`, {{
+                            body: `${{caller}} is calling you`,
+                            icon: '/static/call_icon.png',
+                            requireInteraction: true
+                        }});
+                        
+                        // Handle notification click
+                        notification.onclick = () => {{
+                            window.focus();
+                            notification.close();
+                        }};
+                    }} else if ('Notification' in window && Notification.permission !== 'denied') {{
+                        Notification.requestPermission().then(permission => {{
+                            if (permission === 'granted') {{
+                                const notification = new Notification(`Incoming ${{callType === 'video' ? 'Video' : 'Audio'}} Call`, {{
+                                    body: `${{caller}} is calling you`,
+                                    icon: '/static/call_icon.png',
+                                    requireInteraction: true
+                                }});
+                            }}
+                        }});
+                    }}
                     
                     // Force UI update
                     state = {{...state}};
                     console.log('Call notification state updated:', {{
                         show_incoming_call: state.show_incoming_call,
                         current_chat_user: state.current_chat_user,
-                        incoming_caller: state.incoming_caller
+                        incoming_caller: state.incoming_caller,
+                        call_type: state.call_type
                     }});
                 }}, 0);
             }}
@@ -1095,6 +1219,36 @@ class ChatState(rx.State):
                         // Force UI update
                         state = {{...state}};
                     }}
+                }}, 0);
+            }}
+            
+            // Fallback function for handling incoming calls when the external script isn't loaded
+            function handleIncomingCallFallback(data) {{
+                console.log('Using fallback incoming call handler');
+                
+                const caller = data.caller_username;
+                const callType = data.call_type || 'audio';
+                const invitationId = data.invitation_id || '';
+                
+                setTimeout(() => {{
+                    // Show incoming call notification
+                    state.current_chat_user = caller;
+                    state.call_type = callType;
+                    state.show_incoming_call = true;
+                    state.call_invitation_id = invitationId;
+                    state.incoming_caller = caller;
+                    
+                    // Simple ringtone player
+                    try {{
+                        window.ringtoneElement = new Audio('/static/ringtone.mp3');
+                        window.ringtoneElement.loop = true;
+                        window.ringtoneElement.play();
+                    }} catch(e) {{
+                        console.log('Error playing ringtone:', e);
+                    }}
+                    
+                    // Force UI update
+                    state = {{...state}};
                 }}, 0);
             }}
         """)
@@ -2117,7 +2271,27 @@ class ChatState(rx.State):
             return
             
         try:
-            # 1. Send call response to server
+            # 1. Stop ringtone and clean up notification state
+            rx.call_script("""
+                // Use the call handler if available, otherwise do basic cleanup
+                if (window.callHandler) {
+                    window.callHandler.cleanupCall();
+                } else {
+                    // Stop ringtone if playing
+                    if (window.ringtoneElement) {
+                        window.ringtoneElement.pause();
+                        window.ringtoneElement.currentTime = 0;
+                    }
+                    
+                    // Stop title flashing
+                    if (window.titleFlashInterval) {
+                        clearInterval(window.titleFlashInterval);
+                        document.title = 'Chat';
+                    }
+                }
+            """)
+            
+            # 2. Send call response to server
             headers = {
                 "Authorization": f"Token {self.auth_token}",
                 "Content-Type": "application/json"
@@ -2140,14 +2314,8 @@ class ChatState(rx.State):
                 if self.debug_log_api_calls:
                     print(f"Call accept API response: {response.status_code}")
             
-            # 2. Stop ringtone and send WebSocket response
+            # 3. Also send response via WebSocket
             rx.call_script(f"""
-                // Stop ringtone if playing
-                if (window.incomingCallRingtone) {{
-                    window.incomingCallRingtone.pause();
-                    window.incomingCallRingtone = null;
-                }}
-                
                 // Send call response over WebSocket
                 if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
                     window.chatSocket.send(JSON.stringify({{
@@ -2158,13 +2326,13 @@ class ChatState(rx.State):
                 }}
             """)
             
-            # 3. Connect to WebRTC signaling
+            # 4. Connect to WebRTC signaling
             await self.connect_webrtc_signaling()
             
-            # 4. Initialize peer connection
+            # 5. Initialize peer connection
             await self.initialize_peer_connection()
             
-            # 5. Set up media based on call type
+            # 6. Set up media based on call type
             if self.call_type == "video":
                 # Video call setup
                 rx.call_script("""
@@ -2245,7 +2413,7 @@ class ChatState(rx.State):
                     });
                 """)
             
-            # 6. Start call timer
+            # 7. Start call timer
             await self.start_call_timer()
             
         except Exception as e:
@@ -2254,7 +2422,7 @@ class ChatState(rx.State):
             # Clean up state
             self.show_incoming_call = False
             self.call_invitation_id = ""
-            
+
     @rx.event
     async def decline_call(self):
         """Decline an incoming call."""
@@ -2271,7 +2439,22 @@ class ChatState(rx.State):
             return
             
         try:
-            # 1. Send call response to server
+            # 1. Stop ringtone and clean up notification state
+            rx.call_script("""
+                // Stop ringtone if playing
+                if (window.ringtoneElement) {
+                    window.ringtoneElement.pause();
+                    window.ringtoneElement.currentTime = 0;
+                }
+                
+                // Stop title flashing
+                if (window.titleFlashInterval) {
+                    clearInterval(window.titleFlashInterval);
+                    document.title = document.title.replace('📞 Incoming Call', 'Chat');
+                }
+            """)
+            
+            # 2. Send call response to server
             headers = {
                 "Authorization": f"Token {self.auth_token}",
                 "Content-Type": "application/json"
@@ -2294,14 +2477,8 @@ class ChatState(rx.State):
                 if self.debug_log_api_calls:
                     print(f"Call decline API response: {response.status_code}")
             
-            # 2. Stop ringtone and send WebSocket response
+            # 3. Also send response via WebSocket
             rx.call_script(f"""
-                // Stop ringtone if playing
-                if (window.incomingCallRingtone) {{
-                    window.incomingCallRingtone.pause();
-                    window.incomingCallRingtone = null;
-                }}
-                
                 // Send call response over WebSocket
                 if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
                     window.chatSocket.send(JSON.stringify({{
@@ -2312,7 +2489,7 @@ class ChatState(rx.State):
                 }}
             """)
             
-            # 3. Clean up state
+            # 4. Clean up state
             self.show_incoming_call = False
             self.call_invitation_id = ""
             self.incoming_caller = ""
@@ -3750,6 +3927,7 @@ def incoming_call_popup() -> rx.Component:
 
 def chat_page() -> rx.Component:
     return rx.box(
+        rx.html("<script src='/static/call_handler.js'></script>"),
         rx.hstack(
             rx.cond(
                 ChatState.sidebar_visible,
