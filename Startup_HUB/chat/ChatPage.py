@@ -3172,7 +3172,8 @@ class ChatState(rx.State):
 
     @rx.event
     async def accept_call(self):
-        """Accept an incoming call and join the call."""
+        """Accept an incoming call and join the call.
+        This also notifies the caller via API and WebSocket."""
         print("[WebRTC Debug] Accepting incoming call")
         
         try:
@@ -3217,36 +3218,12 @@ class ChatState(rx.State):
             
             # Skip API call if this is a local-only call
             if not is_local_only and not invitation_id.startswith("local-") and not invitation_id.startswith("legacy-"):
-                headers = {"Authorization": f"Bearer {self.auth_token}"}
-                api_url = f"{self.API_BASE_URL}/communication/incoming-calls/{invitation_id}/"
-                
-                try:
-                    print(f"[WebRTC Debug] [CALL FLOW] Accepting call via API: {api_url}")
-                    client = httpx.AsyncClient()
-                    response = await client.put(
-                        api_url,
-                        json={"status": "accepted"},
-                        headers=headers,
-                        follow_redirects=True
-                    )
-                    
-                    # Log the response for debugging
-                    if response.status_code == 404:
-                        print("[WebRTC Debug] Accept call API endpoint not found (404), proceeding with WebSocket only")
-                    elif response.status_code not in [200, 201, 204]:
-                        print(f"[WebRTC Debug] Error response from API: {response.status_code}")
-                        print(f"[WebRTC Debug] Response content: {response.text[:500]}")
-                        raise Exception(f"Failed to accept call: {response.status_code}")
-                    else:
-                        print(f"[WebRTC Debug] Call accept API response: {response.status_code}")
-                        try:
-                            response_data = response.json()
-                            print(f"[WebRTC Debug] API response data: {response_data}")
-                        except:
-                            print("[WebRTC Debug] No JSON in response")
-                except Exception as e:
-                    print(f"[WebRTC Debug] Error with call accept API: {str(e)}")
-                    print("[WebRTC Debug] Continuing with WebSocket-based accept")
+                # Try API call to update call status
+                update_success = await self.update_call_status(invitation_id, "accepted")
+                if update_success:
+                    print("[WebRTC Debug] Call status updated successfully via API")
+                else:
+                    print("[WebRTC Debug] Failed to update call status via API, continuing with WebSocket")
                     
             # 2. Hide incoming call popup and show call UI
             self.show_incoming_call = False
@@ -3256,21 +3233,14 @@ class ChatState(rx.State):
             else:
                 self.show_call_popup = True
                     
-            # 3. Send WebSocket notification that call was accepted - use both formats for compatibility
+            # 3. Send WebSocket notification that call was accepted
             username = await self.get_username()
             rx.call_script(f"""
-                // Send call accept notification over WebSocket - API format
+                // Send call accept notification over WebSocket - multiple formats for compatibility
                 if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
                     console.log('[WebRTC Debug] [CALL FLOW] Sending call acceptance via WebSocket');
                     
-                    // Send in API format
-                    window.chatSocket.send(JSON.stringify({{
-                        type: 'incoming_call_status',
-                        notification_id: '{invitation_id}',
-                        status: 'accepted'
-                    }}));
-                    
-                    // Also send in legacy format for backward compatibility
+                    // 1. Send acceptance in legacy format
                     window.chatSocket.send(JSON.stringify({{
                         type: 'call_response',
                         invitation_id: '{invitation_id}',
@@ -3278,14 +3248,37 @@ class ChatState(rx.State):
                         username: '{username}'
                     }}));
                     
-                    // Also send join notification
-                    window.chatSocket.send(JSON.stringify({{
-                        type: 'join_call_notification',
-                        invitation_id: '{invitation_id}',
-                        room_id: '{self.current_room_id}',
-                        username: '{username}',
-                        call_type: '{self.call_type}'
-                    }}));
+                    // 2. Also try API format for compatibility
+                    setTimeout(() => {{
+                        window.chatSocket.send(JSON.stringify({{
+                            type: 'incoming_call_status',
+                            notification_id: '{invitation_id}',
+                            status: 'accepted'
+                        }}));
+                    }}, 200);
+                    
+                    // 3. Also try updated response
+                    setTimeout(() => {{
+                        window.chatSocket.send(JSON.stringify({{
+                            type: 'call_notification_update',
+                            notification: {{
+                                id: '{invitation_id}',
+                                status: 'accepted',
+                                responder: '{username}'
+                            }}
+                        }}));
+                    }}, 400);
+                    
+                    // 4. Send join notification
+                    setTimeout(() => {{
+                        window.chatSocket.send(JSON.stringify({{
+                            type: 'join_call_notification',
+                            invitation_id: '{invitation_id}',
+                            room_id: '{self.current_room_id}',
+                            username: '{username}',
+                            call_type: '{self.call_type}'
+                        }}));
+                    }}, 600);
                 }}
                 
                 // Add self to participants list if this is a room call
@@ -3315,9 +3308,13 @@ class ChatState(rx.State):
                         }}
                         
                         // Add tracks to peer connection
-                        stream.getTracks().forEach(track => {{
-                            window.peerConnection.addTrack(track, stream);
-                        }});
+                        if (window.peerConnection) {{
+                            stream.getTracks().forEach(track => {{
+                                window.peerConnection.addTrack(track, stream);
+                            }});
+                        }} else {{
+                            console.error('[WebRTC Debug] Peer connection not initialized');
+                        }}
                     }})
                     .catch(error => {{
                         console.error('[WebRTC Debug] Error accessing video devices:', error);
@@ -3341,9 +3338,13 @@ class ChatState(rx.State):
                         }}
                         
                         // Add tracks to peer connection
-                        stream.getTracks().forEach(track => {{
-                            window.peerConnection.addTrack(track, stream);
-                        }});
+                        if (window.peerConnection) {{
+                            stream.getTracks().forEach(track => {{
+                                window.peerConnection.addTrack(track, stream);
+                            }});
+                        }} else {{
+                            console.error('[WebRTC Debug] Peer connection not initialized');
+                        }}
                     }})
                     .catch(error => {{
                         console.error('[WebRTC Debug] Error accessing audio devices:', error);
@@ -3359,6 +3360,186 @@ class ChatState(rx.State):
             self.error_message = f"Error accepting call: {str(e)}"
             print(f"[WebRTC Debug] Error accepting call: {str(e)}")
             self.show_incoming_call = False
+
+    @rx.event
+    async def update_call_status(self, notification_id: str, status: str) -> bool:
+        """Update the status of a call notification via API.
+        
+        Args:
+            notification_id: The ID of the call notification
+            status: The new status ('seen', 'accepted', 'declined', 'missed', 'ended')
+            
+        Returns:
+            bool: True if the update was successful, False otherwise
+        """
+        print(f"[WebRTC Debug] Updating call status to {status}: {notification_id}")
+        
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        if not self.auth_token:
+            print("[WebRTC Debug] Not authenticated, cannot update call status")
+            return False
+            
+        # API URL for updating call status
+        api_url = f"{self.API_HOST_URL}/communication/incoming-calls/{notification_id}/"
+        
+        # Create payload with status
+        payload = {"status": status}
+        
+        # Try with both token formats (Bearer and Token)
+        auth_headers = [
+            {"Authorization": f"Bearer {self.auth_token}"},
+            {"Authorization": f"Token {self.auth_token}"}
+        ]
+        
+        for headers in auth_headers:
+            try:
+                headers["Content-Type"] = "application/json"
+                print(f"[WebRTC Debug] Trying status update with headers: {headers}")
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.put(
+                        api_url,
+                        json=payload,
+                        headers=headers,
+                        follow_redirects=True,
+                        timeout=10.0
+                    )
+                    
+                    print(f"[WebRTC Debug] Status update response: {response.status_code}")
+                    
+                    if response.status_code >= 200 and response.status_code < 300:
+                        print("[WebRTC Debug] Call status updated successfully")
+                        return True
+                    else:
+                        print(f"[WebRTC Debug] Failed to update call status: {response.text[:200]}")
+            except Exception as e:
+                print(f"[WebRTC Debug] Error updating call status with {list(headers.keys())[0]}: {str(e)}")
+        
+        return False
+
+    @rx.event
+    async def handle_caller_connection(self, notification_id: str):
+        """Handle connection when the user is the caller and the recipient has accepted.
+        This is called by WebSocket notification when a call is accepted."""
+        print(f"[WebRTC Debug] Handling caller connection for call: {notification_id}")
+        
+        try:
+            # Update UI state
+            self.show_calling_popup = False
+            
+            if self.call_type == "video":
+                self.show_video_popup = True
+            else:
+                self.show_call_popup = True
+                
+            # Initialize media stream based on call type
+            rx.call_script(f"""
+                // Initialize media for call type
+                if ('{self.call_type}' === 'video') {{
+                    // Access user's camera and microphone
+                    navigator.mediaDevices.getUserMedia({{ 
+                        video: true,
+                        audio: true
+                    }})
+                    .then(stream => {{
+                        console.log('[WebRTC Debug] Got local media stream for video call');
+                        
+                        // Store local stream
+                        window.localStream = stream;
+                        
+                        // Update UI with local stream
+                        const mediaElement = document.getElementById('local-video');
+                        if (mediaElement) {{
+                            mediaElement.srcObject = stream;
+                        }}
+                        
+                        // Add tracks to peer connection
+                        if (window.peerConnection) {{
+                            stream.getTracks().forEach(track => {{
+                                window.peerConnection.addTrack(track, stream);
+                            }});
+                            
+                            // Create and send offer
+                            window.peerConnection.createOffer()
+                                .then(offer => window.peerConnection.setLocalDescription(offer))
+                                .then(() => {{
+                                    console.log('[WebRTC Debug] Sending SDP offer');
+                                    if (window.signalingSocket && window.signalingSocket.readyState === WebSocket.OPEN) {{
+                                        window.signalingSocket.send(JSON.stringify({{
+                                            type: 'offer',
+                                            offer: window.peerConnection.localDescription
+                                        }}));
+                                    }}
+                                }})
+                                .catch(error => {{
+                                    console.error('[WebRTC Debug] Error creating offer:', error);
+                                    state.error_message = 'Error establishing call connection';
+                                }});
+                        }} else {{
+                            console.error('[WebRTC Debug] Peer connection not initialized');
+                        }}
+                    }})
+                    .catch(error => {{
+                        console.error('[WebRTC Debug] Error accessing video devices:', error);
+                        state.error_message = 'Error accessing camera or microphone. Please check your permissions.';
+                    }});
+                }} else {{
+                    // Access user's microphone only for audio call
+                    navigator.mediaDevices.getUserMedia({{ 
+                        audio: true
+                    }})
+                    .then(stream => {{
+                        console.log('[WebRTC Debug] Got local media stream for audio call');
+                        
+                        // Store local stream
+                        window.localStream = stream;
+                        
+                        // Update UI with local stream
+                        const mediaElement = document.getElementById('local-audio');
+                        if (mediaElement) {{
+                            mediaElement.srcObject = stream;
+                        }}
+                        
+                        // Add tracks to peer connection
+                        if (window.peerConnection) {{
+                            stream.getTracks().forEach(track => {{
+                                window.peerConnection.addTrack(track, stream);
+                            }});
+                            
+                            // Create and send offer
+                            window.peerConnection.createOffer()
+                                .then(offer => window.peerConnection.setLocalDescription(offer))
+                                .then(() => {{
+                                    console.log('[WebRTC Debug] Sending SDP offer');
+                                    if (window.signalingSocket && window.signalingSocket.readyState === WebSocket.OPEN) {{
+                                        window.signalingSocket.send(JSON.stringify({{
+                                            type: 'offer',
+                                            offer: window.peerConnection.localDescription
+                                        }}));
+                                    }}
+                                }})
+                                .catch(error => {{
+                                    console.error('[WebRTC Debug] Error creating offer:', error);
+                                    state.error_message = 'Error establishing call connection';
+                                }});
+                        }} else {{
+                            console.error('[WebRTC Debug] Peer connection not initialized');
+                        }}
+                    }})
+                    .catch(error => {{
+                        console.error('[WebRTC Debug] Error accessing audio devices:', error);
+                        state.error_message = 'Error accessing microphone. Please check your permissions.';
+                    }});
+                }}
+            """)
+            
+            # Start call timer
+            await self.start_call_timer()
+            
+        except Exception as e:
+            print(f"[WebRTC Debug] Error handling caller connection: {str(e)}")
+            self.error_message = f"Error connecting call: {str(e)}"
             
     @rx.event
     async def decline_call(self):
