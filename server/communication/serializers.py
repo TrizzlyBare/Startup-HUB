@@ -1,6 +1,14 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Room, Message, Participant, CallLog, CallInvitation, MediaFile
+from .models import (
+    IncomingCallNotification,
+    Room,
+    Message,
+    Participant,
+    CallLog,
+    CallInvitation,
+    MediaFile,
+)
 from rest_framework import serializers
 from .utils import CloudinaryHelper
 
@@ -160,3 +168,25 @@ class CallInvitationSerializer(serializers.ModelSerializer):
             "expires_at",
             "status",
         ]
+
+
+class IncomingCallNotificationSerializer(serializers.ModelSerializer):
+    caller = UserSerializer(read_only=True)
+    recipient = UserSerializer(read_only=True)
+    room_name = serializers.CharField(source="room.name", read_only=True)
+
+    class Meta:
+        model = IncomingCallNotification
+        fields = [
+            "id",
+            "caller",
+            "recipient",
+            "room",
+            "room_name",
+            "call_type",
+            "created_at",
+            "expires_at",
+            "status",
+            "device_token",
+        ]
+        read_only_fields = ["id", "created_at", "room_name"]

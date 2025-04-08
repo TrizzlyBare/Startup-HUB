@@ -767,3 +767,236 @@ class WebRTCConfigView(APIView):
                 {"error": f"Failed to get WebRTC configuration: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+# Add to views.py
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, permissions
+from django.utils import timezone
+from datetime import timedelta
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+from .models import IncomingCallNotification, Room
+from .serializers import IncomingCallNotificationSerializer
+import logging
+from .notification_service import NotificationService
+
+
+logger = logging.getLogger(__name__)
+
+
+class IncomingCallNotificationView(APIView):
+    """API for managing incoming call notifications"""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        """Create a new incoming call notification"""
+        recipient_id = request.data.get("recipient_id")
+        room_id = request.data.get("room_id")
+        call_type = request.data.get("call_type", "video")
+        device_token = request.data.get("device_token")
+
+        # Validate required fields
+        if not recipient_id:
+            return Response(
+                {"error": "recipient_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not room_id:
+            return Response(
+                {"error": "room_id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Get recipient user
+            User = get_user_model()
+            try:
+                recipient = User.objects.get(id=recipient_id)
+            except User.DoesNotExist:
+                return Response(
+                    {"error": f"User with id {recipient_id} does not exist"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            # Get room
+            try:
+                room = Room.objects.get(id=room_id)
+            except Room.DoesNotExist:
+                return Response(
+                    {"error": f"Room with id {room_id} does not exist"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            # Verify user has access to this room
+            if not Participant.objects.filter(room=room, user=request.user).exists():
+                return Response(
+                    {"error": "You do not have access to this room"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            # Check if recipient is a participant in the room
+            if not Participant.objects.filter(room=room, user=recipient).exists():
+                return Response(
+                    {"error": "Recipient is not a participant in this room"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Set expiration time (60 seconds from now)
+            expires_at = timezone.now() + timedelta(seconds=60)
+
+            # Create notification
+            notification = IncomingCallNotification.objects.create(
+                caller=request.user,
+                recipient=recipient,
+                room=room,
+                call_type=call_type,
+                expires_at=expires_at,
+                device_token=device_token,
+            )
+
+            # Serialize notification
+            serializer = IncomingCallNotificationSerializer(notification)
+
+            # Send notification via WebSocket to user
+            channel_layer = get_channel_layer()
+            user_group_name = f"user_{recipient.id}"
+
+            async_to_sync(channel_layer.group_send)(
+                user_group_name,
+                {"type": "incoming_call", "notification": serializer.data},
+            )
+
+            # If it's a direct room, also send to room group
+            if room.room_type == "direct":
+                room_group_name = f"room_{room.id}"
+                async_to_sync(channel_layer.group_send)(
+                    room_group_name,
+                    {"type": "incoming_call", "notification": serializer.data},
+                )
+
+            # TODO: Handle push notifications for mobile devices
+            # Update the post method in IncomingCallNotificationView to add push notification functionality
+            # Send push notification for mobile devices
+            if device_token:
+                NotificationService.send_incoming_call_notification(
+                    device_token=device_token,
+                    caller=request.user,
+                    recipient=recipient,
+                    call_type=call_type,
+                    room_name=room.name,
+                    notification_id=notification.id,
+                )
+
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.error(f"Error creating incoming call notification: {str(e)}")
+            return Response(
+                {"error": f"Failed to create call notification: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    def get(self, request):
+        """Get active incoming call notifications for the current user"""
+        # Get notifications that haven't expired
+        notifications = IncomingCallNotification.objects.filter(
+            recipient=request.user,
+            status__in=["pending", "seen"],
+            expires_at__gt=timezone.now(),
+        ).order_by("-created_at")
+
+        serializer = IncomingCallNotificationSerializer(notifications, many=True)
+        return Response(serializer.data)
+
+    def put(self, request, notification_id=None):
+        """Update notification status (accept, decline, etc.)"""
+        if not notification_id:
+            return Response(
+                {"error": "notification_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Find notification
+            notification = IncomingCallNotification.objects.get(
+                id=notification_id,
+                recipient=request.user,  # Must be the recipient to update
+            )
+
+            # Check if expired
+            if notification.is_expired():
+                notification.status = "expired"
+                notification.save()
+                serializer = IncomingCallNotificationSerializer(notification)
+                return Response(serializer.data)
+
+            # Update status
+            status_action = request.data.get("status")
+            if status_action in ["seen", "accepted", "declined", "missed"]:
+                notification.status = status_action
+                notification.save()
+
+                # Notify caller via WebSocket about the status update
+                channel_layer = get_channel_layer()
+                user_group_name = f"user_{notification.caller.id}"
+
+                serializer = IncomingCallNotificationSerializer(notification)
+
+                async_to_sync(channel_layer.group_send)(
+                    user_group_name,
+                    {
+                        "type": "call_notification_update",
+                        "notification": serializer.data,
+                    },
+                )
+
+                # If accepted, create a Call message in the room
+                if status_action == "accepted":
+                    from .models import Message
+
+                    # Create call message
+                    message = Message.objects.create(
+                        room=notification.room,
+                        sender=notification.caller,
+                        message_type="call",
+                        call_type=notification.call_type,
+                        call_status="answered",
+                    )
+
+                    # Notify room about call being answered
+                    from .serializers import MessageSerializer
+
+                    message_serializer = MessageSerializer(message)
+
+                    room_group_name = f"room_{notification.room.id}"
+                    async_to_sync(channel_layer.group_send)(
+                        room_group_name,
+                        {"type": "call_notification", "call": message_serializer.data},
+                    )
+
+                return Response(serializer.data)
+            else:
+                return Response(
+                    {
+                        "error": f"Invalid status: {status_action}. Must be one of: seen, accepted, declined, missed"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        except IncomingCallNotification.DoesNotExist:
+            return Response(
+                {
+                    "error": f"Notification with id {notification_id} not found or you are not the recipient"
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception as e:
+            logger.error(f"Error updating call notification: {str(e)}")
+            return Response(
+                {"error": f"Failed to update notification: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

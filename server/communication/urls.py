@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
+    IncomingCallNotificationView,
     RoomViewSet,
     MessageViewSet,
     MediaFileViewSet,
@@ -84,5 +85,15 @@ urlpatterns = [
         "rooms/<uuid:room_id>/webrtc-config/",
         WebRTCConfigView.as_view(),
         name="room-webrtc-config",
+    ),
+    # Add these to urlpatterns in urls.py
+    # Incoming call notifications endpoints
+    path(
+        "incoming-calls/", IncomingCallNotificationView.as_view(), name="incoming-calls"
+    ),
+    path(
+        "incoming-calls/<uuid:notification_id>/",
+        IncomingCallNotificationView.as_view(),
+        name="update-incoming-call",
     ),
 ]

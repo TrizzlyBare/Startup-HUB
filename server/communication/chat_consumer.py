@@ -152,6 +152,9 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         except Exception as e:
             logger.error(f"Disconnect error: {str(e)}")
 
+    # Add these methods to ChatConsumer in chat_consumer.py
+
+    # Add to receive_json method to handle incoming_call_status
     async def receive_json(self, content):
         """
         Handle received WebSocket messages
@@ -172,6 +175,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 await self.handle_typing_status(content)
             elif message_type == "start_call":
                 await self.handle_start_call(content)
+            elif message_type == "end_call":
+                await self.handle_end_call(content)
             elif message_type == "call_response":
                 await self.handle_call_response(content)
             elif message_type == "webrtc_offer":
@@ -180,6 +185,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 await self.handle_webrtc_answer(content)
             elif message_type == "ice_candidate":
                 await self.handle_ice_candidate(content)
+            elif message_type == "incoming_call_status":
+                await self.handle_incoming_call_status(
+                    content
+                )  # New handler for incoming call status
             else:
                 logger.warning(f"Unknown message type: {message_type}")
                 await self.send_json(
@@ -194,16 +203,155 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
             logger.error(traceback.format_exc())
 
-            try:
-                # Send error to client
-                await self.send_json(
-                    {
-                        "type": "error",
-                        "message": f"Error processing {message_type} message: {str(e)}",
-                    }
+    # Add new handler for incoming_call_status
+    async def handle_incoming_call_status(self, content):
+        """Handle updates to incoming call notifications"""
+        notification_id = content.get("notification_id")
+        status = content.get("status")
+
+        if not notification_id or not status:
+            await self.send_json(
+                {"type": "error", "message": "notification_id and status are required"}
+            )
+            return
+
+        if status not in ["seen", "accepted", "declined", "missed"]:
+            await self.send_json(
+                {
+                    "type": "error",
+                    "message": f"Invalid status: {status}. Must be one of: seen, accepted, declined, missed",
+                }
+            )
+            return
+
+        # Update notification status in database
+        notification = await self.update_call_notification_status(
+            notification_id, status
+        )
+
+        if notification:
+            # Notify caller about status update
+            caller_group_name = f"user_{notification['caller_id']}"
+            await self.channel_layer.group_send(
+                caller_group_name,
+                {"type": "call_notification_update", "notification": notification},
+            )
+
+            # If accepted, notify room about call being answered
+            if status == "accepted":
+                room_id = notification["room_id"]
+                call_message = await self.create_call_answered_message(
+                    room_id, notification["caller_id"], notification["call_type"]
                 )
-            except Exception as inner_e:
-                logger.error(f"Failed to send error message: {str(inner_e)}")
+
+                if call_message:
+                    room_group_name = f"room_{room_id}"
+                    await self.channel_layer.group_send(
+                        room_group_name,
+                        {"type": "call_notification", "call": call_message},
+                    )
+        else:
+            await self.send_json(
+                {
+                    "type": "error",
+                    "message": f"Failed to update notification {notification_id}",
+                }
+            )
+
+    # Add database helper methods
+    @database_sync_to_async
+    def update_call_notification_status(self, notification_id, status):
+        """Update incoming call notification status"""
+        from .models import IncomingCallNotification
+
+        try:
+            notification = IncomingCallNotification.objects.get(
+                id=notification_id, recipient=self.user  # Must be the recipient
+            )
+
+            # Check if expired
+            if notification.is_expired() and status != "missed":
+                notification.status = "expired"
+            else:
+                notification.status = status
+
+            notification.save()
+
+            # Return serialized notification
+            return {
+                "id": str(notification.id),
+                "caller_id": str(notification.caller.id),
+                "caller_username": notification.caller.username,
+                "recipient_id": str(notification.recipient.id),
+                "recipient_username": notification.recipient.username,
+                "room_id": str(notification.room.id),
+                "room_name": notification.room.name,
+                "call_type": notification.call_type,
+                "status": notification.status,
+                "created_at": notification.created_at.isoformat(),
+                "expires_at": notification.expires_at.isoformat(),
+            }
+        except IncomingCallNotification.DoesNotExist:
+            logger.warning(
+                f"Notification {notification_id} not found or user is not the recipient"
+            )
+            return None
+        except Exception as e:
+            logger.error(f"Error updating notification status: {str(e)}")
+            return None
+
+    @database_sync_to_async
+    def create_call_answered_message(self, room_id, caller_id, call_type):
+        """Create a call message when a call is answered"""
+        from .models import Message, Room
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+
+        try:
+            room = Room.objects.get(id=room_id)
+            caller = User.objects.get(id=caller_id)
+
+            message = Message.objects.create(
+                room=room,
+                sender=caller,
+                message_type="call",
+                call_type=call_type,
+                call_status="answered",
+            )
+
+            return {
+                "id": str(message.id),
+                "room_id": str(message.room.id),
+                "sender_id": str(message.sender.id),
+                "sender": {
+                    "id": str(message.sender.id),
+                    "username": message.sender.username,
+                },
+                "message_type": "call",
+                "call_type": call_type,
+                "call_status": "answered",
+                "sent_at": message.sent_at.isoformat(),
+            }
+        except (Room.DoesNotExist, User.DoesNotExist) as e:
+            logger.error(f"Room or user not found: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"Error creating call message: {str(e)}")
+            return None
+
+    # Add WebSocket event handlers
+    async def incoming_call(self, event):
+        """Send incoming call notification to WebSocket"""
+        await self.send_json(
+            {"type": "incoming_call", "notification": event["notification"]}
+        )
+
+    async def call_notification_update(self, event):
+        """Send call notification update to WebSocket"""
+        await self.send_json(
+            {"type": "call_notification_update", "notification": event["notification"]}
+        )
 
     # Database access methods
     @database_sync_to_async

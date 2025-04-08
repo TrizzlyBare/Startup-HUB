@@ -267,3 +267,59 @@ class CallInvitation(models.Model):
         if self.is_expired() and self.status == "pending":
             self.status = "expired"
             self.save(update_fields=["status"])
+
+
+from django.db import models
+from django.conf import settings
+import uuid
+from django.utils import timezone
+
+
+class IncomingCallNotification(models.Model):
+    """Model to track incoming call notifications"""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    caller = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sent_call_notifications",
+    )
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="received_call_notifications",
+    )
+    room = models.ForeignKey("Room", on_delete=models.CASCADE)
+    call_type = models.CharField(
+        max_length=10, choices=[("audio", "Audio Call"), ("video", "Video Call")]
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ("pending", "Pending"),
+            ("seen", "Seen"),
+            ("accepted", "Accepted"),
+            ("declined", "Declined"),
+            ("missed", "Missed"),
+            ("expired", "Expired"),
+        ],
+        default="pending",
+    )
+    device_token = models.CharField(max_length=255, null=True, blank=True)
+
+    def __str__(self):
+        return f"Call from {self.caller.username} to {self.recipient.username}"
+
+    def is_expired(self):
+        """Check if notification has expired"""
+        return timezone.now() > self.expires_at
+
+    def auto_expire(self):
+        """Mark notification as expired if it's past the expiration time"""
+        if self.is_expired() and self.status == "pending":
+            self.status = "expired"
+            self.save(update_fields=["status"])
+            return True
+        return False
