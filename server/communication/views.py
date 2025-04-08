@@ -1636,6 +1636,119 @@ class IncomingCallNotificationViewSet(viewsets.ModelViewSet):
             {"expired_count": count, "message": f"Expired {count} notifications"}
         )
 
+    @action(detail=False, methods=["POST"])
+    def create_room_call(self, request):
+        """Create notifications for all users in a room except the caller"""
+        room_id = request.data.get("room_id")
+        call_type = request.data.get("call_type", "video")
+        device_token = request.data.get("device_token")
+
+        # Validate required fields
+        if not room_id:
+            return Response(
+                {"error": "room_id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Get room
+            room = Room.objects.get(id=room_id)
+
+            # Verify user has access to this room
+            if not Participant.objects.filter(room=room, user=request.user).exists():
+                return Response(
+                    {"error": "You do not have access to this room"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            # Get all participants except caller
+            participants = Participant.objects.filter(room=room).exclude(
+                user=request.user
+            )
+
+            if not participants.exists():
+                return Response(
+                    {"error": "No other participants found in this room"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Create notifications for all participants
+            notifications = []
+            expires_at = timezone.now() + timedelta(seconds=60)
+
+            for participant in participants:
+                # Cancel any existing pending notifications
+                IncomingCallNotification.objects.filter(
+                    caller=request.user,
+                    recipient=participant.user,
+                    room=room,
+                    status="pending",
+                ).update(status="expired")
+
+                # Create new notification
+                notification = IncomingCallNotification.objects.create(
+                    caller=request.user,
+                    recipient=participant.user,
+                    room=room,
+                    call_type=call_type,
+                    expires_at=expires_at,
+                    device_token=device_token,
+                )
+                notifications.append(notification)
+
+            # Send notifications via WebSocket to each recipient
+            channel_layer = get_channel_layer()
+            for notification in notifications:
+                serializer = self.get_serializer(notification)
+
+                # Send to user's personal channel
+                user_group_name = f"user_{notification.recipient.id}"
+                async_to_sync(channel_layer.group_send)(
+                    user_group_name,
+                    {"type": "incoming_call", "notification": serializer.data},
+                )
+
+            # Also send as room_call_announcement
+            room_group_name = f"room_{room.id}"
+            primary_notification = notifications[0] if notifications else None
+            if primary_notification:
+                primary_serializer = self.get_serializer(primary_notification)
+                async_to_sync(channel_layer.group_send)(
+                    room_group_name,
+                    {
+                        "type": "room_call_announcement",
+                        "notification": primary_serializer.data,
+                    },
+                )
+
+            # Return info about the created notifications
+            return Response(
+                {
+                    "success": True,
+                    "message": f"Created {len(notifications)} call notifications",
+                    "notification_count": len(notifications),
+                    "first_notification": (
+                        self.get_serializer(notifications[0]).data
+                        if notifications
+                        else None
+                    ),
+                },
+                status=status.HTTP_201_CREATED,
+            )
+
+        except Room.DoesNotExist:
+            return Response(
+                {"error": f"Room with id {room_id} not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception as e:
+            logger.error(
+                f"Error creating room call notifications: {str(e)}", exc_info=True
+            )
+            return Response(
+                {"error": f"Failed to create call notifications: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
     # Add the new method here
     @action(detail=False, methods=["GET"])
     def active_calls(self, request):
