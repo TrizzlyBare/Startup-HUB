@@ -415,11 +415,11 @@ def sidebar(state=None) -> rx.Component:
         rx.vstack(
             # Top section with search and icons
             rx.hstack(
-                rx.avatar(
-                    src="../../profile.jpg",
-                    size="5",
-                    class_name="rounded-full object-cover border-4 border-white m-2",
-                ),
+                # rx.avatar(
+                #     src="../../profile.jpg",
+                #     size="5",
+                #     class_name="rounded-full object-cover border-4 border-white m-2",
+                # ),
                 rx.spacer(),
                 rx.hstack(
                     rx.icon(
