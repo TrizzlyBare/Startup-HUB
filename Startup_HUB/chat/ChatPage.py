@@ -1172,6 +1172,14 @@ class ChatState(rx.State):
                 function createCallNotificationViaAPI() {{
                     console.log('[WebRTC Debug] [CALL FLOW] Attempting API call to create notification');
                     
+                    // Create API request payload that matches the documented format
+                    const apiPayload = {{
+                        room_id: '{room_id}',
+                        call_type: '{call_type}'
+                    }};
+                    
+                    console.log('[WebRTC Debug] [CALL FLOW] API payload:', apiPayload);
+                    
                     // Create notification
                     fetch('{api_url}', {{
                         method: 'POST',
@@ -1179,37 +1187,44 @@ class ChatState(rx.State):
                             'Content-Type': 'application/json',
                             'Authorization': 'Bearer {self.auth_token}'
                         }},
-                        body: JSON.stringify({{
-                            'room_id': '{room_id}',
-                            'call_type': '{call_type}'
-                        }})
+                        body: JSON.stringify(apiPayload)
                     }})
                     .then(response => {{
                         console.log('[WebRTC Debug] [CALL FLOW] API call status:', response.status);
-                        if (response.ok) {{
-                            return response.json();
-                        }} else if (response.status === 404) {{
-                            // If endpoint doesn't exist, use WebSocket fallback
-                            console.log('[WebRTC Debug] [CALL FLOW] API endpoint returned 404, using WebSocket fallback');
-                            throw new Error('API endpoint not found (404)');
-                        }} else {{
-                            console.log('[WebRTC Debug] [CALL FLOW] API error:', response.status);
-                            throw new Error('Failed to create room call notification: ' + response.status);
-                        }}
+                        // For debugging, show the response body text
+                        return response.text().then(text => {{
+                            console.log('[WebRTC Debug] [CALL FLOW] API response text:', text);
+                            if (response.ok) {{
+                                try {{
+                                    return JSON.parse(text);
+                                }} catch (e) {{
+                                    console.error('[WebRTC Debug] [CALL FLOW] Error parsing JSON:', e);
+                                    throw new Error('Invalid JSON response');
+                                }}
+                            }} else if (response.status === 404) {{
+                                // If endpoint doesn't exist, use WebSocket fallback
+                                console.log('[WebRTC Debug] [CALL FLOW] API endpoint returned 404, using WebSocket fallback');
+                                throw new Error('API endpoint not found (404)');
+                            }} else {{
+                                console.log('[WebRTC Debug] [CALL FLOW] API error:', response.status);
+                                throw new Error('Failed to create room call notification: ' + response.status);
+                            }}
+                        }});
                     }})
                     .then(data => {{
                         console.log('[WebRTC Debug] [CALL FLOW] API response success:', data);
                         
                         // Store the notification ID for later use
-                        state.call_invitation_id = data.id;
+                        const notificationId = data.id;
+                        state.call_invitation_id = notificationId;
                         
                         // Send WebSocket message to announce call to all room users
                         console.log('[WebRTC Debug] [CALL FLOW] API call successful, now announcing via WebSocket');
-                        announceCallViaWebSocket(data.id);
+                        announceCallViaWebSocket(data);
                         
-                        console.log('[WebRTC Debug] [CALL FLOW] Room call initiated successfully with ID:', data.id);
+                        console.log('[WebRTC Debug] [CALL FLOW] Room call initiated successfully with ID:', notificationId);
                         state.active_room_call = {{
-                            id: data.id,
+                            id: notificationId,
                             room_id: '{room_id}',
                             room_name: '{room_name}',
                             call_type: '{call_type}',
@@ -1233,20 +1248,28 @@ class ChatState(rx.State):
                     }});
                 }}
                 
-                // Function to handle WebSocket announcement - IMPROVED
-                function announceCallViaWebSocket(callId) {{
+                // Function to handle WebSocket announcement - UPDATED TO MATCH API FORMAT
+                function announceCallViaWebSocket(notificationData) {{
                     // Send WebSocket message to announce call to all room users
                     if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
                         console.log('[WebRTC Debug] [CALL FLOW] USER {current_username} IS SENDING WebSocket room-wide call announcement');
                         
-                        // Create a consistently structured message for room calls
+                        // Create a properly structured message according to API documentation
                         const callAnnouncement = {{
                             type: 'room_call_announcement',
-                            room_id: '{room_id}',
-                            room_name: '{room_name}',
-                            caller_username: '{current_username}',
-                            call_type: '{call_type}',
-                            invitation_id: callId
+                            notification: notificationData || {{
+                                id: '{local_call_id}',
+                                caller: {{
+                                    id: 'local-user-id',
+                                    username: '{current_username}'
+                                }},
+                                room: '{room_id}',
+                                room_name: '{room_name}',
+                                call_type: '{call_type}',
+                                created_at: new Date().toISOString(),
+                                expires_at: new Date(Date.now() + 60000).toISOString(), // 1 minute expiry
+                                status: 'pending'
+                            }}
                         }};
                         
                         // Log the exact message we're sending
@@ -1276,6 +1299,22 @@ class ChatState(rx.State):
                                 window.chatSocket.send(JSON.stringify(callStartedMessage));
                             }}
                         }}, 500);
+                        
+                        // Also send a simplified legacy format message for backward compatibility
+                        setTimeout(() => {{
+                            if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
+                                const legacyFormat = {{
+                                    type: 'room_call_announcement',
+                                    room_id: '{room_id}',
+                                    room_name: '{room_name}',
+                                    caller_username: '{current_username}',
+                                    call_type: '{call_type}',
+                                    invitation_id: notificationData ? notificationData.id : '{local_call_id}'
+                                }};
+                                console.log('[WebRTC Debug] [CALL FLOW] Sending legacy format for compatibility:', legacyFormat);
+                                window.chatSocket.send(JSON.stringify(legacyFormat));
+                            }}
+                        }}, 1000);
                     }} else {{
                         console.error('[WebRTC Debug] [CALL FLOW] Cannot announce call: WebSocket not connected');
                         state.error_message = 'Cannot start call: Communication channel not connected';
@@ -1290,7 +1329,7 @@ class ChatState(rx.State):
                     state.call_invitation_id = '{local_call_id}';
                     
                     // Announce call via WebSocket only
-                    announceCallViaWebSocket('{local_call_id}');
+                    announceCallViaWebSocket(null); // Pass null to use the fallback data
                     
                     // Update state with local call info
                     state.active_room_call = {{
@@ -1379,11 +1418,6 @@ class ChatState(rx.State):
                     // Special detailed logging for call-related messages
                     if (messageType.includes('call') || messageType === 'room_call_announcement') {{
                         console.log(`[WebRTC Debug] [CALL FLOW] USER ${state.username} RECEIVED:`, JSON.stringify(data, null, 2));
-                        
-                        // Log specific details about who is calling who
-                        if (data.caller_username) {{
-                            console.log(`[WebRTC Debug] [CALL FLOW] ${data.caller_username} is trying to call ${state.username} in room ${data.room_id || data.room || roomId}`);
-                        }}
                     }}
                     
                     // Handle different message types
@@ -1397,131 +1431,132 @@ class ChatState(rx.State):
                             handleTypingNotification(data);
                             break;
                         case 'incoming_call':
-                        case 'call_notification':
                             // Handle direct incoming call notification (1-on-1 calls)
-                            console.log('[WebRTC Debug] Direct call notification received:', data);
-                            console.log('[WebRTC Debug] [CALL FLOW] RECEIVER EVENT: User', state.username, 'has received a direct call from', data.caller_username);
+                            // This is the new format according to the API docs
+                            console.log('[WebRTC Debug] [CALL FLOW] RECEIVER EVENT: User', state.username, 'received incoming_call from API');
+                            
+                            // Extract notification data from the API format
+                            const incomingCallNotification = data.notification;
+                            
+                            if (!incomingCallNotification) {{
+                                console.error('[WebRTC Debug] [CALL FLOW] Missing notification data in incoming_call message');
+                                break;
+                            }}
+                            
+                            // Extract caller info
+                            const callerUsername = incomingCallNotification.caller?.username;
                             
                             // Don't handle calls initiated by this user
-                            if (data.caller_username === state.username) {{
+                            if (callerUsername === state.username) {{
                                 console.log('[WebRTC Debug] [CALL FLOW] Ignoring our own call notification');
                                 break;
                             }}
                             
-                            // Show incoming call popup using standard call flow
-                            setTimeout(() => {{
-                                state.current_chat_user = data.caller_username;
-                                state.call_type = data.call_type || 'audio';
-                                state.show_incoming_call = true;
-                                state.call_invitation_id = data.invitation_id;
-                                state.incoming_caller = data.caller_username;
-                                
-                                console.log('[WebRTC Debug] [CALL FLOW] SHOWING POPUP: Direct call for', state.username, 'from', data.caller_username);
-                                
-                                // Play ringtone
-                                try {{
-                                    if (!window.ringtoneElement) {{
-                                        window.ringtoneElement = new Audio('/static/ringtone.mp3');
-                                        window.ringtoneElement.loop = true;
-                                        window.ringtoneElement.volume = 0.7;
-                                    }}
-                                    
-                                    window.ringtoneElement.play().catch(e => {{
-                                        console.log('[WebRTC Debug] Error playing ringtone:', e);
-                                    }});
-                                }} catch(e) {{
-                                    console.error('[WebRTC Debug] Exception playing ringtone:', e);
-                                }}
-                                
-                                // Flash title
-                                const origTitle = document.title;
-                                window.titleFlashInterval = setInterval(() => {{
-                                    document.title = document.title === origTitle ? 
-                                        `📞 Incoming Call from ${{data.caller_username}}` : origTitle;
-                                }}, 1000);
-                                
-                                state._update();
-                            }}, 0);
+                            // Show incoming call popup
+                            handleIncomingCallNotification(incomingCallNotification);
                             break;
-                        case 'room_call_announcement':
-                            // IMPROVED HANDLER: for room-wide call announcement
-                            console.log('[WebRTC Debug] [CALL FLOW] RECEIVER EVENT: User', state.username, 'has received a room call announcement from', data.caller_username);
-                            console.log('[WebRTC Debug] [CALL FLOW] Room call details:', {{
-                                room_id: data.room_id,
-                                room_name: data.room_name,
-                                call_type: data.call_type,
-                                invitation_id: data.invitation_id
-                            }});
+                            
+                        case 'call_notification':
+                            // Handle legacy direct call notification format
+                            console.log('[WebRTC Debug] [CALL FLOW] RECEIVER EVENT: User', state.username, 'received call_notification (legacy format)');
+                            
+                            const legacyNotification = {{
+                                id: data.invitation_id || data.id,
+                                caller: {{
+                                    username: data.caller_username || data.caller || "Unknown caller"
+                                }},
+                                room: data.room_id || data.room,
+                                room_name: data.room_name || "Chat Room",
+                                call_type: data.call_type || "audio",
+                                status: "pending"
+                            }};
                             
                             // Don't handle calls initiated by this user
-                            if (data.caller_username === state.username) {{
+                            if (legacyNotification.caller.username === state.username) {{
+                                console.log('[WebRTC Debug] [CALL FLOW] Ignoring our own call notification');
+                                break;
+                            }}
+                            
+                            // Show incoming call popup
+                            handleIncomingCallNotification(legacyNotification);
+                            break;
+                            
+                        case 'room_call_announcement':
+                            // Handle room call announcement (could be either API format or legacy format)
+                            console.log('[WebRTC Debug] [CALL FLOW] RECEIVER EVENT: User', state.username, 'received room_call_announcement');
+                            
+                            let roomCallNotification;
+                            
+                            // Check if this is the API format (with notification object) or legacy format
+                            if (data.notification) {{
+                                // API format
+                                roomCallNotification = data.notification;
+                                console.log('[WebRTC Debug] [CALL FLOW] Received API format room call notification');
+                            }} else if (data.room_id || data.caller_username) {{
+                                // Legacy format
+                                roomCallNotification = {{
+                                    id: data.invitation_id || `legacy-${Date.now()}`,
+                                    caller: {{
+                                        username: data.caller_username || "Unknown caller"
+                                    }},
+                                    room: data.room_id,
+                                    room_name: data.room_name || "Chat Room",
+                                    call_type: data.call_type || "audio",
+                                    status: "pending"
+                                }};
+                                console.log('[WebRTC Debug] [CALL FLOW] Received legacy format room call, converted to:', roomCallNotification);
+                            }} else {{
+                                console.error('[WebRTC Debug] [CALL FLOW] Invalid room_call_announcement format:', data);
+                                break;
+                            }}
+                            
+                            // Don't handle calls initiated by this user
+                            if (roomCallNotification.caller.username === state.username) {{
                                 console.log('[WebRTC Debug] [CALL FLOW] Ignoring our own room call announcement');
                                 break;
                             }}
                             
                             // Create a call banner at the top of the chat
                             console.log('[WebRTC Debug] [CALL FLOW] Creating call banner for', state.username);
-                            createCallBanner(data);
+                            createCallBanner(roomCallNotification);
                             
                             // Also show incoming call popup
-                            setTimeout(() => {{
-                                // Update call details in state
-                                state.current_chat_user = data.caller_username;
-                                state.call_type = data.call_type || 'audio';
-                                state.show_incoming_call = true;
-                                state.call_invitation_id = data.invitation_id;
-                                state.incoming_caller = data.caller_username;
-                                state.active_room_call = {{
-                                    id: data.invitation_id,
-                                    room_id: data.room_id,
-                                    room_name: data.room_name || 'Chat Room',
-                                    call_type: data.call_type,
-                                    started_by: data.caller_username,
-                                    participants: [data.caller_username]
-                                }};
-                                
-                                console.log('[WebRTC Debug] [CALL FLOW] SHOWING POPUP: Room call for', state.username, 'from', data.caller_username);
-                                
-                                // Play ringtone
-                                try {{
-                                    if (!window.ringtoneElement) {{
-                                        window.ringtoneElement = new Audio('/static/ringtone.mp3');
-                                        window.ringtoneElement.loop = true;
-                                        window.ringtoneElement.volume = 0.7;
-                                    }}
-                                    
-                                    const playPromise = window.ringtoneElement.play();
-                                    
-                                    if (playPromise !== undefined) {{
-                                        playPromise.catch(e => {{
-                                            console.log('[WebRTC Debug] Error playing ringtone:', e);
-                                            // Add click handler for user interaction
-                                            document.addEventListener('click', function unlockAudio() {{
-                                                window.ringtoneElement.play();
-                                                document.removeEventListener('click', unlockAudio);
-                                            }}, {{once: true}});
-                                        }});
-                                    }}
-                                }} catch(e) {{
-                                    console.error('[WebRTC Debug] Exception playing ringtone:', e);
-                                }}
-                                
-                                // Flash title to get user's attention
-                                const origTitle = document.title;
-                                window.titleFlashInterval = setInterval(() => {{
-                                    document.title = document.title === origTitle ? 
-                                        `📞 Room Call from ${{data.caller_username}} in ${{data.room_name}}` : origTitle;
-                                }}, 1000);
-                                
-                                // Force UI update
-                                state._update();
-                            }}, 0);
+                            handleIncomingCallNotification(roomCallNotification);
                             break;
+                            
+                        case 'call_notification_update':
+                            // Handle call status updates
+                            console.log('[WebRTC Debug] [CALL FLOW] Call notification update received');
+                            
+                            const updatedNotification = data.notification;
+                            if (!updatedNotification) {{
+                                console.error('[WebRTC Debug] [CALL FLOW] Missing notification data in update');
+                                break;
+                            }}
+                            
+                            handleCallStatusUpdate(updatedNotification);
+                            break;
+                            
+                        case 'call_ended':
+                            // Handle call end notification
+                            console.log('[WebRTC Debug] [CALL FLOW] Call ended notification received');
+                            
+                            const endedCall = data.call;
+                            if (!endedCall) {{
+                                console.error('[WebRTC Debug] [CALL FLOW] Missing call data in call_ended message');
+                                break;
+                            }}
+                            
+                            // Clean up call resources
+                            cleanupCall(endedCall.id);
+                            break;
+                            
                         case 'call_response':
-                            // Handle call response (accept/decline)
-                            console.log('[WebRTC Debug] [CALL FLOW] Call response received:', data);
-                            handleCallResponse(data);
+                            // Handle legacy call response (accept/decline)
+                            console.log('[WebRTC Debug] [CALL FLOW] Legacy call response received:', data);
+                            handleLegacyCallResponse(data);
                             break;
+                            
                         case 'join_call_notification':
                             // Someone joined the call
                             console.log('[WebRTC Debug] [CALL FLOW] User joined call:', data.username);
@@ -1535,47 +1570,17 @@ class ChatState(rx.State):
                             }}
                             
                             // Show a toast notification that someone joined
-                            const joinToast = document.createElement('div');
-                            joinToast.style.cssText = 'position:fixed;bottom:20px;left:20px;background:#333;color:white;padding:12px;border-radius:4px;z-index:9999;';
-                            joinToast.innerHTML = '<strong>' + data.username + '</strong> joined the call';
-                            document.body.appendChild(joinToast);
-                            
-                            // Auto-remove after 3 seconds
-                            setTimeout(() => {{
-                                joinToast.style.opacity = '0';
-                                joinToast.style.transition = 'opacity 0.5s';
-                                setTimeout(() => document.body.removeChild(joinToast), 500);
-                            }}, 3000);
+                            showJoinedCallToast(data.username);
                             break;
+                            
                         case 'end_call':
-                            // Handle call end
-                            console.log('[WebRTC Debug] [CALL FLOW] Received end_call notification:', data);
+                            // Handle legacy end call notification
+                            console.log('[WebRTC Debug] [CALL FLOW] Legacy end_call notification received:', data);
                             
                             // Clean up call resources
-                            if (window.ringtoneElement) {{
-                                window.ringtoneElement.pause();
-                                window.ringtoneElement.currentTime = 0;
-                            }}
-                            if (window.titleFlashInterval) {{
-                                clearInterval(window.titleFlashInterval);
-                                document.title = 'Chat';
-                            }}
-                            
-                            // Remove call banner if it exists
-                            const callBanner = document.getElementById('active-call-banner');
-                            if (callBanner) {{
-                                callBanner.remove();
-                            }}
-                            
-                            // Update UI state
-                            setTimeout(() => {{
-                                state.show_incoming_call = false;
-                                state.show_calling_popup = false;
-                                state.is_call_connected = false;
-                                state.active_room_call = {{}}; // Clear active room call data
-                                state._update();
-                            }}, 0);
+                            cleanupCall(data.invitation_id || data.call_id);
                             break;
+                            
                         case 'error':
                             console.error('[WebRTC Debug] Chat WebSocket error:', data.message);
                             state.error_message = data.message;
@@ -1601,50 +1606,144 @@ class ChatState(rx.State):
                 state.is_connected = false;
             }};
             
-            // Add detailed logging functions to window for reuse
-            window.webrtcLog = {{
-                callFlow: function(message, data = null) {{
-                    const timestamp = new Date().toISOString();
-                    const username = state.username;
-                    console.log(`[WebRTC Debug] [CALL FLOW] [${timestamp}] [USER: ${username}] ${message}`, data || '');
-                }}
-            }};
+            //========== HELPER FUNCTIONS ==========//
             
-            // Function to handle new message
-            function handleNewMessage(data) {{
-                const message = data.message;
-                if (!message) return;
+            // Function to handle incoming call notification (shows UI)
+            function handleIncomingCallNotification(notification) {{
+                console.log('[WebRTC Debug] [CALL FLOW] Processing incoming call notification:', notification);
                 
-                // Check if the message is from current user
-                const isCurrentUser = message.sender.username === state.username;
-                
-                // Add message to chat history
-                console.log(`[WebRTC Debug] Adding message from ${{message.sender.username}}`);
-                state.chat_history = [...state.chat_history, [
-                    isCurrentUser ? "user" : "other", 
-                    message.content
-                ]];
-            }}
-            
-            // Function to handle typing notification
-            function handleTypingNotification(data) {{
-                const username = data.username;
-                if (!username) return;
-                
-                // Add to typing users if not already there
-                if (!state.typing_users.includes(username)) {{
-                    state.typing_users = [...state.typing_users, username];
+                if (!notification) {{
+                    console.error('[WebRTC Debug] [CALL FLOW] Invalid notification data');
+                    return;
                 }}
                 
-                // Remove after delay
+                const callerId = notification.caller?.id || 'unknown-id';
+                const callerUsername = notification.caller?.username || 'Unknown caller';
+                const notificationId = notification.id;
+                const callType = notification.call_type || 'audio';
+                const roomId = notification.room;
+                const roomName = notification.room_name || 'Chat Room';
+                
+                console.log(`[WebRTC Debug] [CALL FLOW] Incoming call from ${callerUsername} (${callerId})`);
+                
+                // Show incoming call popup using setTimeout to avoid React state update issues
                 setTimeout(() => {{
-                    state.typing_users = state.typing_users.filter(user => user !== username);
-                }}, 3000);
+                    // Update call details in state
+                    state.current_chat_user = callerUsername;
+                    state.call_type = callType;
+                    state.show_incoming_call = true;
+                    state.call_invitation_id = notificationId;
+                    state.incoming_caller = callerUsername;
+                    state.active_room_call = {{
+                        id: notificationId,
+                        room_id: roomId,
+                        room_name: roomName || 'Chat Room',
+                        call_type: callType,
+                        started_by: callerUsername,
+                        participants: [callerUsername]
+                    }};
+                    
+                    console.log('[WebRTC Debug] [CALL FLOW] SHOWING POPUP: Call for', state.username, 'from', callerUsername);
+                    
+                    // Play ringtone
+                    try {{
+                        if (!window.ringtoneElement) {{
+                            window.ringtoneElement = new Audio('/static/ringtone.mp3');
+                            window.ringtoneElement.loop = true;
+                            window.ringtoneElement.volume = 0.7;
+                        }}
+                        
+                        const playPromise = window.ringtoneElement.play();
+                        
+                        if (playPromise !== undefined) {{
+                            playPromise.catch(e => {{
+                                console.log('[WebRTC Debug] Error playing ringtone:', e);
+                                // Add click handler for user interaction
+                                document.addEventListener('click', function unlockAudio() {{
+                                    window.ringtoneElement.play();
+                                    document.removeEventListener('click', unlockAudio);
+                                }}, {{once: true}});
+                            }});
+                        }}
+                    }} catch(e) {{
+                        console.error('[WebRTC Debug] Exception playing ringtone:', e);
+                    }}
+                    
+                    // Flash title to get user's attention
+                    const origTitle = document.title;
+                    window.titleFlashInterval = setInterval(() => {{
+                        document.title = document.title === origTitle ? 
+                            `📞 ${callType === 'video' ? 'Video' : 'Audio'} Call from ${callerUsername}` : origTitle;
+                    }}, 1000);
+                    
+                    // Force UI update
+                    state._update();
+                }}, 0);
             }}
             
-            // Function to handle call response
-            function handleCallResponse(data) {{
-                console.log('[WebRTC Debug] [CALL FLOW] Call response received:', data);
+            // Function to handle call status updates
+            function handleCallStatusUpdate(notification) {{
+                console.log('[WebRTC Debug] [CALL FLOW] Processing call status update:', notification);
+                
+                const status = notification.status;
+                const notificationId = notification.id;
+                
+                // Update UI based on notification status
+                switch(status) {{
+                    case 'accepted':
+                        console.log('[WebRTC Debug] [CALL FLOW] Call was accepted');
+                        
+                        // Stop ringtone if playing
+                        if (window.ringtoneElement) {{
+                            window.ringtoneElement.pause();
+                            window.ringtoneElement.currentTime = 0;
+                        }}
+                        
+                        // If we're the caller, hide calling popup and show call UI
+                        if (state.show_calling_popup) {{
+                            state.show_calling_popup = false;
+                            if (state.call_type === 'video') {{
+                                state.show_video_popup = true;
+                            }} else {{
+                                state.show_call_popup = true;
+                            }}
+                            state._update();
+                        }}
+                        break;
+                        
+                    case 'declined':
+                        console.log('[WebRTC Debug] [CALL FLOW] Call was declined');
+                        
+                        cleanupCall(notificationId);
+                        
+                        // If we're the caller, show declined message
+                        if (state.show_calling_popup) {{
+                            state.show_calling_popup = false;
+                            state.error_message = 'Call declined';
+                            state._update();
+                            
+                            // Stop media streams
+                            if (window.localStream) {{
+                                window.localStream.getTracks().forEach(track => track.stop());
+                            }}
+                        }}
+                        break;
+                        
+                    case 'missed':
+                        console.log('[WebRTC Debug] [CALL FLOW] Call was missed');
+                        cleanupCall(notificationId);
+                        break;
+                        
+                    case 'ended':
+                        console.log('[WebRTC Debug] [CALL FLOW] Call was ended');
+                        cleanupCall(notificationId);
+                        break;
+                }}
+            }}
+            
+            // Function to handle legacy call response format
+            function handleLegacyCallResponse(data) {{
+                console.log('[WebRTC Debug] [CALL FLOW] Legacy call response received:', data);
                 
                 // Get response details
                 const response = data.response;
@@ -1685,14 +1784,94 @@ class ChatState(rx.State):
                 }}
             }}
             
-            // NEW FUNCTION: Create a call banner at the top of the chat
+            // Function to cleanup call resources
+            function cleanupCall(callId) {{
+                console.log('[WebRTC Debug] [CALL FLOW] Cleaning up call:', callId);
+                
+                // Stop ringtone if playing
+                if (window.ringtoneElement) {{
+                    window.ringtoneElement.pause();
+                    window.ringtoneElement.currentTime = 0;
+                }}
+                
+                // Clear title flash interval
+                if (window.titleFlashInterval) {{
+                    clearInterval(window.titleFlashInterval);
+                    document.title = 'Chat';
+                }}
+                
+                // Remove call banner if it exists
+                const callBanner = document.getElementById('active-call-banner');
+                if (callBanner) {{
+                    callBanner.remove();
+                }}
+                
+                // Update UI state
+                setTimeout(() => {{
+                    state.show_incoming_call = false;
+                    state.show_calling_popup = false;
+                    state.is_call_connected = false;
+                    state.active_room_call = {{}}; // Clear active room call data
+                    state._update();
+                }}, 0);
+            }}
+            
+            // Function to show joined call toast notification
+            function showJoinedCallToast(username) {{
+                const joinToast = document.createElement('div');
+                joinToast.style.cssText = 'position:fixed;bottom:20px;left:20px;background:#333;color:white;padding:12px;border-radius:4px;z-index:9999;';
+                joinToast.innerHTML = '<strong>' + username + '</strong> joined the call';
+                document.body.appendChild(joinToast);
+                
+                // Auto-remove after 3 seconds
+                setTimeout(() => {{
+                    joinToast.style.opacity = '0';
+                    joinToast.style.transition = 'opacity 0.5s';
+                    setTimeout(() => document.body.removeChild(joinToast), 500);
+                }}, 3000);
+            }}
+            
+            // Function to handle new message
+            function handleNewMessage(data) {{
+                const message = data.message;
+                if (!message) return;
+                
+                // Check if the message is from current user
+                const isCurrentUser = message.sender.username === state.username;
+                
+                // Add message to chat history
+                console.log(`[WebRTC Debug] Adding message from ${message.sender.username}`);
+                state.chat_history = [...state.chat_history, [
+                    isCurrentUser ? "user" : "other", 
+                    message.content
+                ]];
+            }}
+            
+            // Function to handle typing notification
+            function handleTypingNotification(data) {{
+                const username = data.username;
+                if (!username) return;
+                
+                // Add to typing users if not already there
+                if (!state.typing_users.includes(username)) {{
+                    state.typing_users = [...state.typing_users, username];
+                }}
+                
+                // Remove after delay
+                setTimeout(() => {{
+                    state.typing_users = state.typing_users.filter(user => user !== username);
+                }}, 3000);
+            }}
+            
+            // Create a call banner at the top of the chat
             function createCallBanner(callData) {{
-                console.log('[WebRTC Debug] [CALL FLOW] Creating call banner for room call from', callData.caller_username);
+                console.log('[WebRTC Debug] [CALL FLOW] Creating call banner for room call');
                 
                 setTimeout(() => {{
                     const callType = callData.call_type || 'audio';
-                    const callStarter = callData.caller_username;
+                    const callStarter = callData.caller?.username || callData.caller_username || 'Unknown caller';
                     const roomName = callData.room_name || 'Chat Room';
+                    const notificationId = callData.id || `legacy-${Date.now()}`;
                     
                     // Add a banner at the top of the chat
                     const chatContainer = document.querySelector('.message-container');
@@ -1709,10 +1888,10 @@ class ChatState(rx.State):
                         const iconType = callType === 'video' ? '🎥' : '📞';
                         banner.innerHTML = `
                             <div style="display:flex;align-items:center;gap:8px;">
-                                <span style="font-size:24px;">${{iconType}}</span>
+                                <span style="font-size:24px;">${iconType}</span>
                                 <div>
-                                    <div style="font-weight:bold;">${{callType === 'video' ? 'Video' : 'Audio'}} call in progress</div>
-                                    <div style="font-size:14px;color:#666;">Started by ${{callStarter}} in ${{roomName}}</div>
+                                    <div style="font-weight:bold;">${callType === 'video' ? 'Video' : 'Audio'} call in progress</div>
+                                    <div style="font-size:14px;color:#666;">Started by ${callStarter} in ${roomName}</div>
                                 </div>
                             </div>
                             <button id="join-call-button" style="background:#80d0ea;color:white;border:none;border-radius:4px;padding:8px 12px;cursor:pointer;font-weight:bold;">Join Call</button>
@@ -1728,7 +1907,7 @@ class ChatState(rx.State):
                             const event = new CustomEvent('join_existing_call', {{
                                 detail: {{
                                     call_type: callType,
-                                    notification_id: callData.invitation_id
+                                    notification_id: notificationId
                                 }}
                             }});
                             document.dispatchEvent(event);
@@ -2573,10 +2752,10 @@ class ChatState(rx.State):
             if not self.auth_token:
                 self.error_message = "Not authenticated"
                 return
-                
+                    
             # Initialize WebRTC for the call
             await self.initialize_peer_connection()
-                
+                    
             # Connect to WebRTC signaling server
             await self.connect_webrtc_signaling()
             
@@ -2585,7 +2764,7 @@ class ChatState(rx.State):
             if not invitation_id:
                 self.error_message = "No active call invitation"
                 return
-                
+                    
             # Check if this is a local-only call (when API isn't available)
             is_local_only = False
             if self.active_room_call and self.active_room_call.get("is_local_only"):
@@ -2593,11 +2772,12 @@ class ChatState(rx.State):
                 print("[WebRTC Debug] This is a local-only call (no API interactions)")
             
             # Skip API call if this is a local-only call
-            if not is_local_only and not invitation_id.startswith("local-"):
+            if not is_local_only and not invitation_id.startswith("local-") and not invitation_id.startswith("legacy-"):
                 headers = {"Authorization": f"Bearer {self.auth_token}"}
                 api_url = f"{self.API_BASE_URL}/communication/incoming-calls/{invitation_id}/"
                 
                 try:
+                    print(f"[WebRTC Debug] [CALL FLOW] Accepting call via API: {api_url}")
                     client = httpx.AsyncClient()
                     response = await client.put(
                         api_url,
@@ -2606,16 +2786,24 @@ class ChatState(rx.State):
                         follow_redirects=True
                     )
                     
+                    # Log the response for debugging
                     if response.status_code == 404:
                         print("[WebRTC Debug] Accept call API endpoint not found (404), proceeding with WebSocket only")
                     elif response.status_code not in [200, 201, 204]:
+                        print(f"[WebRTC Debug] Error response from API: {response.status_code}")
+                        print(f"[WebRTC Debug] Response content: {response.text[:500]}")
                         raise Exception(f"Failed to accept call: {response.status_code}")
-                    elif self.debug_log_api_calls:
-                        print(f"Call accept API response: {response.status_code}")
+                    else:
+                        print(f"[WebRTC Debug] Call accept API response: {response.status_code}")
+                        try:
+                            response_data = response.json()
+                            print(f"[WebRTC Debug] API response data: {response_data}")
+                        except:
+                            print("[WebRTC Debug] No JSON in response")
                 except Exception as e:
                     print(f"[WebRTC Debug] Error with call accept API: {str(e)}")
                     print("[WebRTC Debug] Continuing with WebSocket-based accept")
-                
+                    
             # 2. Hide incoming call popup and show call UI
             self.show_incoming_call = False
             
@@ -2623,12 +2811,22 @@ class ChatState(rx.State):
                 self.show_video_popup = True
             else:
                 self.show_call_popup = True
-                
-            # 3. Send WebSocket notification that call was accepted
+                    
+            # 3. Send WebSocket notification that call was accepted - use both formats for compatibility
             username = await self.get_username()
             rx.call_script(f"""
-                // Send call accept notification over WebSocket
+                // Send call accept notification over WebSocket - API format
                 if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
+                    console.log('[WebRTC Debug] [CALL FLOW] Sending call acceptance via WebSocket');
+                    
+                    // Send in API format
+                    window.chatSocket.send(JSON.stringify({{
+                        type: 'incoming_call_status',
+                        notification_id: '{invitation_id}',
+                        status: 'accepted'
+                    }}));
+                    
+                    // Also send in legacy format for backward compatibility
                     window.chatSocket.send(JSON.stringify({{
                         type: 'call_response',
                         invitation_id: '{invitation_id}',
