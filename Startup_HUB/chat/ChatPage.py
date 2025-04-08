@@ -1776,6 +1776,158 @@ class ChatState(rx.State):
                         console.log('[WebRTC Debug] [CALL FLOW] Call was ended');
                         cleanupCall(notificationId);
                         break;
+                        
+                    case 'call_response':
+                        // Handle legacy call response (accept/decline)
+                        console.log('[WebRTC Debug] [CALL FLOW] Call response received:', data);
+                        
+                        // Get response details
+                        const response = data.response;
+                        const responderUsername = data.username;
+                        const invitationId = data.invitation_id;
+                        
+                        // Log details for debugging
+                        console.log(`[WebRTC Debug] [CALL FLOW] Call ${invitationId} ${response}ed by ${responderUsername}`);
+                        
+                        // Update state based on response type
+                        if (response === 'accept') {
+                            // Call was accepted, continue with establishing connection
+                            console.log('[WebRTC Debug] [CALL FLOW] Call accepted by', responderUsername);
+                            
+                            // Check if we're the caller
+                            const isCaller = state.call_invitation_id === invitationId && state.show_calling_popup;
+                            
+                            if (isCaller) {
+                                console.log('[WebRTC Debug] [CALL FLOW] We are the caller, handling connection');
+                                
+                                // Trigger caller connection handler
+                                window._set_state_from_js({
+                                    _events: [{ 
+                                        name: "handle_caller_connection", 
+                                        payload: { notification_id: invitationId } 
+                                    }]
+                                });
+                            }
+                        } else if (response === 'decline') {
+                            // Call was declined
+                            console.log('[WebRTC Debug] [CALL FLOW] Call declined by', responderUsername);
+                            
+                            // Check if we're the caller
+                            if (state.show_calling_popup) {
+                                // Hide calling popup
+                                state.show_calling_popup = false;
+                                state.error_message = 'Call declined';
+                                
+                                // Stop media streams
+                                if (window.localStream) {
+                                    window.localStream.getTracks().forEach(track => track.stop());
+                                }
+                                state._update();
+                            }
+                        }
+                        break;
+
+                    case 'call_notification_update':
+                        // Handle call status updates (API format)
+                        console.log('[WebRTC Debug] [CALL FLOW] Call notification update received:', data);
+                        
+                        // Extract notification data
+                        const updatedNotification = data.notification;
+                        if (!updatedNotification) {
+                            console.error('[WebRTC Debug] [CALL FLOW] Missing notification data in update');
+                            break;
+                        }
+                        
+                        // Get key information
+                        const updateStatus = updatedNotification.status;
+                        const notifId = updatedNotification.id;
+                        const responder = updatedNotification.responder;
+                        
+                        console.log(`[WebRTC Debug] [CALL FLOW] Call ${notifId} status updated to ${updateStatus}`);
+                        
+                        // Process based on status
+                        if (updateStatus === 'accepted') {
+                            console.log('[WebRTC Debug] [CALL FLOW] Call was accepted by', responder);
+                            
+                            // Check if we're the caller
+                            const weAreCaller = state.call_invitation_id === notifId && state.show_calling_popup;
+                            
+                            if (weAreCaller) {
+                                console.log('[WebRTC Debug] [CALL FLOW] We are the caller, handling connection');
+                                
+                                // Trigger caller connection handler
+                                window._set_state_from_js({
+                                    _events: [{ 
+                                        name: "handle_caller_connection", 
+                                        payload: { notification_id: notifId } 
+                                    }]
+                                });
+                            }
+                        } else if (updateStatus === 'declined') {
+                            console.log('[WebRTC Debug] [CALL FLOW] Call was declined');
+                            
+                            // If we're the caller, show declined message
+                            if (state.show_calling_popup) {
+                                // Hide calling popup
+                                state.show_calling_popup = false;
+                                state.error_message = 'Call declined';
+                                
+                                // Stop media streams
+                                if (window.localStream) {
+                                    window.localStream.getTracks().forEach(track => track.stop());
+                                }
+                                state._update();
+                            }
+                        } else if (updateStatus === 'missed') {
+                            console.log('[WebRTC Debug] [CALL FLOW] Call was missed');
+                            cleanupCall(notifId);
+                        } else if (updateStatus === 'ended') {
+                            console.log('[WebRTC Debug] [CALL FLOW] Call was ended');
+                            cleanupCall(notifId);
+                        }
+                        break;
+
+                    case 'incoming_call_status':
+                        // Handle status updates sent through WebSocket (alternative format)
+                        console.log('[WebRTC Debug] [CALL FLOW] Incoming call status update:', data);
+                        
+                        const callStatusUpdate = data.status;
+                        const notificationIdUpdate = data.notification_id;
+                        
+                        if (callStatusUpdate === 'accepted') {
+                            console.log('[WebRTC Debug] [CALL FLOW] Call was accepted via status update');
+                            
+                            // Check if we're the caller
+                            const weAreStatusCaller = state.call_invitation_id === notificationIdUpdate && state.show_calling_popup;
+                            
+                            if (weAreStatusCaller) {
+                                console.log('[WebRTC Debug] [CALL FLOW] We are the caller, handling connection');
+                                
+                                // Trigger caller connection handler
+                                window._set_state_from_js({
+                                    _events: [{ 
+                                        name: "handle_caller_connection", 
+                                        payload: { notification_id: notificationIdUpdate } 
+                                    }]
+                                });
+                            }
+                        } else if (callStatusUpdate === 'declined') {
+                            console.log('[WebRTC Debug] [CALL FLOW] Call was declined via status update');
+                            
+                            // If we're the caller, show declined message
+                            if (state.show_calling_popup) {
+                                // Hide calling popup
+                                state.show_calling_popup = false;
+                                state.error_message = 'Call declined';
+                                
+                                // Stop media streams
+                                if (window.localStream) {
+                                    window.localStream.getTracks().forEach(track => track.stop());
+                                }
+                                state._update();
+                            }
+                        }
+                        break;
                 }}
             }}
             
@@ -5655,9 +5807,7 @@ def chat_page() -> rx.Component:
         debug_button(),  # Button to show debug panel
         incoming_call_popup(),
         websocket_debug_monitor(),  # WebSocket monitor
-        
-        # Add an enhanced debug panel that's always visible when debug mode is on
-        
+                
         on_mount=ChatState.on_mount,
         on_unmount=ChatState.cleanup,
         style={
