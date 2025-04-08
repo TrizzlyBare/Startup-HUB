@@ -1,7 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    IncomingCallNotificationView,
     RoomViewSet,
     MessageViewSet,
     MediaFileViewSet,
@@ -9,6 +8,10 @@ from .views import (
     RoomMessagesView,
     UsernameLoginView,
     WebRTCConfigView,
+    # Remove this line:
+    # IncomingCallNotificationView,
+    # Use the ViewSet instead:
+    IncomingCallNotificationViewSet,
 )
 
 # Import room finding views
@@ -45,6 +48,10 @@ router = DefaultRouter()
 router.register(r"rooms", RoomViewSet, basename="room")
 router.register(r"messages", MessageViewSet, basename="message")
 router.register(r"media", MediaFileViewSet, basename="media")
+# Add the incoming-calls ViewSet to the router
+router.register(
+    r"incoming-calls", IncomingCallNotificationViewSet, basename="incoming-call"
+)
 
 urlpatterns = [
     path("", include(router.urls)),
@@ -86,26 +93,9 @@ urlpatterns = [
         WebRTCConfigView.as_view(),
         name="room-webrtc-config",
     ),
-    # Add these to urlpatterns in urls.py
-    # Incoming call notifications endpoints
-    path(
-        "incoming-calls/", IncomingCallNotificationView.as_view(), name="incoming-calls"
-    ),
-    path(
-        "incoming-calls/<uuid:notification_id>/",
-        IncomingCallNotificationView.as_view(),
-        name="update-incoming-call",
-    ),
-    # Add these to urlpatterns in urls.py
-    # Debug endpoints for call notifications
-    path(
-        "incoming-calls/debug/",
-        IncomingCallNotificationView.as_view({"get": "debug"}),
-        name="debug-incoming-calls",
-    ),
-    path(
-        "incoming-calls/expire-all/",
-        IncomingCallNotificationView.as_view({"post": "expire_all"}),
-        name="expire-all-incoming-calls",
-    ),
+    # REMOVE THESE CONFLICTING PATHS:
+    # path("incoming-calls/", IncomingCallNotificationView.as_view(), name="incoming-calls"),
+    # path("incoming-calls/<uuid:notification_id>/", IncomingCallNotificationView.as_view(), name="update-incoming-call"),
+    # path("incoming-calls/debug/", IncomingCallNotificationView.as_view({"get": "debug"}), name="debug-incoming-calls"),
+    # path("incoming-calls/expire-all/", IncomingCallNotificationView.as_view({"post": "expire_all"}), name="expire-all-incoming-calls"),
 ]

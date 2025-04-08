@@ -34,3 +34,33 @@ class CallInvitationAdmin(admin.ModelAdmin):
     list_display = ("inviter", "invitee", "room", "call_type", "created_at", "status")
     list_filter = ("call_type", "status", "created_at")
     search_fields = ("inviter__username", "invitee__username")
+
+
+# Add to admin.py to register the IncomingCallNotification model
+
+from django.contrib import admin
+from .models import (
+    Room,
+    Participant,
+    Message,
+    CallLog,
+    CallInvitation,
+    IncomingCallNotification,
+)
+
+# Keep existing admin registrations
+
+
+@admin.register(IncomingCallNotification)
+class IncomingCallNotificationAdmin(admin.ModelAdmin):
+    list_display = (
+        "caller",
+        "recipient",
+        "call_type",
+        "created_at",
+        "expires_at",
+        "status",
+    )
+    list_filter = ("call_type", "status", "created_at")
+    search_fields = ("caller__username", "recipient__username")
+    date_hierarchy = "created_at"
