@@ -37,6 +37,10 @@ class ChatState(rx.State):
     call_invitation_id: str = ""
     incoming_caller: str = ""
     
+    # Active call in room
+    active_room_call: Dict[str, Any] = {}
+    joining_existing_call: bool = False
+    
     # WebRTC related states
     webrtc_config: Dict[str, Any] = {}
     ice_servers: List[Dict[str, Any]] = []
@@ -903,7 +907,7 @@ class ChatState(rx.State):
             window.chatSocket = new WebSocket("{ws_url}");
             
             window.chatSocket.onopen = function(event) {{
-                console.log('Chat WebSocket connected to room {room_id_str}');
+                console.log('[WebRTC Debug] Chat WebSocket connected to room {room_id_str}');
                 state.is_connected = true;
                 
                 // Send join message
@@ -915,7 +919,7 @@ class ChatState(rx.State):
             
             window.chatSocket.onmessage = function(event) {{
                 const data = JSON.parse(event.data);
-                console.log('Chat WebSocket message received:', data);
+                console.log('[WebRTC Debug] Chat WebSocket message received:', data);
                 
                 // Handle different message types
                 switch(data.type) {{
@@ -928,37 +932,88 @@ class ChatState(rx.State):
                         handleTypingNotification(data);
                         break;
                     case 'call_notification':
-                        // Handle incoming call notification
-                        if (window.callHandler) {{
-                            window.callHandler.handleIncomingCall(data, state);
+                    case 'incoming_call':
+                        // Handle direct incoming call notification
+                        console.log('[WebRTC Debug] Direct call notification received:', data);
+                        
+                        // Don't handle calls initiated by this user
+                        if (data.caller_username === state.username) {{
+                            console.log('[WebRTC Debug] Ignoring our own call notification');
+                            break;
+                        }}
+                        
+                        if (window.callHandler && typeof window.callHandler.handleIncomingCall === 'function') {{
+                            console.log('[WebRTC Debug] Using external call handler for direct call');
+                            try {{
+                                // Set the type for the handler to know it's a direct call
+                                data.type = 'incoming_call';
+                                window.callHandler.handleIncomingCall(data, state);
+                            }} catch (err) {{
+                                console.error('[WebRTC Debug] Error in external call handler:', err);
+                                handleIncomingCallFallback(data);
+                            }}
                         }} else {{
+                            console.log('[WebRTC Debug] External call handler not available, using fallback');
                             handleIncomingCallFallback(data);
                         }}
+                        break;
+                    case 'room_call_announcement':
+                        // Handle room-wide call announcement
+                        console.log('[WebRTC Debug] Room-wide call announcement received:', data);
+                        
+                        // Don't handle calls initiated by this user
+                        if (data.caller_username === state.username) {{
+                            console.log('[WebRTC Debug] Ignoring our own room call announcement');
+                            break;
+                        }}
+                        
+                        if (window.callHandler && typeof window.callHandler.handleIncomingCall === 'function') {{
+                            console.log('[WebRTC Debug] Notifying of room-wide call');
+                            try {{
+                                window.callHandler.handleIncomingCall(data, state);
+                            }} catch (err) {{
+                                console.error('[WebRTC Debug] Error handling room call announcement:', err);
+                            }}
+                        }}
+                        break;
+                    case 'join_call_notification':
+                        // Someone joined the call
+                        console.log('[WebRTC Debug] User joined call:', data.username);
+                        
+                        // Show a toast notification that someone joined
+                        rx.call_script(`
+                            const joinToast = document.createElement('div');
+                            joinToast.style.cssText = 'position:fixed;bottom:20px;left:20px;background:#333;color:white;padding:12px;border-radius:4px;z-index:9999;';
+                            joinToast.innerHTML = '<strong>${data.username}</strong> joined the call';
+                            document.body.appendChild(joinToast);
+                            
+                            // Auto-remove after 3 seconds
+                            setTimeout(() => {{
+                                joinToast.style.opacity = '0';
+                                joinToast.style.transition = 'opacity 0.5s';
+                                setTimeout(() => document.body.removeChild(joinToast), 500);
+                            }}, 3000);
+                        `);
                         break;
                     case 'call_response':
                         // Handle call response (accept/decline)
                         handleCallResponse(data);
                         break;
-                    case 'start_call':
-                        // Handle incoming call start
-                        console.log('Received start_call notification:', data);
-                        // Don't handle calls initiated by this user
-                        if (data.caller_username !== state.username) {{
-                            if (window.callHandler) {{
-                                window.callHandler.handleIncomingCall(data, state);
-                            }} else {{
-                                handleIncomingCallFallback(data);
-                            }}
-                        }}
-                        break;
                     case 'end_call':
                         // Handle call end
-                        console.log('Received end_call notification:', data);
+                        console.log('[WebRTC Debug] Received end_call notification:', data);
                         
                         // Clean up call resources
-                        if (window.callHandler) {{
+                        if (window.callHandler && typeof window.callHandler.cleanupCall === 'function') {{
+                            console.log('[WebRTC Debug] Using external cleanup handler');
                             window.callHandler.cleanupCall();
+                            
+                            // Also remove from active calls
+                            if (data.room_id && typeof window.callHandler.removeActiveCall === 'function') {{
+                                window.callHandler.removeActiveCall(data.room_id);
+                            }}
                         }} else {{
+                            console.log('[WebRTC Debug] Using fallback cleanup');
                             // Fallback cleanup
                             if (window.ringtoneElement) {{
                                 window.ringtoneElement.pause();
@@ -977,27 +1032,29 @@ class ChatState(rx.State):
                             state.show_call_popup = false;
                             state.show_video_popup = false;
                             state.is_call_connected = false;
+                            state.active_room_call = {{}}; // Clear active room call data
+                            state._update();
                         }}, 0);
                         break;
                     case 'error':
-                        console.error('Chat WebSocket error:', data.message);
+                        console.error('[WebRTC Debug] Chat WebSocket error:', data.message);
                         state.error_message = data.message;
                         break;
                 }}
             }};
             
             window.chatSocket.onclose = function(event) {{
-                console.log('Chat WebSocket connection closed', event);
+                console.log('[WebRTC Debug] Chat WebSocket connection closed', event);
                 state.is_connected = false;
                 
                 // Check if it was an abnormal closure
                 if (event.code !== 1000) {{  // 1000 is normal closure
-                    console.error('Chat WebSocket closed abnormally:', event.code, event.reason);
+                    console.error('[WebRTC Debug] Chat WebSocket closed abnormally:', event.code, event.reason);
                 }}
             }};
             
             window.chatSocket.onerror = function(error) {{
-                console.error('Chat WebSocket error:', error);
+                console.error('[WebRTC Debug] Chat WebSocket error:', error);
                 state.is_connected = false;
             }};
             
@@ -1010,7 +1067,7 @@ class ChatState(rx.State):
                 const isCurrentUser = message.sender.username === state.username;
                 
                 // Add message to chat history
-                console.log(`Adding message from ${{message.sender.username}}`);
+                console.log(`[WebRTC Debug] Adding message from ${{message.sender.username}}`);
                 state.chat_history = [...state.chat_history, [
                     isCurrentUser ? "user" : "other", 
                     message.content
@@ -1033,223 +1090,101 @@ class ChatState(rx.State):
                 }}, 3000);
             }}
             
-            // Function to handle incoming call (works for both call_notification and start_call)
-            function handleIncomingCall(data) {{
-                console.log('Incoming call received:', data);
-                
-                // Get call details
-                const caller = data.caller_username;
-                const callType = data.call_type || 'audio';
-                const invitationId = data.invitation_id || '';
-                
-                // Update state in a way that won't cause hydration issues
-                setTimeout(() => {{
-                    // Show incoming call notification
-                    state.current_chat_user = caller;
-                    state.call_type = callType;
-                    state.show_incoming_call = true;
-                    state.call_invitation_id = invitationId;
-                    state.incoming_caller = caller;
-                    
-                    // Create audio element for ringtone
-                    if (!window.ringtoneElement) {{
-                        window.ringtoneElement = new Audio('/static/ringtone.mp3');
-                        window.ringtoneElement.loop = true;
-                    }}
-                    
-                    // Play ringtone
-                    try {{
-                        window.ringtoneElement.play();
-                    }} catch(e) {{
-                        console.log('Error playing ringtone:', e);
-                    }}
-                    
-                    // Flash title
-                    const origTitle = document.title;
-                    window.titleFlashInterval = setInterval(() => {{
-                        document.title = document.title.includes('Incoming Call') ? 
-                            origTitle : '📞 Incoming Call from ' + caller;
-                    }}, 1000);
-                    
-                    // Force UI update
-                    state = {{...state}};
-                    console.log('Call notification state updated', {{
-                        show_incoming_call: state.show_incoming_call,
-                        incoming_caller: state.incoming_caller,
-                        call_type: state.call_type
-                    }});
-                }}, 0);
-            }}
-            
-            // Function to handle call notification
-            function handleCallNotification(data) {{
-                console.log('Call notification received:', data);
-                
-                // Get call details
-                const caller = data.caller_username;
-                const callType = data.call_type || 'audio';
-                const invitationId = data.invitation_id || '';
-                
-                // Update state in a way that won't cause hydration issues
-                setTimeout(() => {{
-                    // Show incoming call notification
-                    state.current_chat_user = caller;
-                    state.call_type = callType;
-                    state.show_incoming_call = true;
-                    state.call_invitation_id = invitationId;
-                    state.incoming_caller = caller;
-                    
-                    // Create and play ringtone with vibration
-                    if (!window.ringtoneElement) {{
-                        window.ringtoneElement = new Audio('/static/ringtone.mp3');
-                        window.ringtoneElement.loop = true;
-                        document.body.appendChild(window.ringtoneElement);
-                    }}
-                    
-                    // Try to play sound with fallbacks
-                    try {{
-                        window.ringtoneElement.play()
-                            .then(() => {{
-                                console.log('Ringtone playing');
-                                // Vibrate device if supported
-                                if ('vibrate' in navigator) {{
-                                    // Vibrate pattern: 500ms vibrate, 200ms pause, repeat
-                                    navigator.vibrate([500, 200, 500, 200, 500]);
-                                }}
-                            }})
-                            .catch(e => {{
-                                console.log('Error playing ringtone:', e);
-                                // Add click handler to unlock audio on user interaction
-                                const unlockAudio = () => {{
-                                    window.ringtoneElement.play()
-                                        .then(() => {{
-                                            if ('vibrate' in navigator) {{
-                                                navigator.vibrate([500, 200, 500]);
-                                            }}
-                                        }});
-                                    document.removeEventListener('click', unlockAudio);
-                                    document.removeEventListener('touchstart', unlockAudio);
-                                }};
-                                document.addEventListener('click', unlockAudio);
-                                document.addEventListener('touchstart', unlockAudio);
-                            }});
-                    }} catch(e) {{
-                        console.log('Exception playing ringtone:', e);
-                    }}
-                    
-                    // Flash title to get user attention
-                    const originalTitle = document.title;
-                    const titleFlash = setInterval(() => {{
-                        document.title = document.title === originalTitle ? 
-                            `📞 ${{callType === 'video' ? 'Video' : 'Audio'}} Call from ${{caller}}` : originalTitle;
-                    }}, 1000);
-                    
-                    // Store interval ID to clear later
-                    window.titleFlashInterval = titleFlash;
-                    
-                    // Show browser notification if possible
-                    if ('Notification' in window && Notification.permission === 'granted') {{
-                        const notification = new Notification(`Incoming ${{callType === 'video' ? 'Video' : 'Audio'}} Call`, {{
-                            body: `${{caller}} is calling you`,
-                            icon: '/static/call_icon.png',
-                            requireInteraction: true
-                        }});
-                        
-                        // Handle notification click
-                        notification.onclick = () => {{
-                            window.focus();
-                            notification.close();
-                        }};
-                    }} else if ('Notification' in window && Notification.permission !== 'denied') {{
-                        Notification.requestPermission().then(permission => {{
-                            if (permission === 'granted') {{
-                                const notification = new Notification(`Incoming ${{callType === 'video' ? 'Video' : 'Audio'}} Call`, {{
-                                    body: `${{caller}} is calling you`,
-                                    icon: '/static/call_icon.png',
-                                    requireInteraction: true
-                                }});
-                            }}
-                        }});
-                    }}
-                    
-                    // Force UI update
-                    state = {{...state}};
-                    console.log('Call notification state updated:', {{
-                        show_incoming_call: state.show_incoming_call,
-                        current_chat_user: state.current_chat_user,
-                        incoming_caller: state.incoming_caller,
-                        call_type: state.call_type
-                    }});
-                }}, 0);
-            }}
-            
             // Function to handle call response
             function handleCallResponse(data) {{
-                console.log('Call response received:', data);
+                console.log('[WebRTC Debug] Call response received:', data);
                 
                 // Get response details
                 const response = data.response;
                 
-                // Update state in a way that won't cause hydration issues
-                setTimeout(() => {{
-                    if (response === 'accept') {{
-                        // Call was accepted, continue with establishing connection
-                        console.log('Call accepted');
-                        // Hide calling popup and show call UI
-                        state.show_calling_popup = false;
-                        if (state.call_type === 'video') {{
-                            state.show_video_popup = true;
-                        }} else {{
-                            state.show_call_popup = true;
-                        }}
-                        // Force UI update
-                        state = {{...state}};
-                    }} else if (response === 'decline') {{
-                        // Call was declined
-                        console.log('Call declined');
-                        // Hide calling popup
-                        state.show_calling_popup = false;
-                        state.error_message = 'Call declined';
-                        state.incoming_caller = '';
-                        
-                        // Stop media streams
-                        if (window.localStream) {{
-                            window.localStream.getTracks().forEach(track => track.stop());
-                        }}
-                        // Force UI update
-                        state = {{...state}};
+                // Update state immediately
+                if (response === 'accept') {{
+                    // Call was accepted, continue with establishing connection
+                    console.log('[WebRTC Debug] Call accepted');
+                    // Hide calling popup and show call UI
+                    state.show_calling_popup = false;
+                    if (state.call_type === 'video') {{
+                        state.show_video_popup = true;
+                    }} else {{
+                        state.show_call_popup = true;
                     }}
-                }}, 0);
+                    state._update();
+                }} else if (response === 'decline') {{
+                    // Call was declined
+                    console.log('[WebRTC Debug] Call declined');
+                    // Hide calling popup
+                    state.show_calling_popup = false;
+                    state.error_message = 'Call declined';
+                    state.incoming_caller = '';
+                    
+                    // Stop media streams
+                    if (window.localStream) {{
+                        window.localStream.getTracks().forEach(track => track.stop());
+                    }}
+                    state._update();
+                }}
             }}
             
             // Fallback function for handling incoming calls when the external script isn't loaded
             function handleIncomingCallFallback(data) {{
-                console.log('Using fallback incoming call handler');
+                console.log('[WebRTC Debug] Using fallback incoming call handler');
                 
                 const caller = data.caller_username;
                 const callType = data.call_type || 'audio';
                 const invitationId = data.invitation_id || '';
                 
-                setTimeout(() => {{
-                    // Show incoming call notification
-                    state.current_chat_user = caller;
-                    state.call_type = callType;
-                    state.show_incoming_call = true;
-                    state.call_invitation_id = invitationId;
-                    state.incoming_caller = caller;
-                    
-                    // Simple ringtone player
-                    try {{
+                // Log the call details and state before updating
+                console.log(`[WebRTC Debug] Call details - Caller: ${{caller}}, Type: ${{callType}}, ID: ${{invitationId}}`);
+                console.log('[WebRTC Debug] Current state before updating:', {{
+                    show_incoming_call: state.show_incoming_call,
+                    incoming_caller: state.incoming_caller,
+                    call_type: state.call_type
+                }});
+                
+                // Update state immediately
+                state.current_chat_user = caller;
+                state.call_type = callType;
+                state.show_incoming_call = true;
+                state.call_invitation_id = invitationId;
+                state.incoming_caller = caller;
+                
+                try {{
+                    // Create and play ringtone
+                    if (!window.ringtoneElement) {{
                         window.ringtoneElement = new Audio('/static/ringtone.mp3');
                         window.ringtoneElement.loop = true;
-                        window.ringtoneElement.play();
-                    }} catch(e) {{
-                        console.log('Error playing ringtone:', e);
+                        window.ringtoneElement.volume = 0.7;
                     }}
                     
-                    // Force UI update
-                    state = {{...state}};
-                }}, 0);
+                    // Try to play ringtone
+                    const playPromise = window.ringtoneElement.play();
+                    
+                    if (playPromise !== undefined) {{
+                        playPromise.catch(e => {{
+                            console.log('[WebRTC Debug] Error playing ringtone:', e);
+                            // Add click handler for user interaction
+                            document.addEventListener('click', function unlockAudio() {{
+                                window.ringtoneElement.play();
+                                document.removeEventListener('click', unlockAudio);
+                            }}, {{once: true}});
+                        }});
+                    }}
+                }} catch(e) {{
+                    console.error('[WebRTC Debug] Exception playing ringtone:', e);
+                }}
+                
+                // Flash title
+                const origTitle = document.title;
+                window.titleFlashInterval = setInterval(() => {{
+                    document.title = document.title === origTitle ? 
+                        `📞 Incoming ${{callType === 'video' ? 'Video' : 'Audio'}} Call from ${{caller}}` : origTitle;
+                }}, 1000);
+                
+                // Force UI update with small delay
+                setTimeout(() => {{
+                    console.log('[WebRTC Debug] Force updating UI state for incoming call');
+                    state._update();
+                }}, 100);
             }}
         """)
         self.is_connected = True
@@ -1339,1089 +1274,311 @@ class ChatState(rx.State):
 
     @rx.event
     async def start_call(self):
-        """Start an audio call with debug logging."""
-        if not self.current_room_id:
-            print("[WebRTC Debug] Error: No active chat room")
-            self.error_message = "No active chat room"
+        """Start an audio call with the current chat user."""
+        print("[WebRTC Debug] Starting audio call initialization")
+        
+        # Verify we have someone to call
+        if not self.current_chat_user or not self.current_room_id:
+            self.error_message = "No active chat user or room"
+            print("[WebRTC Debug] Error: No active chat user or room")
             return
             
         # Get authentication token
         self.auth_token = await self.get_token()
-        
         if not self.auth_token:
+            self.error_message = "Not authenticated"
             print("[WebRTC Debug] Error: Not authenticated")
-            self.error_message = "Not authenticated. Please log in."
             return
             
-        try:
-            print("[WebRTC Debug] Starting audio call initialization")
-            # Initialize WebRTC peer connection
-            await self.initialize_peer_connection()
-            
-            # Get media stream with debug
-            rx.call_script("""
-                webrtcDebug.log('Requesting audio media stream');
-                navigator.mediaDevices.getUserMedia({ audio: true })
-                    .then(stream => {
-                        webrtcDebug.log('Audio stream obtained', {
-                            trackCount: stream.getTracks().length,
-                            tracks: stream.getTracks().map(track => ({
-                                kind: track.kind,
-                                id: track.id,
-                                enabled: track.enabled,
-                                muted: track.muted
-                            }))
-                        });
-                        
-                        window.localStream = stream;
-                        // Add stream to peer connection
-                        stream.getTracks().forEach(track => {
-                            window.peerConnection.addTrack(track, stream);
-                            webrtcDebug.log('Track added to peer connection', {
-                                kind: track.kind,
-                                id: track.id
-                            });
-                        });
-                    })
-                    .catch(error => {
-                        webrtcDebug.log('Error accessing media devices', {
-                            error: error.toString()
-                        });
-                        console.error('Error accessing media devices:', error);
-                        state.error_message = 'Error accessing microphone. Please check permissions.';
-                    });
-            """)
-            
-            print("[WebRTC Debug] Sending start call notification to server")
-            # Send start call notification to server
-            headers = {
-                "Authorization": f"Token {self.auth_token}",
-                "Content-Type": "application/json"
-            }
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/start_call/",
-                    json={
-                        "call_type": "audio",
-                        "action": "start"
-                    },
-                    headers=headers,
-                    follow_redirects=True
-                )
-                
-                print(f"[WebRTC Debug] Call start API response: {response.status_code}")
-                
-                if response.status_code in [200, 201]:
-                    print("[WebRTC Debug] Call started successfully")
-                    # Show calling popup
-                    self.show_calling_popup = True
-                    self.call_type = "audio"
-                    
-                    # Send WebSocket notification to other participants
-                    rx.call_script(f"""
-                        if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
-                            const notification = {{
-                                type: 'start_call',
-                                call_type: 'audio',
-                                caller_username: '{self.username}',
-                                room_id: '{self.current_room_id}'
-                            }};
-                            webrtcDebug.log('Sending WebSocket notification', notification);
-                            window.chatSocket.send(JSON.stringify(notification));
-                        }}
-                    """)
-                    
-                    # Start call timer
-                    await self.start_call_timer()
-                else:
-                    print(f"[WebRTC Debug] Error starting call: {response.status_code}")
-                    self.error_message = "Failed to start call"
-                    
-        except Exception as e:
-            print(f"[WebRTC Debug] Error in start_call: {str(e)}")
-            self.error_message = str(e)
-
-    @rx.event
-    async def start_video_call(self):
-        """Start a video call in the current room."""
-        if not self.current_room_id:
-            self.error_message = "No active chat room"
-            return
-            
-        # Get authentication token
-        self.auth_token = await self.get_token()
+        # Get user ID and room name for call API
+        current_username = await self.get_current_username()
+        current_user_id = await self.get_storage_item("user_id")
+        room_id = str(self.current_room_id)
         
-        if not self.auth_token:
-            print("Not authenticated - cannot start video call")
-            self.error_message = "Not authenticated. Please log in."
-            return
-            
+        # Initialize WebRTC component
+        await self.initialize_peer_connection()
+        
+        # Show calling popup
+        self.call_type = "audio"
+        self.show_calling_popup = True
+        
         try:
-            # 1. Get WebRTC configuration
-            await self.get_webrtc_config()
+            print(f"[WebRTC Debug] Initializing peer connection")
             
-            # 2. Connect to signaling WebSocket
-            await self.connect_webrtc_signaling()
+            # Send API request to create call notification
+            api_url = f"{self.API_BASE_URL}/incoming-calls/"
             
-            # 3. Initialize peer connection
-            await self.initialize_peer_connection()
+            print(f"[WebRTC Debug] Sending start call notification to server")
             
-            # 4. Set up the media stream and start call
-            self.call_type = "video"
-            
-            media_element_id = "local-video" if self.call_type == "video" else "local-audio"
-            use_video = "true" if self.call_type == "video" else "false"
+            # Use JavaScript fetch for API call to create call notification
             rx.call_script(f"""
-                // Get media stream based on call type
-                navigator.mediaDevices.getUserMedia({{
-                    audio: true,
-                    video: {use_video}
-                }}).then(stream => {{
-                    // Store local stream
-                    window.localStream = stream;
+                // Call API to create notification
+                fetch('{api_url}', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer {self.auth_token}'
+                    }},
+                    body: JSON.stringify({{
+                        'recipient_id': '{self.current_chat_user}',
+                        'room_id': '{room_id}',
+                        'call_type': 'audio'
+                    }})
+                }})
+                .then(response => {{
+                    console.log('[WebRTC Debug] Call start API status:', response.status);
+                    if (response.ok) {{
+                        return response.json();
+                    }} else {{
+                        throw new Error('Failed to create call notification: ' + response.status);
+                    }}
+                }})
+                .then(data => {{
+                    console.log('[WebRTC Debug] Call start API response:', data);
                     
-                    // Update UI with local stream
-                    const mediaElement = document.getElementById("{media_element_id}");
-                    if (mediaElement) {{
-                        mediaElement.srcObject = stream;
+                    // Store the notification ID for later use
+                    state.call_invitation_id = data.id;
+                    
+                    // Send WebSocket message to announce call to all room users
+                    if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
+                        console.log('[WebRTC Debug] Sending room-wide call announcement');
+                        window.chatSocket.send(JSON.stringify({{
+                            type: 'room_call_announcement',
+                            room: '{room_id}',
+                            room_name: '{self.current_room_name}',
+                            caller_username: '{current_username}',
+                            caller_id: '{current_user_id}',
+                            call_type: 'audio',
+                            invitation_id: data.id
+                        }}));
                     }}
                     
-                    // Add tracks to peer connection
-                    stream.getTracks().forEach(track => {{
-                        window.peerConnection.addTrack(track, stream);
-                    }});
-                    
-                    // Show appropriate call UI
-                    state.show_incoming_call = false;
-                    state.show_call_popup = true;
-                    if ("{self.call_type}" === "video") {{
-                        state.show_video_popup = true;
-                    }}
-                }}).catch(error => {{
-                    console.error("Error accessing media devices:", error);
-                    state.error_message = "Error accessing media devices. Please check your permissions.";
-                    // Clean up on error
-                    if (window.peerConnection) {{
-                        window.peerConnection.close();
-                        window.peerConnection = null;
-                    }}
-                    if (window.localStream) {{
-                        window.localStream.getTracks().forEach(track => track.stop());
-                        window.localStream = null;
-                    }}
+                    console.log('[WebRTC Debug] Call started successfully');
+                }})
+                .catch(error => {{
+                    console.error('[WebRTC Debug] Error starting call:', error);
+                    state.error_message = 'Failed to start call: ' + error.message;
+                    state.show_calling_popup = false;
+                    state._update();
                 }});
             """)
             
-            # 5. Notify server about call start using the correct API endpoint
-            headers = {
-                "Authorization": f"Token {self.auth_token}",
-                "Content-Type": "application/json"
-            }
+        except Exception as e:
+            print(f"[WebRTC Debug] Error starting call: {str(e)}")
+            self.error_message = f"Error starting call: {str(e)}"
+            self.show_calling_popup = False
+
+    @rx.event
+    async def start_video_call(self):
+        """Start a video call with the current chat user."""
+        print("[WebRTC Debug] Starting video call initialization")
+        
+        # Verify we have someone to call
+        if not self.current_chat_user or not self.current_room_id:
+            self.error_message = "No active chat user or room"
+            print("[WebRTC Debug] Error: No active chat user or room")
+            return
             
-            async with httpx.AsyncClient() as client:
-                # Using your exact API endpoint format
-                response = await client.post(
-                    f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/start_call/",
-                    json={"call_type": "video"},
-                    headers=headers,
-                    follow_redirects=True
-                )
-                
-                if self.debug_log_api_calls:
-                    print(f"Video call start API response: {response.status_code}")
-                
-                # Also send message via WebSocket if we have a connection
-                rx.call_script("""
-                    // Send video call notification over chat WebSocket if available
-                    if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {
-                        window.chatSocket.send(JSON.stringify({
-                            type: 'start_call',
-                            call_type: 'video'
-                        }));
-                    }
-                """)
-                
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        if not self.auth_token:
+            self.error_message = "Not authenticated"
+            print("[WebRTC Debug] Error: Not authenticated")
+            return
+            
+        # Get user ID and room name for call API
+        current_username = await self.get_current_username()
+        current_user_id = await self.get_storage_item("user_id")
+        room_id = str(self.current_room_id)
+        
+        # Initialize WebRTC component
+        await self.initialize_peer_connection()
+        
+        # Show calling popup
+        self.call_type = "video"
+        self.show_calling_popup = True
+        
+        try:
+            print(f"[WebRTC Debug] Initializing peer connection for video call")
+            
+            # Send API request to create call notification
+            api_url = f"{self.API_BASE_URL}/incoming-calls/"
+            
+            print(f"[WebRTC Debug] Sending start video call notification to server")
+            
+            # Use JavaScript fetch for API call to create call notification
+            rx.call_script(f"""
+                // Call API to create notification
+                fetch('{api_url}', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer {self.auth_token}'
+                    }},
+                    body: JSON.stringify({{
+                        'recipient_id': '{self.current_chat_user}',
+                        'room_id': '{room_id}',
+                        'call_type': 'video'
+                    }})
+                }})
+                .then(response => {{
+                    console.log('[WebRTC Debug] Video call start API status:', response.status);
+                    if (response.ok) {{
+                        return response.json();
+                    }} else {{
+                        throw new Error('Failed to create video call notification: ' + response.status);
+                    }}
+                }})
+                .then(data => {{
+                    console.log('[WebRTC Debug] Video call start API response:', data);
+                    
+                    // Store the notification ID for later use
+                    state.call_invitation_id = data.id;
+                    
+                    // Send WebSocket message to announce call to all room users
+                    if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
+                        console.log('[WebRTC Debug] Sending room-wide video call announcement');
+                        window.chatSocket.send(JSON.stringify({{
+                            type: 'room_call_announcement',
+                            room: '{room_id}',
+                            room_name: '{self.current_room_name}',
+                            caller_username: '{current_username}',
+                            caller_id: '{current_user_id}',
+                            call_type: 'video',
+                            invitation_id: data.id
+                        }}));
+                    }}
+                    
+                    console.log('[WebRTC Debug] Video call started successfully');
+                }})
+                .catch(error => {{
+                    console.error('[WebRTC Debug] Error starting video call:', error);
+                    state.error_message = 'Failed to start video call: ' + error.message;
+                    state.show_calling_popup = false;
+                    state._update();
+                }});
+            """)
+            
             # Start tracking call duration
             await self.start_call_timer()
             
         except Exception as e:
+            print(f"[WebRTC Debug] Error starting video call: {str(e)}")
             self.error_message = f"Error starting video call: {str(e)}"
-            print(f"Error starting video call: {str(e)}")
+            self.show_calling_popup = False
     
     @rx.event
     async def end_call(self):
-        """End an audio call with debug logging."""
+        """End an audio call."""
+        print("[WebRTC Debug] Ending call")
+        
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        if not self.auth_token:
+            self.error_message = "Not authenticated"
+            print("[WebRTC Debug] Error: Not authenticated")
+            return
+            
+        # Get room ID
+        room_id = str(self.current_room_id)
+        
         try:
-            print("[WebRTC Debug] Ending call")
             # Clean up WebRTC resources
             rx.call_script("""
-                webrtcDebug.log('Cleaning up WebRTC resources');
+                console.log('[WebRTC Debug] Cleaning up WebRTC resources');
                 
                 // Stop all tracks in local stream
                 if (window.localStream) {
-                    webrtcDebug.log('Stopping local stream tracks');
+                    console.log('[WebRTC Debug] Stopping local stream tracks');
                     window.localStream.getTracks().forEach(track => {
                         track.stop();
-                        webrtcDebug.log('Track stopped', {
-                            kind: track.kind,
-                            id: track.id
-                        });
+                        console.log('[WebRTC Debug] Track stopped:', track.kind);
                     });
                     window.localStream = null;
                 }
                 
                 // Close peer connection
                 if (window.peerConnection) {
-                    webrtcDebug.log('Closing peer connection');
+                    console.log('[WebRTC Debug] Closing peer connection');
                     window.peerConnection.close();
                     window.peerConnection = null;
                 }
                 
-                webrtcDebug.log('WebRTC cleanup completed');
+                console.log('[WebRTC Debug] WebRTC cleanup completed');
             """)
             
             print("[WebRTC Debug] Sending end call notification to server")
-            # Send end call notification to server
-            headers = {
-                "Authorization": f"Token {self.auth_token}",
-                "Content-Type": "application/json"
-            }
             
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/start_call/",
-                    json={
-                        "call_type": "audio",
-                        "action": "end"
-                    },
-                    headers=headers,
-                    follow_redirects=True
-                )
-                
-                print(f"[WebRTC Debug] Call end API response: {response.status_code}")
-                
-                if response.status_code in [200, 201]:
-                    print("[WebRTC Debug] Call ended successfully")
-                    # Update UI state
-                    self.show_calling_popup = False
-                    self.show_call_popup = False
-                    self.call_duration = 0
+            # Use JavaScript fetch for API call to end the call
+            api_url = f"{self.API_BASE_URL}/calls/end/"
+            
+            rx.call_script(f"""
+                // Call API to end call notification
+                fetch('{api_url}', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer {self.auth_token}'
+                    }},
+                    body: JSON.stringify({{
+                        'room_id': '{room_id}'
+                    }})
+                }})
+                .then(response => {{
+                    console.log('[WebRTC Debug] Call end API status:', response.status);
+                    if (!response.ok) {{
+                        throw new Error('Failed to end call: ' + response.status);
+                    }}
+                    return response.json();
+                }})
+                .then(data => {{
+                    console.log('[WebRTC Debug] Call end API response:', data);
                     
-                    # Send WebSocket notification
-                    rx.call_script(f"""
-                        if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
-                            const notification = {{
-                                type: 'end_call',
-                                call_type: 'audio',
-                                room_id: '{self.current_room_id}'
-                            }};
-                            webrtcDebug.log('Sending end call WebSocket notification', notification);
-                            window.chatSocket.send(JSON.stringify(notification));
-                        }}
-                    """)
-                else:
-                    print(f"[WebRTC Debug] Error ending call: {response.status_code}")
-                    self.error_message = "Failed to end call"
+                    // Send WebSocket notification to all room users
+                    if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
+                        console.log('[WebRTC Debug] Sending room-wide call end announcement');
+                        window.chatSocket.send(JSON.stringify({{
+                            type: 'end_call',
+                            room_id: '{room_id}',
+                            call_type: state.call_type
+                        }}));
+                    }}
+                    
+                    console.log('[WebRTC Debug] Call ended successfully');
+                    
+                    // Clean up call handler resources
+                    if (window.callHandler && typeof window.callHandler.cleanupCall === 'function') {{
+                        window.callHandler.cleanupCall();
+                    }}
+                    
+                    // Also remove from active calls
+                    if (typeof window.callHandler.removeActiveCall === 'function') {{
+                        window.callHandler.removeActiveCall('{room_id}');
+                    }}
+                }})
+                .catch(error => {{
+                    console.error('[WebRTC Debug] Error ending call:', error);
+                    state.error_message = 'Failed to end call: ' + error.message;
+                }});
+            """)
+            
+            # Update UI state
+            self.show_calling_popup = False
+            self.show_call_popup = False
+            self.show_video_popup = False
+            self.call_duration = 0
+            self.is_call_connected = False
+            self.active_room_call = {}
                     
         except Exception as e:
             print(f"[WebRTC Debug] Error in end_call: {str(e)}")
-            self.error_message = str(e)
-
+            self.error_message = f"Error ending call: {str(e)}"
+            
     @rx.event
     async def end_video_call(self):
         """End a video call."""
-        # Stop local media streams
-        rx.call_script("""
-            // Stop all tracks in the local stream
-            if (window.localStream) {
-                window.localStream.getTracks().forEach(track => track.stop());
-                window.localStream = null;
-            }
-            
-            // Close peer connection
-            if (window.peerConnection) {
-                window.peerConnection.close();
-                window.peerConnection = null;
-            }
-            
-            // Close data channel
-            if (window.dataChannel) {
-                window.dataChannel.close();
-                window.dataChannel = null;
-            }
-            
-            // Close signaling connection
-            if (window.signalingSocket) {
-                window.signalingSocket.close();
-                window.signalingSocket = null;
-            }
-        """)
-        
-        self.show_video_popup = False
-        self.show_calling_popup = False
-        self.is_call_connected = False
-        self.signaling_connected = False
-        
-        # Notify server about call end
-        if self.current_room_id:
-            try:
-                # Get authentication token
-                self.auth_token = await self.get_token()
-                
-                if not self.auth_token:
-                    print("Not authenticated - cannot end call properly")
-                    return
-                    
-                # Set up headers
-                headers = {
-                    "Authorization": f"Token {self.auth_token}",
-                    "Content-Type": "application/json"
-                }
-                
-                # Use AsyncClient for HTTP requests
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"{self.API_BASE_URL}/communication/rooms/{self.current_room_id}/end_call/",
-                        headers=headers,
-                        follow_redirects=True
-                    )
-            except Exception as e:
-                print(f"Error ending video call: {str(e)}")
-        yield
-
-    @rx.event
-    async def toggle_mute(self):
-        """Toggle microphone mute state."""
-        self.is_muted = not self.is_muted
-        
-        # Update local stream audio tracks
-        rx.call_script("""
-            if (window.localStream) {
-                window.localStream.getAudioTracks().forEach(track => {
-                    track.enabled = !state.is_muted;
-                });
-            }
-        """)
-        yield
-
-    @rx.event
-    async def toggle_camera(self):
-        """Toggle camera state."""
-        self.is_camera_off = not self.is_camera_off
-        
-        # Update local stream video tracks
-        rx.call_script("""
-            if (window.localStream) {
-                window.localStream.getVideoTracks().forEach(track => {
-                    track.enabled = !state.is_camera_off;
-                });
-            }
-        """)
-        yield
-
-    @rx.event
-    async def increment_call_duration(self):
-        """Increment call duration counter every second.
-        This is an async generator meant to be used directly as an event handler."""
-        while self.show_call_popup or self.show_video_popup:
-            self.call_duration += 1
-            yield rx.utils.sleep(1)
-
-    @rx.event
-    async def start_call_timer(self):
-        """Start the call timer as a background task."""
-        # Create a background task to handle the duration updates
-        asyncio.create_task(self._increment_call_duration_task())
-    
-    async def _increment_call_duration_task(self):
-        """Background task to increment call duration without yielding."""
-        while self.show_call_popup or self.show_video_popup:
-            self.call_duration += 1
-            await asyncio.sleep(1)
-
-    @rx.event
-    async def clear_error_message(self):
-        self.error_message = ""
-        yield
-
-    @rx.event
-    async def clear_success_message(self):
-        self.success_message = ""
-        yield
-        
-    @rx.event
-    async def cleanup(self):
-        """Clean up resources when component unmounts."""
-        # Clear any resource usage
-        self.chat_history = []
-        yield
-
-    @rx.event
-    async def go_back_to_chat_list(self):
-        """Go back to the chat list from a chat room."""
-        print("Going back to chat list")
-        # Clear the current room state
-        self.current_room_id = ""
-        self.current_chat_user = ""
-        
-        # Redirect to the chat list
-        return rx.redirect("/chat")
-
-    @rx.event
-    async def keypress_handler(self, key: str):
-        """Handle keypress events in the message input."""
-        try:
-            # Only send typing notification for non-Enter keys
-            if key != "Enter":
-                # Use direct call instead of emit - typing isn't critical
-                print("User is typing...")
-                # Don't await - just fire and forget for typing notifications
-                self.send_typing_notification()
-            # Send message when Enter is pressed
-            elif key == "Enter" and self.message.strip():
-                print(f"Sending message: {self.message[:10]}...")
-                # Use regular send_message, it will update the UI
-                await self.send_message()
-        except Exception as e:
-            print(f"Error in keypress_handler: {e}")
-
-    @rx.event
-    async def show_error(self):
-        """Show error message in a notification."""
-        # Don't use window_alert - the error_alert component will display the message
-        yield
-
-    @rx.event
-    async def show_success(self):
-        """Show success message in a notification."""
-        # Don't use window_alert - the success_alert component will display the message
-        yield
-        
-    @rx.event
-    async def set_success_message(self, message: str):
-        """Set a success message in the state."""
-        self.success_message = message
-        yield
-
-    @rx.event
-    async def set_error_message(self, message: str):
-        """Set an error message in the state."""
-        self.error_message = message
-        yield
-
-    @rx.event
-    async def toggle_debug_info(self):
-        """Toggle the visibility of the debug info panel."""
-        self.debug_show_info = not self.debug_show_info
-        yield
-        
-    @rx.event
-    async def toggle_debug_dummy_data(self):
-        """Toggle between using dummy data and real API data."""
-        self.debug_use_dummy_data = not self.debug_use_dummy_data
-        print(f"Debug dummy data set to: {self.debug_use_dummy_data}")
-        
-        # Reload data with the new setting
-        if self.debug_use_dummy_data:
-            await self._set_dummy_data()
-            self._set_dummy_messages()
-        else:
-            try:
-                await self.load_rooms()
-                if self.current_room_id:
-                    await self.load_messages()
-            except Exception as e:
-                print(f"Error loading data: {e}, falling back to dummy data")
-                await self._set_dummy_data()
-                self._set_dummy_messages()
-        yield
-
-    @rx.event
-    async def login_as_user(self, username: str):
-        """Debug function to set the current username manually."""
-        print(f"Setting username to: {username}")
-        
-        # First make sure username is updated in state
-        self.username = username
-        
-        # Then update it in localStorage with direct script code
-        rx.call_script(f"""
-            // Save username to localStorage
-            localStorage.setItem('username', '{username}');
-            console.log('Username saved to localStorage:', '{username}');
-            
-            // Force update the state in case it didn't update properly
-            if (window._state) {{
-                window._state.username = '{username}';
-                console.log('Directly updated state.username to:', '{username}');
-            }}
-        """)
-        
-        # Force a refresh of the chat to properly show messages with new user
-        if self.current_room_id:
-            try:
-                # Force update chat history to show correct message ownership
-                for i in range(len(self.chat_history)):
-                    sender, msg = self.chat_history[i]
-                    # Update any "user" messages to reflect new username
-                    if sender == "user":
-                        print(f"Message {i+1} already marked as from current user")
-                    # If the message is from the new username, mark it as from current user
-                    elif sender == username:
-                        print(f"Updating message {i+1} ownership to current user")
-                        self.chat_history[i] = ("user", msg)
-                
-                # Then reload all messages to ensure proper display
-                await self.load_messages()
-            except Exception as e:
-                print(f"Error updating chat messages: {e}")
-        yield
-
-    @rx.event
-    async def poll_messages(self):
-        """Poll for new messages as a fallback for WebSockets."""
-        print(f"\n=== Starting message polling for room: {self.current_room_id} ===")
-        
-        # Verify the room_id is valid
-        if not self.current_room_id or not isinstance(self.current_room_id, str) or not self.current_room_id.strip():
-            print("Cannot poll messages: missing or invalid room_id")
-            return
-            
-        if not self.auth_token:
-            print("Cannot poll messages: missing auth_token")
-            return
-        
-        # If username is not set or is default, try to fix it
-        if not self.username or self.username == "user":
-            await self.fix_username_if_needed()
-            print(f"Username after fixing attempt: {self.username}")
-            
-        # Store room_id locally to avoid any issues with state changes
-        room_id = self.current_room_id
-        print(f"Polling messages for room {room_id}")
-            
-        poll_count = 0
-        last_message_id = None  # Track the last message ID we've seen
-        
-        # Set up headers once
-        headers = {
-            "Authorization": f"Token {self.auth_token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-        
-        while self.should_reconnect:
-            # Check if room_id is still valid and matches
-            if self.current_room_id != room_id:
-                print(f"Room changed from {room_id} to {self.current_room_id}, stopping polling")
-                break
-                
-            try:
-                poll_count += 1
-                if poll_count % 10 == 0:  # Log every 10 polls to avoid spam
-                    print(f"Polling messages for room {room_id} (count: {poll_count})...")
-                
-                # Use the correct API endpoint for fetching messages
-                url = f"{self.API_BASE_URL}/communication/messages/?room_id={room_id}"
-                
-                # Add pagination if needed
-                if last_message_id:
-                    url += f"&after_id={last_message_id}"
-                    
-                if poll_count % 10 == 0:  # Log URL occasionally
-                    print(f"Polling URL: {url}")
-                
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        url,
-                        headers=headers,
-                        follow_redirects=True,
-                        timeout=10.0  # Add timeout to prevent hanging
-                    )
-                    
-                    # Debug response information
-                    if poll_count % 10 == 0:
-                        print(f"Response status: {response.status_code}")
-                        print(f"Response headers: {response.headers}")
-                        # Print first 200 chars of response to debug
-                        content_preview = response.text[:200] + "..." if len(response.text) > 200 else response.text
-                        print(f"Response content: {content_preview}")
-                    
-                    # Check if response is empty or invalid
-                    if not response.text or response.text.isspace():
-                        print("Empty response received from server")
-                        continue
-                    
-                    try:
-                        data = response.json()
-                    except json.JSONDecodeError as e:
-                        print(f"Invalid JSON response: {str(e)}")
-                        print(f"Raw response: {response.text[:500]}")
-                        await asyncio.sleep(5)  # Wait longer after an error
-                        continue
-                    
-                    messages = data.get("results", [])
-                    
-                    if messages:
-                        print(f"Received {len(messages)} new messages")
-                        
-                        # Update the last message ID if we have messages
-                        if messages:
-                            last_message_id = messages[-1].get("id") 
-                        
-                        # If we still don't have a proper username, check one last time
-                        if not self.username or self.username == "user":
-                            await self.fix_username_if_needed()
-                        
-                        # Process new messages
-                        for msg in messages:
-                            sender = msg.get("sender", {}).get("username", "unknown")
-                            content = msg.get("content", "")
-                            sent_at = msg.get("sent_at", "")
-                            
-                            # Ensure content is not None
-                            if content is None:
-                                content = ""
-                            
-                            # Check if we need to update our username from message data
-                            if self.username == "user" and self.auth_token:
-                                # If we have a token, we can try to identify which messages are ours
-                                current_user_in_msg = msg.get("is_sender", False)
-                                if current_user_in_msg:
-                                    print(f"Found message from current user, updating username to: {sender}")
-                                    self.username = sender
-                                    rx.call_script(f"""
-                                        localStorage.setItem('username', '{sender}');
-                                        console.log('Username saved to localStorage from message data:', '{sender}');
-                                    """)
-                                    is_current_user = True
-                                else:
-                                    # Determine if the message is from the current user based on username
-                                    is_current_user = sender == self.username
-                            else:
-                                # Determine if the message is from the current user based on username
-                                is_current_user = sender == self.username
-                            
-                            print(f"Polling received message from {sender}, current user is {self.username}, is_current_user: {is_current_user}")
-                            
-                            # Add to chat history if not already there
-                            message_key = f"{sender}:{content}:{sent_at}"
-                            if not any(message_key in str(msg) for msg in self.chat_history[-10:]):
-                                print(f"Adding message from {sender}: {content[:20]}...")
-                                self.chat_history.append(
-                                    ("user" if is_current_user else "other", content)
-                                )
-                    
-                    # Update last message time
-                    self.last_message_time = asyncio.get_event_loop().time()
-            except httpx.HTTPError as e:
-                # Handle HTTP-specific errors
-                print(f"HTTP error during polling: {str(e)}")
-                await asyncio.sleep(5)  # Wait longer after an error
-            except Exception as e:
-                print(f"Error polling messages: {str(e)}")
-                await asyncio.sleep(5)  # Wait longer after an error
-                
-            # Wait before polling again - shorter wait if no errors
-            await asyncio.sleep(2)
-        
-        print("Message polling stopped.")
-
-    @rx.event
-    async def load_messages(self):
-        """Load messages for the current room."""
-        # Get authentication token
-        self.auth_token = await self.get_token()
-        
-        if not self.auth_token:
-            print("Cannot load messages: not authenticated")
-            return
-
-        if not self.current_room_id:
-            print("Cannot load messages: no room ID")
-            return
-            
-        # Store the room_id locally to avoid any issues with state changes
-        room_id = self.current_room_id
-        
-        # Make sure we have the correct username before loading messages
-        if not self.username or self.username == "user":
-            await self.fix_username_if_needed()
-        
-        # Log the current username for debugging message ownership
-        print(f"Current username for message ownership: {self.username}")
-        
-        # Make sure username is in sync with localStorage before loading messages
-        rx.call_script("""
-            const username = localStorage.getItem('username');
-            console.log('Direct localStorage username check:', username);
-            
-            if (username) {
-                // Force update both state objects to ensure correct username
-                if (window._state) {
-                    window._state.username = username;
-                    console.log('Directly updated _state.username to:', username);
-                }
-                
-                // Also update state.username which might be a different object
-                if (state && state.username !== username) {
-                    state.username = username;
-                    console.log('Updated state.username to:', username);
-                }
-            }
-        """)
-        
-        # Wait a moment for username to be set
-        await asyncio.sleep(0.1)
-        
-        # Double-check username again
-        print(f"Username after localStorage check: {self.username}")
-
-        try:
-            print(f"Loading messages for room {room_id}...")
-            
-            # Set up headers
-            headers = {
-                "Authorization": f"Token {self.auth_token}",
-                "Content-Type": "application/json"
-            }
-            
-            # Before loading messages, get room details directly from the server
-            # to ensure we have the correct and most up-to-date room name
-            async with httpx.AsyncClient() as client:
-                # First get the room details to get the most accurate name
-                try:
-                    room_response = await client.get(
-                        f"{self.API_BASE_URL}/communication/rooms/{room_id}/",
-                        headers=headers,
-                        follow_redirects=True
-                    )
-                    
-                    if room_response.status_code == 200:
-                        room_data = room_response.json()
-                        if room_data:
-                            # Update room name
-                            if "name" in room_data:
-                                self.current_chat_user = room_data["name"]
-                                print(f"Updated room name from API: {self.current_chat_user}")
-                    else:
-                        print(f"Could not fetch room details, status: {room_response.status_code}")
-                        # Fall back to finding room name from cached rooms list
-                        self._find_room_name_from_cache(room_id)
-                except Exception as e:
-                    print(f"Error fetching room details: {e}")
-                    # Fall back to finding room name from cached rooms list
-                    self._find_room_name_from_cache(room_id)
-                
-                # Now load messages
-                response = await client.get(
-                    f"{self.API_BASE_URL}/communication/messages/?room_id={room_id}",
-                    headers=headers,
-                    follow_redirects=True
-                )
-                
-                print(f"Messages API response status: {response.status_code}")
-                
-                data = response.json()
-                messages = data.get("results", [])
-                print(f"Loaded {len(messages)} messages")
-                
-                # Clear existing chat history
-                self.chat_history = []
-                
-                # Format messages for display - newer messages should be at the bottom
-                sorted_messages = sorted(messages, key=lambda m: m.get("sent_at", ""))
-                
-                for msg in sorted_messages:
-                    sender = msg.get("sender", {}).get("username", "unknown")
-                    content = msg.get("content", "")
-                    
-                    # Ensure content is not None
-                    if content is None:
-                        content = ""
-                    
-                    # Determine if the message is from the current user
-                    is_current_user = sender == self.username
-                    
-                    print(f"Message from {sender}, current user is {self.username}, is_current_user: {is_current_user}")
-                    
-                    # Add to chat history
-                    self.chat_history.append(
-                        ("user" if is_current_user else "other", content)
-                    )
-                    
-                print(f"Successfully loaded and processed {len(messages)} messages")
-        except Exception as e:
-            print(f"Error loading messages: {str(e)}")
-            self.error_message = f"Error loading messages: {str(e)}"
-            
-            # If in development mode, use dummy data on error
-            if self.debug_use_dummy_data:
-                self._set_dummy_messages()
-
-    def _find_room_name_from_cache(self, room_id):
-        """Helper method to find room name from cached rooms list."""
-        print(f"Finding room name from cached rooms for room ID: {room_id}")
-        found = False
-        for room in self.rooms:
-            if str(room.get("id", "")) == str(room_id):
-                self.current_chat_user = room.get("name", "Chat Room")
-                print(f"Found room name in cache: {self.current_chat_user}")
-                found = True
-                break
-        
-        if not found:
-            print(f"Room {room_id} not found in cached rooms list, using default name")
-            self.current_chat_user = "Chat Room"
-
-    @rx.event
-    async def load_rooms(self):
-        """Load all rooms for the current user."""
-        # Get authentication token
-        self.auth_token = await self.get_token()
-        
-        if not self.auth_token:
-            self.error_message = "Not authenticated"
-            return
-
-        try:
-            print("Loading rooms...")
-            
-            # Set up headers
-            headers = {
-                "Authorization": f"Token {self.auth_token}",
-                "Content-Type": "application/json"
-            }
-            
-            # Use AsyncClient for HTTP requests
-            async with httpx.AsyncClient() as client:
-                # Use the correct API endpoint for rooms
-                response = await client.get(
-                    f"{self.API_BASE_URL}/communication/rooms/",  # Simplified endpoint
-                    headers=headers,
-                    follow_redirects=True
-                )
-                
-                print(f"Rooms API response status: {response.status_code}")
-                
-                data = response.json()
-                self.rooms = data.get("results", [])  # Adjust based on your API response structure
-                print(f"Loaded {len(self.rooms)} rooms")
-                
-                # Debug room data with more detailed information
-                for i, room in enumerate(self.rooms):
-                    room_id = room.get("id", "")
-                    room_name = room.get("name", "Unknown")
-                    print(f"Room {i+1}: ID={room_id}, Name={room_name}")
-                    
-                    # Additional debug info for direct rooms
-                    participants = room.get("participants", [])
-                    if participants and len(participants) > 0:
-                        participant_names = [p.get("user", {}).get("username", "unknown") for p in participants]
-                        print(f"  Participants: {', '.join(participant_names)}")
-                
-                # If we have a current_room_id but no current_chat_user, try to find the name
-                if self.current_room_id and not self.current_chat_user:
-                    print(f"Looking for name for room {self.current_room_id}")
-                    found = False
-                    for room in self.rooms:
-                        if str(room.get("id", "")) == str(self.current_room_id):
-                            self.current_chat_user = room.get("name", "Chat Room")
-                            print(f"Found room name: {self.current_chat_user} for room {self.current_room_id}")
-                            found = True
-                            break
-                    if not found:
-                        print(f"WARNING: Could not find room with ID {self.current_room_id} in rooms list")
-                    
-                # If we have rooms, set the first one as active if no room already selected
-                if self.rooms and not self.current_room_id:
-                    print("No room selected, setting first room as active")
-                    first_room = self.rooms[0]
-                    self.current_room_id = first_room.get("id")
-                    self.current_chat_user = first_room.get("name", "Chat")
-                    print(f"Set active room: ID={self.current_room_id}, Name={self.current_chat_user}")
-                    await self.load_messages()
-                    
-                    # Start polling for messages
-                    self.should_reconnect = True
-                    self.last_message_time = asyncio.get_event_loop().time()
-                    print("Starting polling for first room")
-                    asyncio.create_task(self.poll_messages())
-                    
-                self.loading = False
-        except Exception as e:
-            self.error_message = f"Error loading rooms: {str(e)}"
-            print(f"Error loading rooms: {str(e)}")
-            self.loading = False
-
-    @rx.event
-    async def accept_call(self):
-        """Accept an incoming call."""
-        if not self.call_invitation_id:
-            self.error_message = "No active call invitation"
-            return
-            
-        # Get authentication token
-        self.auth_token = await self.get_token()
-        
-        if not self.auth_token:
-            print("Not authenticated - cannot accept call")
-            self.error_message = "Not authenticated. Please log in."
-            return
-            
-        try:
-            # 1. Stop ringtone and clean up notification state
-            rx.call_script("""
-                // Use the call handler if available, otherwise do basic cleanup
-                if (window.callHandler) {
-                    window.callHandler.cleanupCall();
-                } else {
-                    // Stop ringtone if playing
-                    if (window.ringtoneElement) {
-                        window.ringtoneElement.pause();
-                        window.ringtoneElement.currentTime = 0;
-                    }
-                    
-                    // Stop title flashing
-                    if (window.titleFlashInterval) {
-                        clearInterval(window.titleFlashInterval);
-                        document.title = 'Chat';
-                    }
-                }
-            """)
-            
-            # 2. Send call response to server
-            headers = {
-                "Authorization": f"Token {self.auth_token}",
-                "Content-Type": "application/json"
-            }
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.API_BASE_URL}/communication/call-response/",
-                    json={
-                        "invitation_id": self.call_invitation_id,
-                        "response": "accept"
-                    },
-                    headers=headers,
-                    follow_redirects=True
-                )
-                
-                if response.status_code not in [200, 201]:
-                    raise Exception(f"Failed to accept call: {response.status_code}")
-                
-                if self.debug_log_api_calls:
-                    print(f"Call accept API response: {response.status_code}")
-            
-            # 3. Also send response via WebSocket
-            rx.call_script(f"""
-                // Send call response over WebSocket
-                if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
-                    window.chatSocket.send(JSON.stringify({{
-                        type: 'call_response',
-                        invitation_id: '{self.call_invitation_id}',
-                        response: 'accept'
-                    }}));
-                }}
-            """)
-            
-            # 4. Connect to WebRTC signaling
-            await self.connect_webrtc_signaling()
-            
-            # 5. Initialize peer connection
-            await self.initialize_peer_connection()
-            
-            # 6. Set up media based on call type
-            if self.call_type == "video":
-                # Video call setup
-                rx.call_script("""
-                    // Get media stream for video call
-                    navigator.mediaDevices.getUserMedia({
-                        audio: true,
-                        video: true
-                    }).then(stream => {
-                        // Store local stream
-                        window.localStream = stream;
-                        
-                        // Update UI with local stream
-                        const mediaElement = document.getElementById('local-video');
-                        if (mediaElement) {
-                            mediaElement.srcObject = stream;
-                        }
-                        
-                        // Add tracks to peer connection
-                        stream.getTracks().forEach(track => {
-                            window.peerConnection.addTrack(track, stream);
-                        });
-                        
-                        // Show video call UI
-                        state.show_incoming_call = false;
-                        state.show_call_popup = true;
-                        state.show_video_popup = true;
-                    }).catch(error => {
-                        console.error('Error accessing video devices:', error);
-                        state.error_message = 'Error accessing camera. Please check your permissions.';
-                        // Clean up on error
-                        if (window.peerConnection) {
-                            window.peerConnection.close();
-                            window.peerConnection = null;
-                        }
-                        if (window.localStream) {
-                            window.localStream.getTracks().forEach(track => track.stop());
-                            window.localStream = null;
-                        }
-                    });
-                """)
-            else:
-                # Audio call setup
-                rx.call_script("""
-                    // Get media stream for audio call
-                    navigator.mediaDevices.getUserMedia({
-                        audio: true,
-                        video: false
-                    }).then(stream => {
-                        // Store local stream
-                        window.localStream = stream;
-                        
-                        // Update UI with local stream
-                        const mediaElement = document.getElementById('local-audio');
-                        if (mediaElement) {
-                            mediaElement.srcObject = stream;
-                        }
-                        
-                        // Add tracks to peer connection
-                        stream.getTracks().forEach(track => {
-                            window.peerConnection.addTrack(track, stream);
-                        });
-                        
-                        // Show audio call UI
-                        state.show_incoming_call = false;
-                        state.show_call_popup = true;
-                    }).catch(error => {
-                        console.error('Error accessing audio devices:', error);
-                        state.error_message = 'Error accessing microphone. Please check your permissions.';
-                        // Clean up on error
-                        if (window.peerConnection) {
-                            window.peerConnection.close();
-                            window.peerConnection = null;
-                        }
-                        if (window.localStream) {
-                            window.localStream.getTracks().forEach(track => track.stop());
-                            window.localStream = null;
-                        }
-                    });
-                """)
-            
-            # 7. Start call timer
-            await self.start_call_timer()
-            
-        except Exception as e:
-            self.error_message = f"Error accepting call: {str(e)}"
-            print(f"Error accepting call: {str(e)}")
-            # Clean up state
-            self.show_incoming_call = False
-            self.call_invitation_id = ""
+        # Reuse the same end_call method
+        await self.end_call()
 
     @rx.event
     async def decline_call(self):
@@ -2757,6 +1914,395 @@ class ChatState(rx.State):
             }}
         """)
         self.signaling_connected = True
+
+    @rx.event
+    async def join_existing_call(self):
+        """Join an existing call in the current room."""
+        print("[WebRTC Debug] Joining existing call in room")
+        
+        # Check if we have an active room call to join
+        if not self.active_room_call:
+            self.error_message = "No active call to join"
+            print("[WebRTC Debug] Error: No active call to join")
+            return
+            
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        if not self.auth_token:
+            self.error_message = "Not authenticated"
+            print("[WebRTC Debug] Error: Not authenticated")
+            return
+            
+        # Set call type from active room call
+        call_type = self.active_room_call.get("call_type", "audio")
+        room_id = self.active_room_call.get("room_id", "")
+        caller = self.active_room_call.get("caller", "")
+        
+        # Ensure we're in the right room
+        if str(self.current_room_id) != str(room_id):
+            print(f"[WebRTC Debug] Need to switch to room {room_id} first")
+            await self.open_room(room_id)
+        
+        print(f"[WebRTC Debug] Joining {call_type} call initiated by {caller}")
+        
+        # Connect to WebRTC signaling
+        await self.connect_webrtc_signaling()
+        
+        # Determine call type and set UI accordingly
+        if call_type == "video":
+            print("[WebRTC Debug] Setting up video call UI for joining")
+            self.show_video_popup = True
+            
+            # Initialize media with video
+            rx.call_script("""
+                console.log('[WebRTC Debug] Initializing video call media for joining call');
+                
+                // Get user media with video
+                navigator.mediaDevices.getUserMedia({ audio: true, video: true })
+                    .then(stream => {
+                        console.log('[WebRTC Debug] Got local media stream with video');
+                        
+                        // Save stream reference
+                        window.localStream = stream;
+                        
+                        // Display local video
+                        const localVideo = document.getElementById('local-video');
+                        if (localVideo) {
+                            localVideo.srcObject = stream;
+                        }
+                        
+                        // Let others know we joined
+                        if (window.chatSocket) {
+                            window.chatSocket.send(JSON.stringify({
+                                type: 'join_call',
+                                room_id: '""" + str(room_id) + """',
+                                username: '""" + str(self.username) + """',
+                                call_type: '""" + call_type + """'
+                            }));
+                        }
+                        
+                        // Update UI state
+                        state.is_call_connected = true;
+                        state.joining_existing_call = false;
+                        state._update();
+                    })
+                    .catch(error => {
+                        console.error('[WebRTC Debug] Error accessing media devices:', error);
+                        state.error_message = 'Failed to access camera and microphone';
+                        state.show_video_popup = false;
+                        state._update();
+                    });
+            """)
+        else:
+            print("[WebRTC Debug] Setting up audio call UI for joining")
+            self.show_call_popup = True
+            
+            # Initialize media with audio only
+            rx.call_script("""
+                console.log('[WebRTC Debug] Initializing audio call media for joining call');
+                
+                // Get user media with audio only
+                navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+                    .then(stream => {
+                        console.log('[WebRTC Debug] Got local media stream with audio');
+                        
+                        // Save stream reference
+                        window.localStream = stream;
+                        
+                        // Let others know we joined
+                        if (window.chatSocket) {
+                            window.chatSocket.send(JSON.stringify({
+                                type: 'join_call',
+                                room_id: '""" + str(room_id) + """',
+                                username: '""" + str(self.username) + """',
+                                call_type: '""" + call_type + """'
+                            }));
+                        }
+                        
+                        // Update UI state
+                        state.is_call_connected = true;
+                        state.joining_existing_call = false;
+                        state._update();
+                    })
+                    .catch(error => {
+                        console.error('[WebRTC Debug] Error accessing microphone:', error);
+                        state.error_message = 'Failed to access microphone';
+                        state.show_call_popup = false;
+                        state._update();
+                    });
+            """)
+        
+        # Start call timer
+        await self.start_call_timer()
+
+    @rx.event
+    async def go_back_to_chat_list(self):
+        """Go back to the chat list from a chat room."""
+        print("Going back to chat list")
+        # Clear the current room state
+        self.current_room_id = ""
+        self.current_chat_user = ""
+        
+        # Reset call-related states
+        self.show_call_popup = False
+        self.show_video_popup = False
+        self.show_calling_popup = False
+        self.show_incoming_call = False
+        self.active_room_call = {}
+        self.is_call_connected = False
+        
+        # Clean up WebRTC resources
+        rx.call_script("""
+            // Clean up WebRTC resources when going back to chat list
+            console.log('[WebRTC Debug] Cleaning up resources when leaving room');
+            
+            // Stop local streams
+            if (window.localStream) {
+                window.localStream.getTracks().forEach(track => track.stop());
+                window.localStream = null;
+            }
+            
+            // Close peer connection
+            if (window.peerConnection) {
+                window.peerConnection.close();
+                window.peerConnection = null;
+            }
+            
+            // Clean up call handler resources
+            if (window.callHandler && typeof window.callHandler.cleanupCall === 'function') {
+                window.callHandler.cleanupCall();
+            }
+        """)
+        
+        # Redirect to the chat list
+        return rx.redirect("/chat")
+
+    @rx.event
+    async def keypress_handler(self, key: str):
+        """Handle keypress events in the message input."""
+        try:
+            # Only send typing notification for non-Enter keys
+            if key != "Enter":
+                # Send typing notification
+                await self.send_typing_notification()
+            # Send message when Enter is pressed
+            elif key == "Enter" and self.message.strip():
+                print(f"Sending message via Enter key: {self.message[:20]}...")
+                # Use regular send_message, it will update the UI
+                await self.send_message()
+        except Exception as e:
+            print(f"Error in keypress_handler: {e}")
+            self.error_message = f"Error sending message: {e}"
+
+    @rx.event
+    async def toggle_mute(self):
+        """Toggle microphone mute state."""
+        self.is_muted = not self.is_muted
+        
+        # Update local stream audio tracks
+        rx.call_script("""
+            console.log('[WebRTC Debug] Toggling mute:', state.is_muted);
+            
+            // Toggle audio tracks in local stream
+            if (window.localStream) {
+                window.localStream.getAudioTracks().forEach(track => {
+                    track.enabled = !state.is_muted;
+                    console.log('[WebRTC Debug] Audio track enabled:', !state.is_muted);
+                });
+            }
+        """)
+
+    @rx.event
+    async def toggle_camera(self):
+        """Toggle camera on/off state."""
+        self.is_camera_off = not self.is_camera_off
+        
+        # Update local stream video tracks
+        rx.call_script("""
+            console.log('[WebRTC Debug] Toggling camera:', state.is_camera_off);
+            
+            // Toggle video tracks in local stream
+            if (window.localStream) {
+                window.localStream.getVideoTracks().forEach(track => {
+                    track.enabled = !state.is_camera_off;
+                    console.log('[WebRTC Debug] Video track enabled:', !state.is_camera_off);
+                });
+            }
+        """)
+        
+    @rx.event
+    async def start_call_timer(self):
+        """Start the call timer to track call duration."""
+        print("[WebRTC Debug] Starting call timer")
+        
+        # Reset call duration
+        self.call_duration = 0
+        
+        # Use JavaScript to increment the timer every second
+        rx.call_script("""
+            // Clear any existing timer
+            if (window.callDurationTimer) {
+                clearInterval(window.callDurationTimer);
+            }
+            
+            // Start a new timer that updates every second
+            window.callDurationTimer = setInterval(() => {
+                // Only increment if call is active
+                if (state.show_call_popup || state.show_video_popup) {
+                    state.call_duration += 1;
+                    state._update();
+                } else {
+                    // Stop timer if call is no longer active
+                    clearInterval(window.callDurationTimer);
+                }
+            }, 1000);
+        """)
+
+    @rx.event
+    async def clear_error_message(self):
+        """Clear the error message."""
+        self.error_message = ""
+        
+    @rx.event
+    async def clear_success_message(self):
+        """Clear the success message."""
+        self.success_message = ""
+
+    @rx.event
+    async def show_error(self):
+        """Show error message in a notification."""
+        # This method is called when the error alert component mounts
+        # No action needed as the error_message is already set before mounting
+        pass
+        
+    @rx.event
+    async def show_success(self):
+        """Show success message in a notification."""
+        # This method is called when the success alert component mounts
+        # No action needed as the success_message is already set before mounting
+        pass
+
+    @rx.event
+    async def login_as_user(self, username: str):
+        """Debug function to set the current username manually."""
+        print(f"Setting username to: {username}")
+        
+        # Update username in state
+        self.username = username
+        
+        # Update in localStorage with direct script code
+        rx.call_script(f"""
+            // Save username to localStorage
+            localStorage.setItem('username', '{username}');
+            console.log('[Debug] Username saved to localStorage:', '{username}');
+        """)
+        
+        # Show success message
+        self.success_message = f"Logged in as {username}"
+
+    @rx.event
+    async def toggle_debug_info(self):
+        """Toggle the visibility of the debug info panel."""
+        print(f"Toggling debug info panel: {not self.debug_show_info}")
+        self.debug_show_info = not self.debug_show_info
+
+    @rx.event
+    async def toggle_debug_dummy_data(self):
+        """Toggle between using dummy data and real API data."""
+        self.debug_use_dummy_data = not self.debug_use_dummy_data
+        print(f"Debug dummy data set to: {self.debug_use_dummy_data}")
+        
+        # Reload data with the new setting
+        if self.debug_use_dummy_data:
+            await self._set_dummy_data()
+            if hasattr(self, '_set_dummy_messages'):
+                self._set_dummy_messages()
+        else:
+            try:
+                # Load real data from the API
+                # These methods should be implemented elsewhere
+                if hasattr(self, 'load_rooms'):
+                    await self.load_rooms()
+                if self.current_room_id and hasattr(self, 'load_messages'):
+                    await self.load_messages()
+            except Exception as e:
+                print(f"Error loading data: {e}, falling back to dummy data")
+                await self._set_dummy_data()
+                if hasattr(self, '_set_dummy_messages'):
+                    self._set_dummy_messages()
+                    
+        # Show confirmation message
+        self.success_message = f"Debug data mode: {'Dummy' if self.debug_use_dummy_data else 'API'}"
+
+    @rx.event
+    async def accept_call(self):
+        """Accept an incoming call invitation."""
+        print("[WebRTC Debug] Accepting incoming call")
+        
+        # Verify we have active call invitation
+        if not self.call_invitation_id:
+            self.error_message = "No active call invitation"
+            print("[WebRTC Debug] Error: No active call invitation")
+            return
+            
+        # Get authentication token
+        self.auth_token = await self.get_token()
+        if not self.auth_token:
+            self.error_message = "Not authenticated"
+            print("[WebRTC Debug] Error: Not authenticated")
+            return
+            
+        # Clean up notification state
+        rx.call_script("""
+            console.log('[WebRTC Debug] Cleaning up call notification state');
+            
+            // Stop ringtone if playing
+            if (window.callHandler && typeof window.callHandler.stopRingtone === 'function') {
+                window.callHandler.stopRingtone();
+            } else if (window.ringtoneElement) {
+                window.ringtoneElement.pause();
+                window.ringtoneElement.currentTime = 0;
+            }
+            
+            // Stop title flashing
+            if (window.callHandler && typeof window.callHandler.stopTitleFlashing === 'function') {
+                window.callHandler.stopTitleFlashing();
+            } else if (window.titleFlashInterval) {
+                clearInterval(window.titleFlashInterval);
+                document.title = 'Chat';
+            }
+        """)
+        
+        # Set UI state for the appropriate call type
+        self.show_incoming_call = False
+        if self.call_type == "video":
+            self.show_video_popup = True
+        else:
+            self.show_call_popup = True
+            
+        # Connect to WebRTC signaling
+        if hasattr(self, 'connect_webrtc_signaling'):
+            await self.connect_webrtc_signaling()
+            
+        # Start call timer
+        if hasattr(self, 'start_call_timer'):
+            await self.start_call_timer()
+
+    @rx.event
+    async def cleanup(self):
+        """Clean up resources when component unmounts."""
+        print("Cleaning up resources")
+        
+        # Clear any resource usage
+        self.chat_history = []
+        self.message = ""
+        
+        # Reset call-related states
+        self.show_call_popup = False
+        self.show_video_popup = False
+        self.show_calling_popup = False
+        self.show_incoming_call = False
+        self.active_room_call = {}
 
 def calling_popup() -> rx.Component:
     """Component for showing the calling popup."""
