@@ -1115,25 +1115,55 @@ class ChatState(rx.State):
 
     @rx.event
     async def announce_room_call(self, api_url: str, call_type: str = "audio"):
-        """
-        Create a call notification for all users in a room that will trigger popup windows.
-        
-        Args:
-            api_url: The API URL for creating call notifications
-            call_type: The type of call ("audio" or "video")
-        """
-        print(f"[WebRTC Debug] [CALL FLOW] SENDER EVENT: User {self.username} is announcing {call_type} call to room {self.current_room_id}")
+        """Announce a room call and initialize WebRTC."""
+        print(f"[WebRTC Debug] Announcing room call of type: {call_type}")
         
         try:
-            # Set the room call API URL
-            self.room_call_api_url = api_url
-            
-            # 1. Get necessary data
+            # Get authentication token
             self.auth_token = await self.get_token()
             if not self.auth_token:
                 self.error_message = "Not authenticated"
                 return
                 
+            # Initialize WebRTC for the call
+            await self.initialize_peer_connection()
+            
+            # Connect to WebRTC signaling server
+            await self.connect_webrtc_signaling()
+            
+            # Request microphone permissions and initialize media stream
+            rx.call_script("""
+                // Request microphone permissions
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(stream => {
+                        console.log('[WebRTC Debug] Got microphone permissions and stream');
+                        
+                        // Store local stream
+                        window.localStream = stream;
+                        
+                        // Update UI with local stream
+                        const mediaElement = document.getElementById('local-audio');
+                        if (mediaElement) {
+                            mediaElement.srcObject = stream;
+                        }
+                        
+                        // Add tracks to peer connection
+                        if (window.peerConnection) {
+                            stream.getTracks().forEach(track => {
+                                window.peerConnection.addTrack(track, stream);
+                            });
+                        }
+                    })
+                    .catch(error => {
+                        console.error('[WebRTC Debug] Error accessing microphone:', error);
+                        state.error_message = 'Error accessing microphone. Please check your permissions.';
+                    });
+            """)
+            
+            # Set the room call API URL
+            self.room_call_api_url = api_url
+            
+            # Get necessary data
             current_username = await self.get_username()
             if not current_username:
                 self.error_message = "Username not found"
@@ -1144,7 +1174,7 @@ class ChatState(rx.State):
                 self.error_message = "No active room selected"
                 return
                 
-            # Find room name - make sure we have a proper room name
+            # Find room name
             room_name = self.current_chat_user
             if not room_name:
                 for room in self.rooms:
@@ -1153,245 +1183,20 @@ class ChatState(rx.State):
                         break
                 if not room_name:
                     room_name = f"Room {room_id}"
-                    
-            print(f"[WebRTC Debug] [CALL FLOW] Call details - User: {current_username}, Room: {room_name} ({room_id}), Type: {call_type}")
             
-            # Create a unique local ID for the call in case API fails
+            # Create a unique local ID for the call
             local_call_id = f"local-{room_id}-{int(time.time())}"
             
-            # 2. Try to create call notification using the provided API URL
-            # But also have a fallback for when the API isn't implemented yet
-            rx.call_script(f"""
-                console.log('[WebRTC Debug] [CALL FLOW] USER {current_username} IS INITIATING call via API: {api_url}');
-                
-                // DEBUGGING: Alert to confirm the script is running
-                console.warn('[CRITICAL DEBUG] About to make POST request to {api_url}');
-                
-                // Show calling popup
-                state.show_calling_popup = true;
-                state.call_type = '{call_type}';
-                state._update();
-                
-                // Function to handle API-based approach
-                function createCallNotificationViaAPI() {{
-                    // Create notification
-                    console.warn('[CRITICAL DEBUG] Making fetch POST request now');
-                    
-                    // Show an alert to confirm the code is running
-                    alert('Attempting to make call API request to: ' + '{api_url}');
-                    
-                    const requestBody = {{
-                        'recipient_id': null, // Setting to null for room-wide calls
-                        'room_id': '{room_id}',
-                        'call_type': '{call_type}'
-                    }};
-                    
-                    console.warn('[CRITICAL DEBUG] Request body:', JSON.stringify(requestBody));
-                    
-                    // Try first with Token auth
-                    tryFetchWithAuth('Token');
-                    
-                    // Function to try fetch with different auth types
-                    function tryFetchWithAuth(authType) {{
-                        console.warn('[CRITICAL DEBUG] Trying with ' + authType + ' authentication');
-                        
-                        // Use explicit fetch with detailed logging
-                        fetch('{api_url}', {{
-                            method: 'POST',
-                            headers: {{
-                                'Content-Type': 'application/json',
-                                'Authorization': authType + ' {self.auth_token}'
-                            }},
-                            body: JSON.stringify(requestBody)
-                        }})
-                        .then(function(response) {{
-                            console.warn('[CRITICAL DEBUG] Room call API response received (' + authType + '):', response.status);
-                            
-                            // Store response in a variable accessible to later callbacks
-                            const responseStatus = response.status;
-                            
-                            return response.text().then(function(text) {{
-                                try {{
-                                    // Try to parse as JSON
-                                    const data = JSON.parse(text);
-                                    console.warn('[CRITICAL DEBUG] Parsed JSON response:', data);
-                                        
-                                    // If successful response, continue with JSON data
-                                        if (responseStatus >= 200 && responseStatus < 300) {{
-                                        return data;
-                                        }} else if (responseStatus === 401 && authType === 'Token') {{
-                                        // If unauthorized with Token, try Bearer
-                                        console.warn('[CRITICAL DEBUG] Token auth failed, trying Bearer');
-                                            tryFetchWithAuth('Bearer');
-                                        return null;
-                                        }} else {{
-                                        throw new Error('API error (' + responseStatus + '): ' + JSON.stringify(data));
-                                    }}
-                                }} catch (e) {{
-                                    // Not JSON or parsing error
-                                    console.warn('[CRITICAL DEBUG] Raw response text:', text);
-                                            
-                                            if (responseStatus === 404) {{
-                                        throw new Error('API endpoint not found (404)');
-                                    }} else if (responseStatus === 401 && authType === 'Token') {{
-                                        // If unauthorized with Token, try Bearer
-                                        console.warn('[CRITICAL DEBUG] Token auth failed, trying Bearer');
-                                        tryFetchWithAuth('Bearer');
-                                        return null;
-                                    }} else {{
-                                        throw new Error('Failed: ' + responseStatus + ', Response: ' + text);
-                                    }}
-                                }}
-                            }});
-                        }})
-                        .then(function(data) {{
-                            if (!data) return; // Skip if auth switching
-                            
-                            console.warn('[CRITICAL DEBUG] Room call API success - Processing data');
-                                    alert('Call API request successful!');
-                                    
-                                    // Store the notification ID for later use
-                                    state.call_invitation_id = data.id;
-                                    
-                                    // Send WebSocket message to announce call to all room users
-                                    announceCallViaWebSocket(data.id);
-                                    
-                            console.log('[WebRTC Debug] Room call started successfully');
-                                    state.active_room_call = {{
-                                        id: data.id,
-                                        room_id: '{room_id}',
-                                        room_name: '{room_name}',
-                                        call_type: '{call_type}',
-                                        started_by: '{current_username}',
-                                        start_time: new Date().toISOString()
-                                    }};
-                                    state._update();
-                        }})
-                        .catch(function(error) {{
-                            if (error.message && error.message.includes('auth failed')) return; // Skip if auth switching
-                            
-                            console.error('[CRITICAL DEBUG] Error making POST request:', error);
-                            alert('Error making call API request: ' + error.message);
-                            
-                            // If API endpoint not found, use WebSocket only approach
-                            if (error.message && error.message.includes('404')) {{
-                                console.log('[WebRTC Debug] API endpoint not available, using WebSocket only');
-                                                handleAPIUnavailable();
-                                            }} else {{
-                                state.error_message = 'Failed to start room call: ' + error.message;
-                                                state.show_calling_popup = false;
-                                                state._update();
-                                            }}
-                        }});
-                    }}
-                }}
-                
-                // Function to handle WebSocket announcement - UPDATED TO MATCH API FORMAT
-                function announceCallViaWebSocket(notificationData) {{
-                    // Send WebSocket message to announce call to all room users
-                    if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
-                        console.log('[WebRTC Debug] [CALL FLOW] USER {current_username} IS SENDING WebSocket room-wide call announcement');
-                        
-                        // Create a properly structured message according to API documentation
-                        const callAnnouncement = {{
-                            type: 'room_call_announcement',
-                            notification: notificationData || {{
-                                id: '{local_call_id}',
-                                caller: {{
-                                    id: 'local-user-id',
-                                    username: '{current_username}'
-                                }},
-                                room: '{room_id}',
-                                room_name: '{room_name}',
-                                call_type: '{call_type}',
-                                created_at: new Date().toISOString(),
-                                expires_at: new Date(Date.now() + 60000).toISOString(), // 1 minute expiry
-                                status: 'pending'
-                            }}
-                        }};
-                        
-                        // Log the exact message we're sending
-                        console.log('[WebRTC Debug] [CALL FLOW] SENDING PAYLOAD:', JSON.stringify(callAnnouncement, null, 2));
-                        
-                        // Send the message
-                        window.chatSocket.send(JSON.stringify(callAnnouncement));
-                        
-                        // Also add a system message to the chat to indicate a call started
-                        const callStartedMessage = {{
-                            type: 'message',
-                            message: {{
-                                content: '{current_username} started a ' + 
-                                        ('{call_type}' === 'video' ? 'video' : 'audio') + 
-                                        ' call. You can join by clicking the call banner at the top of the chat.',
-                                sender: {{
-                                    username: 'System'
-                                }},
-                                sent_at: new Date().toISOString()
-                            }}
-                        }};
-                        
-                        // Send the system message
-                        setTimeout(() => {{
-                            if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
-                                console.log('[WebRTC Debug] [CALL FLOW] Sending system message about call');
-                                window.chatSocket.send(JSON.stringify(callStartedMessage));
-                            }}
-                        }}, 500);
-                        
-                        // Also send a simplified legacy format message for backward compatibility
-                        setTimeout(() => {{
-                            if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
-                                const legacyFormat = {{
-                                    type: 'room_call_announcement',
-                                    room_id: '{room_id}',
-                                    room_name: '{room_name}',
-                                    caller_username: '{current_username}',
-                                    call_type: '{call_type}',
-                                    invitation_id: notificationData ? notificationData.id : '{local_call_id}'
-                                }};
-                                console.log('[WebRTC Debug] [CALL FLOW] Sending legacy format for compatibility:', legacyFormat);
-                                window.chatSocket.send(JSON.stringify(legacyFormat));
-                            }}
-                        }}, 1000);
-                                        }} else {{
-                        console.error('[WebRTC Debug] [CALL FLOW] Cannot announce call: WebSocket not connected');
-                        state.error_message = 'Cannot start call: Communication channel not connected';
-                    }}
-                }}
-                
-                // Function to handle the case where API is unavailable
-                function handleAPIUnavailable() {{
-                    console.log('[WebRTC Debug] [CALL FLOW] Using local call ID:', '{local_call_id}');
-                    
-                    // Set a local call ID instead
-                    state.call_invitation_id = '{local_call_id}';
-                    
-                    // Announce call via WebSocket only
-                    announceCallViaWebSocket(null); // Pass null to use the fallback data
-                    
-                    // Update state with local call info
-                    state.active_room_call = {{
-                        id: '{local_call_id}',
-                        room_id: '{room_id}',
-                        room_name: '{room_name}',
-                        call_type: '{call_type}',
-                        started_by: '{current_username}',
-                        start_time: new Date().toISOString(),
-                        is_local_only: true // Flag to indicate this call exists only via WebSocket
-                    }};
-                                            state._update();
-                                        }}
-                
-                // Start the process
-                createCallNotificationViaAPI();
-            """)
+            # Show calling popup
+            self.show_calling_popup = True
+            self.call_type = call_type
             
-            # 3. Start call timer
+            # Start call timer
             if call_type in ["audio", "video"]:
                 await self.start_call_timer()
                 
         except Exception as e:
-            print(f"[WebRTC Debug] [CALL FLOW] Error announcing room call: {str(e)}")
+            print(f"[WebRTC Debug] Error announcing room call: {str(e)}")
             self.error_message = f"Error announcing room call: {str(e)}"
             self.show_calling_popup = False
 
@@ -1972,38 +1777,38 @@ class ChatState(rx.State):
     async def initialize_peer_connection(self):
         """Initialize WebRTC peer connection with debug logging."""
         print("[WebRTC Debug] Initializing peer connection")
+        
+        # Initialize WebRTC with debug logging
         rx.call_script("""
-            // WebRTC Debug Logger
-            const webrtcDebug = {
-                log: function(message, data = null) {
-                    const timestamp = new Date().toISOString();
-                    console.log(`[WebRTC Debug] ${timestamp} - ${message}`, data || '');
-                    
-                    // Update debug info in localStorage
-                    const debugInfo = JSON.parse(localStorage.getItem('webrtc_debug') || '[]');
-                    debugInfo.push({ timestamp, message, data });
-                    if (debugInfo.length > 100) debugInfo.shift(); // Keep last 100 logs
-                    localStorage.setItem('webrtc_debug', JSON.stringify(debugInfo));
-                }
-            };
-
-            // Initialize WebRTC with debug
+            console.log('[WebRTC Debug] Starting peer connection initialization');
+            
+            // Initialize WebRTC
+            const initResult = window.initializeWebRTC();
+            console.log('[WebRTC Debug] WebRTC initialization result:', initResult);
+            
+            if (!initResult.success) {
+                console.error('[WebRTC Debug] WebRTC initialization failed:', initResult.error);
+                state.error_message = 'Failed to initialize WebRTC: ' + initResult.error;
+                return;
+            }
+            
+            // Create RTCPeerConnection with debug logging
             try {
-                webrtcDebug.log('Creating RTCPeerConnection');
+                console.log('[WebRTC Debug] Creating RTCPeerConnection');
                 const configuration = {
                     iceServers: [
                         { urls: 'stun:stun.l.google.com:19302' }
                     ]
                 };
                 window.peerConnection = new RTCPeerConnection(configuration);
-
+                
                 // Connection state changes
                 window.peerConnection.onconnectionstatechange = function() {
-                    webrtcDebug.log('Connection state changed', {
+                    console.log('[WebRTC Debug] Connection state changed:', {
                         state: window.peerConnection.connectionState
                     });
                 };
-
+                
                 // ICE connection state changes
                 window.peerConnection.oniceconnectionstatechange = function() {
                     webrtcDebug.log('ICE connection state changed', {
@@ -2637,6 +2442,8 @@ class ChatState(rx.State):
                     };
                     window.peerConnection.send(JSON.stringify(data));
                 }
+            } else {
+                console.error('No local stream available for muting');
             }
         """)
         yield
@@ -3893,262 +3700,6 @@ class ChatState(rx.State):
             }}
         """)
         self.signaling_connected = True
-
-    @rx.event
-    async def announce_room_call(self, api_url: str, call_type: str = "audio"):
-        """
-        Create a call notification for all users in a room that will trigger popup windows.
-        
-        Args:
-            api_url: The API URL for creating call notifications
-            call_type: The type of call ("audio" or "video")
-        """
-        print(f"[WebRTC Debug] Announcing {call_type} call to room {self.current_room_id}")
-        
-        try:
-            # Set the room call API URL
-            self.room_call_api_url = api_url
-            
-            # 1. Get necessary data
-            self.auth_token = await self.get_token()
-            if not self.auth_token:
-                self.error_message = "Not authenticated"
-                return
-                
-            current_username = await self.get_username()
-            if not current_username:
-                self.error_message = "Username not found"
-                return
-                
-            room_id = self.current_room_id
-            if not room_id:
-                self.error_message = "No active room selected"
-                return
-                
-            # Find room name - make sure we have a proper room name
-            room_name = self.current_chat_user
-            if not room_name:
-                for room in self.rooms:
-                    if str(room.get("id", "")) == str(room_id):
-                        room_name = room.get("name", f"Room {room_id}")
-                        break
-                if not room_name:
-                    room_name = f"Room {room_id}"
-            
-            # Create a unique local ID for the call in case API fails
-            local_call_id = f"local-{room_id}-{int(time.time())}"
-            
-            # 2. Try to create call notification using the provided API URL
-            # But also have a fallback for when the API isn't implemented yet
-            rx.call_script(f"""
-                console.log('[WebRTC Debug] Creating room call notification via API: {api_url}');
-                
-                // DEBUGGING: Alert to confirm the script is running
-                console.warn('[CRITICAL DEBUG] About to make POST request to {api_url}');
-                
-                // Show calling popup
-                state.show_calling_popup = true;
-                state.call_type = '{call_type}';
-                state._update();
-                
-                // Function to handle API-based approach
-                function createCallNotificationViaAPI() {{
-                    // Create notification
-                    console.warn('[CRITICAL DEBUG] Making fetch POST request now');
-                    
-                    // Show an alert to confirm the code is running
-                    alert('Attempting to make call API request to: ' + '{api_url}');
-                    
-                    const requestBody = {{
-                        'recipient_id': null, // Setting to null for room-wide calls
-                        'room_id': '{room_id}',
-                        'call_type': '{call_type}'
-                    }};
-                    
-                    console.warn('[CRITICAL DEBUG] Request body:', JSON.stringify(requestBody));
-                    
-                    // Try first with Token auth
-                    tryFetchWithAuth('Token');
-                    
-                    // Function to try fetch with different auth types
-                    function tryFetchWithAuth(authType) {{
-                        console.warn('[CRITICAL DEBUG] Trying with ' + authType + ' authentication');
-                        
-                        // Use explicit fetch with detailed logging
-                            fetch('{api_url}', {{
-                                method: 'POST',
-                                headers: {{
-                                    'Content-Type': 'application/json',
-                                    'Authorization': authType + ' {self.auth_token}'
-                                }},
-                                body: JSON.stringify(requestBody)
-                            }})
-                            .then(function(response) {{
-                                console.warn('[CRITICAL DEBUG] Room call API response received (' + authType + '):', response.status);
-                                
-                                // Store response in a variable accessible to later callbacks
-                                const responseStatus = response.status;
-                                
-                                return response.text().then(function(text) {{
-                                    try {{
-                                        // Try to parse as JSON
-                                        const data = JSON.parse(text);
-                                        console.warn('[CRITICAL DEBUG] Parsed JSON response:', data);
-                                    
-                                    // If successful response, continue with JSON data
-                                    if (responseStatus >= 200 && responseStatus < 300) {{
-                                        return data;
-                                    }} else if (responseStatus === 401 && authType === 'Token') {{
-                                        // If unauthorized with Token, try Bearer
-                                        console.warn('[CRITICAL DEBUG] Token auth failed, trying Bearer');
-                                        tryFetchWithAuth('Bearer');
-                                        return null;
-                                    }} else {{
-                                        throw new Error('API error (' + responseStatus + '): ' + JSON.stringify(data));
-                                    }}
-                                }} catch (e) {{
-                                    // Not JSON or parsing error
-                                    console.warn('[CRITICAL DEBUG] Raw response text:', text);
-                                    
-                                    if (responseStatus === 404) {{
-                                        throw new Error('API endpoint not found (404)');
-                                    }} else if (responseStatus === 401 && authType === 'Token') {{
-                                        // If unauthorized with Token, try Bearer
-                                        console.warn('[CRITICAL DEBUG] Token auth failed, trying Bearer');
-                                        tryFetchWithAuth('Bearer');
-                                        return null;
-                                    }} else {{
-                                        throw new Error('Failed: ' + responseStatus + ', Response: ' + text);
-                                    }}
-                                }}
-                            }});
-                        }})
-                        .then(function(data) {{
-                            if (!data) return; // Skip if auth switching
-                            
-                            console.warn('[CRITICAL DEBUG] Room call API success - Processing data');
-                            alert('Call API request successful!');
-                                                
-                                                // Store the notification ID for later use
-                                                state.call_invitation_id = data.id;
-                                                
-                                                // Send WebSocket message to announce call to all room users
-                                                announceCallViaWebSocket(data.id);
-                                                
-                            console.log('[WebRTC Debug] Room call started successfully');
-                                                state.active_room_call = {{
-                                                    id: data.id,
-                                                    room_id: '{room_id}',
-                                                    room_name: '{room_name}',
-                                                    call_type: '{call_type}',
-                                                    started_by: '{current_username}',
-                                                    start_time: new Date().toISOString()
-                                                }};
-                                                state._update();
-                        }})
-                        .catch(function(error) {{
-                            if (error.message && error.message.includes('auth failed')) return; // Skip if auth switching
-                            
-                            console.error('[CRITICAL DEBUG] Error making POST request:', error);
-                            alert('Error making call API request: ' + error.message);
-                            
-                            // If API endpoint not found, use WebSocket only approach
-                            if (error.message && error.message.includes('404')) {{
-                                console.log('[WebRTC Debug] API endpoint not available, using WebSocket only');
-                                            handleAPIUnavailable();
-                                        }} else {{
-                                state.error_message = 'Failed to start room call: ' + error.message;
-                                state.show_calling_popup = false;
-                                state._update();
-                            }}
-                        }});
-                    }}
-                }}
-                
-                // Function to handle WebSocket announcement - IMPROVED
-                function announceCallViaWebSocket(callId) {{
-                    // Send WebSocket message to announce call to all room users
-                    if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
-                        console.log('[WebRTC Debug] Sending room-wide call announcement');
-                        
-                        // Create a consistently structured message for room calls
-                        const callAnnouncement = {{
-                            type: 'room_call_announcement',
-                            room_id: '{room_id}',
-                            room_name: '{room_name}',
-                            caller_username: '{current_username}',
-                            call_type: '{call_type}',
-                            invitation_id: callId
-                        }};
-                        
-                        // Log the exact message we're sending
-                        console.log('[WebRTC Debug] Call announcement payload:', callAnnouncement);
-                        
-                        // Send the message
-                        window.chatSocket.send(JSON.stringify(callAnnouncement));
-                        
-                        // Also add a system message to the chat to indicate a call started
-                        const callStartedMessage = {{
-                            type: 'message',
-                            message: {{
-                                content: '{current_username} started a ' + 
-                                        ('{call_type}' === 'video' ? 'video' : 'audio') + 
-                                        ' call. You can join by clicking the call banner at the top of the chat.',
-                                sender: {{
-                                    username: 'System'
-                                }},
-                                sent_at: new Date().toISOString()
-                            }}
-                        }};
-                        
-                        // Send the system message
-                        setTimeout(() => {{
-                            if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
-                                window.chatSocket.send(JSON.stringify(callStartedMessage));
-                            }}
-                        }}, 500);
-                            }} else {{
-                        console.error('[WebRTC Debug] Cannot announce call: WebSocket not connected');
-                        state.error_message = 'Cannot start call: Communication channel not connected';
-                    }}
-                }}
-                
-                // Function to handle the case where API is unavailable
-                function handleAPIUnavailable() {{
-                    console.log('[WebRTC Debug] Using local call ID:', '{local_call_id}');
-                    
-                    // Set a local call ID instead
-                    state.call_invitation_id = '{local_call_id}';
-                    
-                    // Announce call via WebSocket only
-                    announceCallViaWebSocket('{local_call_id}');
-                    
-                    // Update state with local call info
-                    state.active_room_call = {{
-                        id: '{local_call_id}',
-                        room_id: '{room_id}',
-                        room_name: '{room_name}',
-                        call_type: '{call_type}',
-                        started_by: '{current_username}',
-                        start_time: new Date().toISOString(),
-                        is_local_only: true // Flag to indicate this call exists only via WebSocket
-                    }};
-                    state._update();
-                }}
-                
-                // Start the process
-                createCallNotificationViaAPI();
-            """)
-            
-            # 3. Start call timer
-            if call_type in ["audio", "video"]:
-                await self.start_call_timer()
-                
-        except Exception as e:
-            print(f"[WebRTC Debug] Error announcing room call: {str(e)}")
-            self.error_message = f"Error announcing room call: {str(e)}"
-            self.show_calling_popup = False
-
 
     @rx.event
     async def get_active_call_notifications(self):
