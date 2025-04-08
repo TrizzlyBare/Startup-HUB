@@ -4936,13 +4936,14 @@ def message_input() -> rx.Component:
                 on_change=ChatState.set_message,
                 # Use our keypress_handler for key events
                 on_key_down=ChatState.keypress_handler,
-                _placeholder={"color": "#AAAAAA"},
+                _placeholder={"color": "gray"},
                 border_radius="20px",
                 border="none",
                 width="100%",
                 bg="white",
                 padding="10px 15px",
                 height="40px",
+                class_name= "text-black",
                 _focus={
                     "outline": "none",
                     "box_shadow": "0 0 0 2px rgba(128, 208, 234, 0.3)",
@@ -5357,158 +5358,95 @@ def user_header() -> rx.Component:
     )
 
 def incoming_call_popup() -> rx.Component:
-    """Component for showing incoming call popup."""
     return rx.cond(
         ChatState.show_incoming_call,
         rx.box(
             rx.center(
                 rx.vstack(
-                    rx.avatar(
-                        name=ChatState.incoming_caller,
-                        size="9",
-                        border="4px solid #80d0ea",
-                        margin_bottom="20px",
-                        border_radius="50%",
-                        width="120px",
-                        height="120px",
-                        animation="pulse 1.5s infinite",
-                    ),
-                    rx.text(
-                        ChatState.incoming_caller,
-                        font_size="24px",
-                        font_weight="bold",
-                        color="#333333",
-                        margin_bottom="10px",
-                        text_align="center",
-                    ),
-                    rx.text(
-                        rx.cond(
-                            ChatState.call_type == "video",
-                            "Incoming video call...",
-                            "Incoming audio call..."
-                        ),
-                        font_size="18px",
-                        color="#666666",
-                        margin_bottom="20px",
-                        text_align="center",
-                    ),
-                    rx.hstack(
-                        rx.button(
-                            rx.icon("phone"),
-                            on_click=ChatState.accept_call,
+                    rx.center(
+                        rx.avatar(
+                            name=ChatState.incoming_caller,
+                            size="9",
+                            border="4px solid #80d0ea",
+                            margin_bottom="20px",
                             border_radius="50%",
-                            bg="#4CAF50",
-                            color="white",
-                            width="60px",
-                            height="60px",
-                            padding="0",
-                            _hover={
-                                "bg": "#45a049",
-                                "transform": "scale(1.1)",
-                            },
-                            transition="all 0.2s ease-in-out",
+                            width="120px",
+                            height="120px",
                         ),
-                        rx.button(
-                            rx.icon("phone-off"),
-                            on_click=ChatState.decline_call,
-                            border_radius="50%",
-                            bg="#ff4444",
-                            color="white",
-                            width="60px",
-                            height="60px",
-                            padding="0",
-                            _hover={
-                                "bg": "#ff3333",
-                                "transform": "scale(1.1)",
-                            },
-                            transition="all 0.2s ease-in-out",
+                        width="100%",
+                    ),
+                    rx.center(
+                        rx.text(
+                            ChatState.incoming_caller,
+                            font_size="24px",
+                            font_weight="bold",
+                            color="#333333",
+                            margin_bottom="10px",
                         ),
-                        spacing="4",
-                        justify_content="center",
+                        width="100%",
+                    ),
+                    rx.center(
+                        rx.text(
+                            f"Incoming {ChatState.call_type.capitalize()} Call",
+                            color="gray.500",
+                            font_size="16px",
+                            margin_bottom="20px",
+                        ),
+                        width="100%",
+                    ),
+                    rx.center(
+                        rx.hstack(
+                            rx.button(
+                                rx.icon("phone"),
+                                on_click=ChatState.accept_call,
+                                border_radius="50%",
+                                bg="#4CAF50",
+                                color="white",
+                                width="60px",
+                                height="60px",
+                                padding="0",
+                                _hover={
+                                    "bg": "#45a049",
+                                    "transform": "scale(1.1)",
+                                },
+                                transition="all 0.2s ease-in-out",
+                            ),
+                            rx.button(
+                                rx.icon("phone-off"),
+                                on_click=ChatState.decline_call,
+                                border_radius="50%",
+                                bg="#ff4444",
+                                color="white",
+                                width="60px",
+                                height="60px",
+                                padding="0",
+                                _hover={
+                                    "bg": "#ff3333",
+                                    "transform": "scale(1.1)",
+                                },
+                                transition="all 0.2s ease-in-out",
+                            ),
+                            spacing="4",
+                        ),
                         width="100%",
                     ),
                     align_items="center",
                     justify_content="center",
                     width="340px",
                     height="400px",
+                    padding="30px",
                     bg="white",
                     border_radius="20px",
-                    padding="30px",
-                    position="fixed",
-                    top="50%",
-                    left="50%",
-                    transform="translate(-50%, -50%)",
                     box_shadow="0 4px 20px rgba(0, 0, 0, 0.1)",
-                    z_index="1000",
-                    css={
-                        "@keyframes pulse": {
-                            "0%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0.7)"},
-                            "70%": {"box-shadow": "0 0 0 10px rgba(128, 208, 234, 0)"},
-                            "100%": {"box-shadow": "0 0 0 0 rgba(128, 208, 234, 0)"}
-                        }
-                    },
                 ),
+                position="fixed",
+                top="50%",
+                left="50%",
+                transform="translate(-50%, -50%)",
+                z_index="1000",
             ),
-            position="fixed",
-            top="0",
-            left="0",
-            width="100%",
-            height="100%",
-            bg="rgba(0, 0, 0, 0.5)",
-            display="flex",
-            justify_content="center",
-            align_items="center",
-            on_click=ChatState.decline_call,  # Click outside to decline
         ),
-        None,
     )
-
-# def chat_page() -> rx.Component:
-#     return rx.box(
-#         rx.hstack(
-#             rx.cond(
-#                 ChatState.sidebar_visible,
-#                 sidebar(),
-#                 rx.fragment()
-#             ),
-#             rx.vstack(
-#                 user_header(),
-#                 chat(),
-#                 message_input(),
-#                 height="100vh",
-#                 width="100%",
-#                 spacing="0",
-#                 bg="#2d2d2d",
-#             ),
-#             spacing="0",
-#             width="100%",
-#             height="100vh",
-#             overflow="hidden",
-#         ),
-#         calling_popup(),
-#         call_popup(),
-#         video_call_popup(),
-#         error_alert(),
-#         success_alert(),
-#         debug_info(),  # Debug panel
-#         debug_button(),  # Button to show debug panel
-#         incoming_call_popup(),
-#         on_mount=ChatState.on_mount,
-#         on_unmount=ChatState.cleanup,
-#         style={
-#             "@keyframes typing-dot": {
-#                 "0%, 60%, 100%": {
-#                     "opacity": "0.4",
-#                     "transform": "scale(0.8)"
-#                 },
-#                 "30%": {
-#                     "opacity": "1",
-#                     "transform": "scale(1)"
-#                 }
-#             }
-#         },
-#     )
-
 
 def websocket_debug_monitor() -> rx.Component:
     """Hidden debug component to monitor WebSocket call flow."""
