@@ -2,6 +2,7 @@ import reflex as rx
 import json
 import asyncio
 import httpx
+import time
 from typing import List, Dict, Optional, Any
 from ..Matcher.SideBar import sidebar
 from ..Auth.AuthPage import AuthState
@@ -287,8 +288,18 @@ class ChatState(rx.State):
 
     @rx.event
     async def on_mount(self):
-        """Initialize when the component mounts."""
-        print("\n=== ChatPage Mounted ===")
+        """Initialize the component when it mounts."""
+        print("Chat component mounted")
+        
+        # Check for active call notifications - this will help catch any pending calls
+        # when a user first loads the application
+        await self.get_active_call_notifications()
+        
+        # Set up periodic call notification checks
+        asyncio.create_task(self._periodic_notification_check())
+        
+        # Proceed with normal initialization
+        # ... existing code ...
         
         # Use try-except to make this robust against different Reflex versions
         try:
@@ -821,62 +832,269 @@ class ChatState(rx.State):
     @rx.event
     async def open_room(self, room_id: str, room_name: str = None):
         """Open a chat room by ID and load messages."""
-        print(f"\n===== Opening room: {room_id}, name: {room_name} =====")
+        print(f"\n=== Opening Room {room_id} ===")
         
-        if not room_id:
-            print("No room ID provided to open_room method")
-            return
-            
-        # Get authentication token
-        self.auth_token = await self.get_token()
-        
-        if not self.auth_token:
-            print("Not authenticated - cannot open room")
-            self.error_message = "Not authenticated. Please log in."
-            return
-
-        # Force room_id to be a string
-        room_id = str(room_id)
-        print(f"Room ID (forced to string): {room_id}")
-        
-        # 1. Set the room details
-        self.current_room_id = room_id
-        
-        # 2. Set initial room name if provided
-        if room_name:
-            # Set it initially, but we'll confirm it when loading messages
-            self.current_chat_user = room_name
-            print(f"Setting initial room name: {room_name}")
-        else:
-            # Clear it so load_messages will load the correct name from the server
-            self.current_chat_user = ""
-                
-        print(f"Set current_room_id to {self.current_room_id}")
-        
-        # Check if we need to reload rooms before loading messages
-        if not self.rooms:
-            print("No rooms loaded yet, loading rooms first")
-            await self.load_rooms()
-            
-        # 3. Load messages for this room (this will also fetch the correct room name)
         try:
+            if not room_id:
+                self.error_message = "Invalid room ID"
+                return
+                
+            # Set the active room and user
+            was_previously_set = (self.current_room_id == room_id)
+            self.current_room_id = room_id
+            
+            # If room_name is provided, use it; otherwise find it from our cached rooms
+            if room_name:
+                self.current_chat_user = room_name
+            else:
+                # Try to find room name from the rooms we've already loaded
+                found_name = self._find_room_name_from_cache(room_id)
+                if found_name:
+                    self.current_chat_user = found_name
+                else:
+                    self.current_chat_user = f"Room {room_id[:8]}..."
+            
+            print(f"Opened room: {self.current_chat_user} (ID: {room_id})")
+            
+            # Load messages for this room
             await self.load_messages()
             
-            # 4. Connect to WebSocket for this room
-            await self.on_room_open()
-            
-            # 5. Update the URL to reflect the current room
-            # Only update URL if we're not already on this room's URL
-            if hasattr(self, "router"):
-                current_params = getattr(self.router.page, "params", {})
-                current_room_id = current_params.get("room_id", "")
+            # Connect to WebSocket for this room if not already connected
+            if not was_previously_set or not self.is_connected:
+                await self.on_room_open()
                 
-                if current_room_id != room_id:
-                    print(f"Updating URL to /chat/room/{room_id}")
-                    return rx.redirect(f"/chat/room/{room_id}")
+            # Check if there are any active calls in this room
+            await self.check_room_active_calls(room_id)
+            
         except Exception as e:
-            print(f"Error loading room: {str(e)}")
-            self.error_message = f"Failed to load room: {str(e)}"
+            self.error_message = f"Error opening room: {str(e)}"
+            print(f"Error opening room: {str(e)}")
+            
+    @rx.event
+    async def check_room_active_calls(self, room_id: str):
+        """Check if there are any active calls in the current room."""
+        print(f"[WebRTC Debug] Checking for active calls in room {room_id}")
+        
+        try:
+            # Get authentication token
+            self.auth_token = await self.get_token()
+            if not self.auth_token:
+                print("[WebRTC Debug] Not authenticated, can't check for active calls")
+                return
+                
+            # Fetch active notifications
+            headers = {"Authorization": f"Bearer {self.auth_token}"}
+            api_url = f"{self.API_BASE_URL}/incoming-calls/"
+            
+            client = httpx.AsyncClient()
+            response = await client.get(
+                api_url,
+                headers=headers,
+                follow_redirects=True
+            )
+            
+            if response.status_code == 404:
+                # If the endpoint doesn't exist yet, use WebSocket check as fallback
+                print("[WebRTC Debug] Notification API endpoint not found (404) - checking for active calls via WebSocket")
+                return self._check_active_calls_via_websocket(room_id)
+            elif response.status_code != 200:
+                print(f"[WebRTC Debug] Failed to fetch call notifications: {response.status_code}")
+                return
+                
+            # Process notifications
+            notifications = response.json()
+            if self.debug_log_api_calls:
+                print(f"[WebRTC Debug] Received {len(notifications)} active call notifications")
+                
+            # Filter for accepted calls in this room (active calls)
+            room_active_calls = [n for n in notifications if 
+                                n.get("room") == room_id and 
+                                n.get("status") == "accepted"]
+                
+            if room_active_calls:
+                # Sort by created_at time and get the most recent
+                room_active_calls.sort(key=lambda n: n.get("created_at", ""), reverse=True)
+                active_call = room_active_calls[0]
+                
+                # Set active call info
+                caller_username = active_call.get("caller", {}).get("username", "Unknown caller")
+                room_name = active_call.get("room_name", "Unknown room") 
+                call_type = active_call.get("call_type", "audio")
+                notification_id = active_call.get("id", "")
+                
+                print(f"[WebRTC Debug] Found active {call_type} call in room {room_name} started by {caller_username}")
+                
+                # Set joining_existing_call flag and update active call info
+                self._show_active_call_banner(notification_id, room_id, room_name, call_type, caller_username)
+                
+            else:
+                self.joining_existing_call = False
+                print("[WebRTC Debug] No active calls found in this room")
+                
+        except Exception as e:
+            print(f"[WebRTC Debug] Error checking for room calls: {str(e)}")
+            
+    def _check_active_calls_via_websocket(self, room_id: str):
+        """Fallback method to check for active calls using WebSocket."""
+        print("[WebRTC Debug] Using WebSocket to check for active calls")
+        
+        # This is a fallback when the API endpoint isn't available
+        # We'll send a WebSocket message to request active call info for the room
+        rx.call_script(f"""
+            if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
+                console.log('[WebRTC Debug] Requesting active call info via WebSocket');
+                window.chatSocket.send(JSON.stringify({{
+                    type: 'check_active_calls',
+                    room_id: '{room_id}'
+                }}));
+                
+                // Add a one-time handler for the response
+                const handleActiveCallInfo = function(event) {{
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'active_call_info') {{
+                        console.log('[WebRTC Debug] Received active call info:', data);
+                        
+                        if (data.active_call) {{
+                            // Use custom event to trigger UI update
+                            const callEvent = new CustomEvent('active_call_detected', {{
+                                detail: {{
+                                    notification_id: data.active_call.id,
+                                    room_id: '{room_id}',
+                                    room_name: data.active_call.room_name,
+                                    call_type: data.active_call.call_type,
+                                    caller_username: data.active_call.started_by
+                                }}
+                            }});
+                            document.dispatchEvent(callEvent);
+                        }}
+                        
+                        // Remove this handler after processing
+                        window.chatSocket.removeEventListener('message', handleActiveCallInfo);
+                    }}
+                }};
+                
+                window.chatSocket.addEventListener('message', handleActiveCallInfo);
+                
+                // Add a listener for the custom event
+                document.addEventListener('active_call_detected', (e) => {{
+                    window._set_state_from_js({{
+                        joining_existing_call: true,
+                        active_room_call: {{
+                            id: e.detail.notification_id,
+                            room_id: e.detail.room_id,
+                            room_name: e.detail.room_name,
+                            call_type: e.detail.call_type,
+                            started_by: e.detail.caller_username,
+                            participants: [e.detail.caller_username]
+                        }},
+                        _events: [{{ 
+                            name: "_show_active_call_banner", 
+                            payload: {{ 
+                                notification_id: e.detail.notification_id,
+                                room_id: e.detail.room_id,
+                                room_name: e.detail.room_name,
+                                call_type: e.detail.call_type,
+                                caller_username: e.detail.caller_username
+                            }} 
+                        }}]
+                    }});
+                }}, {{ once: true }});
+            }}
+        """)
+            
+    @rx.event
+    async def _show_active_call_banner(self, notification_id: str, room_id: str, room_name: str, call_type: str, caller_username: str):
+        """Show banner for active call in room."""
+        # Set joining_existing_call flag and update active call info
+        self.joining_existing_call = True
+        self.active_room_call = {
+            "id": notification_id,
+            "room_id": room_id,
+            "room_name": room_name,
+            "call_type": call_type, 
+            "started_by": caller_username,
+            "participants": [caller_username]
+        }
+        
+        # Show call banner/join button in the UI
+        rx.call_script(f"""
+            // Create a call banner to show active call
+            setTimeout(() => {{
+                const callType = '{call_type}';
+                const callStarter = '{caller_username}';
+                
+                // Add a banner at the top of the chat
+                const chatContainer = document.querySelector('.message-container');
+                if (chatContainer) {{
+                    // Check if banner already exists
+                    if (document.getElementById('active-call-banner')) {{
+                        return; // Banner already exists, no need to create another
+                    }}
+                    
+                    const banner = document.createElement('div');
+                    banner.id = 'active-call-banner';
+                    banner.style.cssText = 'position:sticky;top:0;width:100%;background:#e8f7fc;border-radius:8px;padding:10px;margin:10px 0;display:flex;justify-content:space-between;align-items:center;z-index:10;box-shadow:0 2px 5px rgba(0,0,0,0.1);';
+                    
+                    const iconType = callType === 'video' ? '🎥' : '📞';
+                    banner.innerHTML = `
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:24px;">${{iconType}}</span>
+                            <div>
+                                <div style="font-weight:bold;">${{callType === 'video' ? 'Video' : 'Audio'}} call in progress</div>
+                                <div style="font-size:14px;color:#666;">Started by ${{callStarter}}</div>
+                            </div>
+                        </div>
+                        <button id="join-call-button" style="background:#80d0ea;color:white;border:none;border-radius:4px;padding:8px 12px;cursor:pointer;font-weight:bold;">Join Call</button>
+                    `;
+                    
+                    chatContainer.insertBefore(banner, chatContainer.firstChild);
+                    
+                    // Add click handler for join button
+                    document.getElementById('join-call-button').addEventListener('click', () => {{
+                        // Using a custom event to trigger Reflex event
+                        const event = new CustomEvent('join_existing_call', {{
+                            detail: {{
+                                call_type: callType,
+                                notification_id: '{notification_id}'
+                            }}
+                        }});
+                        document.dispatchEvent(event);
+                    }});
+                    
+                    // Listen for the custom event
+                    document.addEventListener('join_existing_call', (e) => {{
+                        // Call Reflex method
+                        window._set_state_from_js({{
+                            call_type: e.detail.call_type,
+                            call_invitation_id: e.detail.notification_id,
+                            _events: [{{ name: "join_existing_call", payload: {{ invitation_id: e.detail.notification_id }} }}]
+                        }});
+                    }});
+                }}
+            }}, 500);
+        """)
+
+    @rx.event
+    async def join_existing_call(self, invitation_id: str = None):
+        """Join an existing call in the room."""
+        print(f"[WebRTC Debug] Joining existing call: {invitation_id}")
+        
+        if not invitation_id and self.active_room_call:
+            invitation_id = self.active_room_call.get("id", "")
+            
+        if not invitation_id:
+            self.error_message = "No active call to join"
+            return
+            
+        # Set call invitation ID 
+        self.call_invitation_id = invitation_id
+        
+        # Use the call type from active room call
+        if self.active_room_call:
+            self.call_type = self.active_room_call.get("call_type", "audio")
+            
+        # Accept the call using our existing method
+        await self.accept_call()
 
     @rx.event
     async def connect_chat_websocket(self):
@@ -1478,7 +1696,7 @@ class ChatState(rx.State):
             print("[WebRTC Debug] Sending end call notification to server")
             
             # Use JavaScript fetch for API call to end the call
-            api_url = f"{self.API_BASE_URL}/calls/end/"
+            api_url = f"{self.API_BASE_URL}/communication/calls/end/"
             
             rx.call_script(f"""
                 // Call API to end call notification
@@ -2151,25 +2369,35 @@ class ChatState(rx.State):
                 self.error_message = "No active call invitation"
                 return
                 
-            is_room_call = bool(self.active_room_call.get("id"))
-            headers = {"Authorization": f"Bearer {self.auth_token}"}
+            # Check if this is a local-only call (when API isn't available)
+            is_local_only = False
+            if self.active_room_call and self.active_room_call.get("is_local_only"):
+                is_local_only = True
+                print("[WebRTC Debug] This is a local-only call (no API interactions)")
             
-            # Different API for accepting incoming calls
-            api_url = f"{self.API_BASE_URL}/incoming-calls/{invitation_id}/"
-            
-            client = httpx.AsyncClient()
-            response = await client.put(
-                api_url,
-                json={"status": "accepted"},
-                headers=headers,
-                follow_redirects=True
-            )
-            
-            if response.status_code not in [200, 201, 204]:
-                raise Exception(f"Failed to accept call: {response.status_code}")
+            # Skip API call if this is a local-only call
+            if not is_local_only and not invitation_id.startswith("local-"):
+                headers = {"Authorization": f"Bearer {self.auth_token}"}
+                api_url = f"{self.API_BASE_URL}/communication/incoming-calls/{invitation_id}/"
                 
-            if self.debug_log_api_calls:
-                print(f"Call accept API response: {response.status_code}")
+                try:
+                    client = httpx.AsyncClient()
+                    response = await client.put(
+                        api_url,
+                        json={"status": "accepted"},
+                        headers=headers,
+                        follow_redirects=True
+                    )
+                    
+                    if response.status_code == 404:
+                        print("[WebRTC Debug] Accept call API endpoint not found (404), proceeding with WebSocket only")
+                    elif response.status_code not in [200, 201, 204]:
+                        raise Exception(f"Failed to accept call: {response.status_code}")
+                    elif self.debug_log_api_calls:
+                        print(f"Call accept API response: {response.status_code}")
+                except Exception as e:
+                    print(f"[WebRTC Debug] Error with call accept API: {str(e)}")
+                    print("[WebRTC Debug] Continuing with WebSocket-based accept")
                 
             # 2. Hide incoming call popup and show call UI
             self.show_incoming_call = False
@@ -2272,7 +2500,7 @@ class ChatState(rx.State):
             self.error_message = f"Error accepting call: {str(e)}"
             print(f"[WebRTC Debug] Error accepting call: {str(e)}")
             self.show_incoming_call = False
-
+            
     @rx.event
     async def decline_call(self):
         """Decline an incoming call."""
@@ -2291,26 +2519,37 @@ class ChatState(rx.State):
                 self.error_message = "No active call invitation"
                 return
                 
-            # Decline call via API
-            headers = {"Authorization": f"Bearer {self.auth_token}"}
-            
-            # Use the update notification API endpoint
-            api_url = f"{self.API_BASE_URL}/incoming-calls/{invitation_id}/"
-            
-            # Make API request
-            client = httpx.AsyncClient()
-            response = await client.put(
-                api_url,
-                json={"status": "declined"},
-                headers=headers,
-                follow_redirects=True
-            )
-            
-            if response.status_code not in [200, 201, 204]:
-                raise Exception(f"Failed to decline call: {response.status_code}")
-            
-            if self.debug_log_api_calls:
-                print(f"Call decline API response: {response.status_code}")
+            # Check if this is a local-only call (when API isn't available)
+            is_local_only = False
+            if self.active_room_call and self.active_room_call.get("is_local_only"):
+                is_local_only = True
+                print("[WebRTC Debug] This is a local-only call (no API interactions)")
+                
+            # Skip API call if this is a local-only call
+            if not is_local_only and not invitation_id.startswith("local-"):
+                # Decline call via API
+                headers = {"Authorization": f"Bearer {self.auth_token}"}
+                api_url = f"{self.API_BASE_URL}/communication/incoming-calls/{invitation_id}/"
+                
+                try:
+                    # Make API request
+                    client = httpx.AsyncClient()
+                    response = await client.put(
+                        api_url,
+                        json={"status": "declined"},
+                        headers=headers,
+                        follow_redirects=True
+                    )
+                    
+                    if response.status_code == 404:
+                        print("[WebRTC Debug] Decline call API endpoint not found (404), proceeding with WebSocket only")
+                    elif response.status_code not in [200, 201, 204]:
+                        raise Exception(f"Failed to decline call: {response.status_code}")
+                    elif self.debug_log_api_calls:
+                        print(f"Call decline API response: {response.status_code}")
+                except Exception as e:
+                    print(f"[WebRTC Debug] Error with call decline API: {str(e)}")
+                    print("[WebRTC Debug] Continuing with WebSocket-based decline")
             
             # Stop ringtone and clear UI
             rx.call_script(f"""
@@ -2638,7 +2877,11 @@ class ChatState(rx.State):
             # Get room name from cache
             room_name = self._find_room_name_from_cache(room_id)
             
-            # 2. Create call notification using the provided API URL
+            # Create a unique local ID for the call in case API fails
+            local_call_id = f"local-{room_id}-{int(time.time())}"
+            
+            # 2. Try to create call notification using the provided API URL
+            # But also have a fallback for when the API isn't implemented yet
             rx.call_script(f"""
                 console.log('[WebRTC Debug] Creating room call notification via API: {api_url}');
                 
@@ -2647,32 +2890,68 @@ class ChatState(rx.State):
                 state.call_type = '{call_type}';
                 state._update();
                 
-                // Create notification
-                fetch('{api_url}', {{
-                    method: 'POST',
-                    headers: {{
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer {self.auth_token}'
-                    }},
-                    body: JSON.stringify({{
-                        'room_id': '{room_id}',
-                        'call_type': '{call_type}'
+                // Function to handle API-based approach
+                function createCallNotificationViaAPI() {{
+                    // Create notification
+                    fetch('{api_url}', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer {self.auth_token}'
+                        }},
+                        body: JSON.stringify({{
+                            'room_id': '{room_id}',
+                            'call_type': '{call_type}'
+                        }})
                     }})
-                }})
-                .then(response => {{
-                    console.log('[WebRTC Debug] Room call API status:', response.status);
-                    if (response.ok) {{
-                        return response.json();
-                    }} else {{
-                        throw new Error('Failed to create room call notification: ' + response.status);
-                    }}
-                }})
-                .then(data => {{
-                    console.log('[WebRTC Debug] Room call API response:', data);
-                    
-                    // Store the notification ID for later use
-                    state.call_invitation_id = data.id;
-                    
+                    .then(response => {{
+                        console.log('[WebRTC Debug] Room call API status:', response.status);
+                        if (response.ok) {{
+                            return response.json();
+                        }} else if (response.status === 404) {{
+                            // If endpoint doesn't exist, use WebSocket fallback
+                            throw new Error('API endpoint not found (404)');
+                        }} else {{
+                            throw new Error('Failed to create room call notification: ' + response.status);
+                        }}
+                    }})
+                    .then(data => {{
+                        console.log('[WebRTC Debug] Room call API response:', data);
+                        
+                        // Store the notification ID for later use
+                        state.call_invitation_id = data.id;
+                        
+                        // Send WebSocket message to announce call to all room users
+                        announceCallViaWebSocket(data.id);
+                        
+                        console.log('[WebRTC Debug] Room call started successfully');
+                        state.active_room_call = {{
+                            id: data.id,
+                            room_id: '{room_id}',
+                            room_name: '{room_name}',
+                            call_type: '{call_type}',
+                            started_by: '{current_username}',
+                            start_time: new Date().toISOString()
+                        }};
+                        state._update();
+                    }})
+                    .catch(error => {{
+                        console.error('[WebRTC Debug] Error starting room call via API:', error);
+                        
+                        // If API endpoint not found, use WebSocket only approach
+                        if (error.message.includes('404')) {{
+                            console.log('[WebRTC Debug] API endpoint not available, using WebSocket only');
+                            handleAPIUnavailable();
+                        }} else {{
+                            state.error_message = 'Failed to start room call: ' + error.message;
+                            state.show_calling_popup = false;
+                            state._update();
+                        }}
+                    }});
+                }}
+                
+                // Function to handle WebSocket announcement
+                function announceCallViaWebSocket(callId) {{
                     // Send WebSocket message to announce call to all room users
                     if (window.chatSocket && window.chatSocket.readyState === WebSocket.OPEN) {{
                         console.log('[WebRTC Debug] Sending room-wide call announcement');
@@ -2682,27 +2961,36 @@ class ChatState(rx.State):
                             room_name: '{room_name}',
                             caller_username: '{current_username}',
                             call_type: '{call_type}',
-                            invitation_id: data.id
+                            invitation_id: callId
                         }}));
                     }}
+                }}
+                
+                // Function to handle the case where API is unavailable
+                function handleAPIUnavailable() {{
+                    console.log('[WebRTC Debug] Using local call ID:', '{local_call_id}');
                     
-                    console.log('[WebRTC Debug] Room call started successfully');
+                    // Set a local call ID instead
+                    state.call_invitation_id = '{local_call_id}';
+                    
+                    // Announce call via WebSocket only
+                    announceCallViaWebSocket('{local_call_id}');
+                    
+                    // Update state with local call info
                     state.active_room_call = {{
-                        id: data.id,
+                        id: '{local_call_id}',
                         room_id: '{room_id}',
                         room_name: '{room_name}',
                         call_type: '{call_type}',
                         started_by: '{current_username}',
-                        start_time: new Date().toISOString()
+                        start_time: new Date().toISOString(),
+                        is_local_only: true // Flag to indicate this call exists only via WebSocket
                     }};
                     state._update();
-                }})
-                .catch(error => {{
-                    console.error('[WebRTC Debug] Error starting room call:', error);
-                    state.error_message = 'Failed to start room call: ' + error.message;
-                    state.show_calling_popup = false;
-                    state._update();
-                }});
+                }}
+                
+                // Start the process
+                createCallNotificationViaAPI();
             """)
             
             # 3. Start call timer
@@ -2713,6 +3001,122 @@ class ChatState(rx.State):
             print(f"[WebRTC Debug] Error announcing room call: {str(e)}")
             self.error_message = f"Error announcing room call: {str(e)}"
             self.show_calling_popup = False
+
+    @rx.event
+    async def get_active_call_notifications(self):
+        """Fetch active call notifications for the current user."""
+        print("[WebRTC Debug] Checking for active call notifications")
+        
+        try:
+            # Get authentication token
+            self.auth_token = await self.get_token()
+            if not self.auth_token:
+                print("[WebRTC Debug] Not authenticated, can't check for notifications")
+                return
+                
+            # Fetch active notifications
+            headers = {"Authorization": f"Bearer {self.auth_token}"}
+            api_url = f"{self.API_BASE_URL}/communication/incoming-calls/"
+            
+            client = httpx.AsyncClient()
+            response = await client.get(
+                api_url,
+                headers=headers,
+                follow_redirects=True
+            )
+            
+            if response.status_code == 404:
+                # If the endpoint doesn't exist yet, don't treat as an error
+                print("[WebRTC Debug] Notification API endpoint not found (404) - this feature may not be implemented on the backend yet")
+                return
+            elif response.status_code != 200:
+                print(f"[WebRTC Debug] Failed to fetch notifications: {response.status_code}")
+                return
+                
+            # Process notifications
+            notifications = response.json()
+            if self.debug_log_api_calls:
+                print(f"[WebRTC Debug] Received {len(notifications)} active call notifications")
+                
+            # Handle pending notifications (only show the most recent one if multiple exist)
+            pending_notifications = [n for n in notifications if n.get("status") == "pending"]
+            if pending_notifications:
+                # Sort by created_at time and get the most recent
+                pending_notifications.sort(key=lambda n: n.get("created_at", ""), reverse=True)
+                notification = pending_notifications[0]
+                
+                # Show incoming call notification for the most recent pending call
+                caller_username = notification.get("caller", {}).get("username", "Unknown caller")
+                room_name = notification.get("room_name", "Unknown room")
+                call_type = notification.get("call_type", "audio")
+                notification_id = notification.get("id", "")
+                
+                print(f"[WebRTC Debug] Showing pending call from {caller_username} in {room_name}")
+                
+                # Set up UI to show incoming call
+                self.show_incoming_call = True
+                self.call_invitation_id = notification_id
+                self.call_type = call_type
+                self.incoming_caller = caller_username
+                self.current_chat_user = caller_username
+                
+                # Set active room call info
+                self.active_room_call = {
+                    "id": notification_id,
+                    "room_id": notification.get("room", ""),
+                    "room_name": room_name,
+                    "call_type": call_type,
+                    "started_by": caller_username,
+                    "participants": [caller_username]
+                }
+                
+                # Play ringtone and update UI via JavaScript
+                rx.call_script("""
+                    // Play ringtone
+                    try {
+                        if (!window.ringtoneElement) {
+                            window.ringtoneElement = new Audio('/static/ringtone.mp3');
+                            window.ringtoneElement.loop = true;
+                            window.ringtoneElement.volume = 0.7;
+                        }
+                        
+                        const playPromise = window.ringtoneElement.play();
+                        
+                        if (playPromise !== undefined) {
+                            playPromise.catch(e => {
+                                console.log('[WebRTC Debug] Error playing ringtone:', e);
+                                // Add click handler for user interaction
+                                document.addEventListener('click', function unlockAudio() {
+                                    window.ringtoneElement.play();
+                                    document.removeEventListener('click', unlockAudio);
+                                }, {once: true});
+                            });
+                        }
+                    } catch(e) {
+                        console.error('[WebRTC Debug] Exception playing ringtone:', e);
+                    }
+                    
+                    // Flash title
+                    const origTitle = document.title;
+                    window.titleFlashInterval = setInterval(() => {
+                        document.title = document.title === origTitle ? 
+                            `📞 Incoming Call from ${state.incoming_caller}` : origTitle;
+                    }, 1000);
+                """)
+                
+        except Exception as e:
+            print(f"[WebRTC Debug] Error fetching call notifications: {str(e)}")
+            # Don't set error message to avoid disrupting the UI for a background check
+
+    async def _periodic_notification_check(self):
+        """Periodically check for new call notifications."""
+        while True:
+            # Only check if we're not already in a call
+            if not self.show_call_popup and not self.show_video_popup and not self.show_incoming_call:
+                await self.get_active_call_notifications()
+            
+            # Wait for next check interval (15-30 seconds is reasonable)
+            await asyncio.sleep(20)
 
 def calling_popup() -> rx.Component:
     """Component for showing the calling popup."""
