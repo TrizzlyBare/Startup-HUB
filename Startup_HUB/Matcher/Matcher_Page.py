@@ -978,10 +978,29 @@ class MatchState(rx.State):
                 print(f"Creating new room between {current_username} and {target_username}")
                 
                 async with httpx.AsyncClient() as client:
-                    # Use the direct room creation endpoint
+                    # First get the user ID for the target user
+                    user_response = await client.get(
+                        f"{self.API_BASE_URL}/auth/profile/{target_username}/",
+                        headers=headers
+                    )
+                    
+                    if user_response.status_code != 200:
+                        print(f"Failed to get user ID: {user_response.text}")
+                        self.error_message = f"Failed to get user ID: {user_response.text}"
+                        return False
+                    
+                    user_data = user_response.json()
+                    recipient_id = user_data.get("id")
+                    
+                    if not recipient_id:
+                        print("No user ID found in response")
+                        self.error_message = "Could not get recipient ID"
+                        return False
+                    
+                    # Use the direct room creation endpoint with recipient_id
                     create_response = await client.post(
                         f"{self.API_BASE_URL}/communication/room/direct/",
-                        json={"username": target_username},
+                        json={"recipient_id": recipient_id},
                         headers=headers
                     )
                     

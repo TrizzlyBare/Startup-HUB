@@ -4206,6 +4206,12 @@ def call_popup() -> rx.Component:
                     bg="white",
                     border_radius="10px",
                     box_shadow="0 4px 6px rgba(0, 0, 0, 0.1)",
+                    width="400px",
+                    justify="center",  # Center content horizontally
+                    align="center",    # Center content vertically
+                    display="flex",    # Use flexbox to align items
+                    direction="column", # Arrange elements in a column
+                    height="auto",  # Adjust height as needed
                 ),
                 position="fixed",
                 top="50%",
@@ -4215,6 +4221,7 @@ def call_popup() -> rx.Component:
             ),
         ),
     )
+
 
 def video_call_popup() -> rx.Component:
     return rx.cond(
